@@ -14,7 +14,10 @@ create table public.profiles (
 );
 
 -- Auto-create a profile row whenever a new auth user signs up.
-create function public.handle_new_user()
+-- Named distinctly (not handle_new_user/on_auth_user_created) so this can
+-- coexist in a Supabase project shared with other apps that already use
+-- those common names for their own auth.users trigger.
+create function public.handle_new_tutorops_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
@@ -26,9 +29,9 @@ begin
 end;
 $$;
 
-create trigger on_auth_user_created
+create trigger on_tutorops_auth_user_created
   after insert on auth.users
-  for each row execute function public.handle_new_user();
+  for each row execute function public.handle_new_tutorops_user();
 
 -- ---------------------------------------------------------------------------
 -- Catalog: boards, grades, subjects, and the offerings/syllabus that tie
