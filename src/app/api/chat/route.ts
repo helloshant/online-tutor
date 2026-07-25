@@ -11,6 +11,19 @@ const MAX_TOKENS = 1536;
 const MAX_MESSAGE_LENGTH = 2000;
 
 export async function POST(request: Request) {
+  // Every code path below must return through NextResponse.json — this
+  // top-level catch is the backstop so an unexpected throw (e.g. a missing
+  // env var) never reaches the client as an empty/non-JSON body, which is
+  // impossible for `fetch(...).json()` on the client to parse.
+  try {
+    return await handleChatRequest(request);
+  } catch (err) {
+    console.error("Unexpected error in /api/chat:", err);
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
+}
+
+async function handleChatRequest(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -150,6 +163,7 @@ export async function POST(request: Request) {
     .select("*");
 
   if (insertError || !inserted) {
+    console.error("Failed to persist chat_messages:", insertError);
     return NextResponse.json({ error: "Could not save the conversation" }, { status: 500 });
   }
 
