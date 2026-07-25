@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import { CHAT_MODEL, getAnthropicClient } from "@/lib/anthropic";
+import { getChatReply } from "@/lib/llm";
 import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "@/lib/tutorPrompt";
 import type { ChatMessage } from "@/lib/supabase/types";
 
@@ -108,24 +108,15 @@ export async function POST(request: Request) {
 
   let assistantText: string;
   try {
-    const anthropic = getAnthropicClient();
-    const response = await anthropic.messages.create({
-      model: CHAT_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      messages: [
-        ...orderedHistory.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-        { role: "user" as const, content: message },
-      ],
+    assistantText = await getChatReply({
+      systemPrompt,
+      history: orderedHistory.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      message,
+      maxTokens: MAX_TOKENS,
     });
-    const textBlock = response.content.find((block) => block.type === "text");
-    assistantText =
-      textBlock && textBlock.type === "text"
-        ? textBlock.text
-        : "Sorry, I couldn't come up with an answer. Please try rephrasing your question.";
   } catch {
     return NextResponse.json(
       { error: "The tutor is temporarily unavailable. Please try again shortly." },

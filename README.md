@@ -7,7 +7,7 @@ panel to see every user's selections and manage the underlying board/grade/subje
 catalog.
 
 Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), Razorpay, and
-the Anthropic Claude API.
+a pluggable LLM backend (Anthropic Claude by default, or Azure OpenAI).
 
 ## How it works
 
@@ -85,8 +85,14 @@ Fill in:
 
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` —
   Supabase dashboard → Project Settings → API.
-- `ANTHROPIC_API_KEY` — [console.anthropic.com](https://console.anthropic.com). `ANTHROPIC_MODEL`
-  is optional and defaults to Anthropic's current flagship model.
+- `LLM_PROVIDER` — `anthropic` (default) or `azure-openai`. Only fill in the section for
+  whichever one you pick:
+  - **Anthropic**: `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
+    `ANTHROPIC_MODEL` is optional and defaults to Anthropic's current flagship model.
+  - **Azure OpenAI**: `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` from your Azure OpenAI
+    resource's Keys and Endpoint page, `AZURE_OPENAI_CHAT_DEPLOYMENT` (the deployment name you
+    gave the model in Azure AI Foundry, e.g. `gpt-4o`), and `AZURE_OPENAI_API_VERSION` (e.g.
+    `2024-08-01-preview`).
 - `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — Razorpay dashboard → Settings → API Keys. Use test
   mode keys for local development.
 
