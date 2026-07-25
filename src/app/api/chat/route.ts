@@ -117,7 +117,8 @@ export async function POST(request: Request) {
       message,
       maxTokens: MAX_TOKENS,
     });
-  } catch {
+  } catch (err) {
+    console.error("LLM chat completion failed:", err);
     return NextResponse.json(
       { error: "The tutor is temporarily unavailable. Please try again shortly." },
       { status: 502 }
