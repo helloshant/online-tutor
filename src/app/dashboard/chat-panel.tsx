@@ -163,6 +163,12 @@ export function ChatPanel({
           <button
             type="submit"
             disabled={sending || !input.trim()}
+            // Browser extensions (password managers, Grammarly, etc.) commonly
+            // patch the `disabled` attribute on form buttons before React
+            // hydrates, which triggers a false-positive hydration mismatch
+            // warning here even though server and client compute the same
+            // value from identical initial state.
+            suppressHydrationWarning
             className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
           >
             Send
