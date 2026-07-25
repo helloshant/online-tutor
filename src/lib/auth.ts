@@ -31,8 +31,20 @@ export async function requireUser() {
   return session;
 }
 
+export function isStaff(role: Profile["role"] | undefined): boolean {
+  return role === "admin" || role === "superadmin";
+}
+
+// Admin panel access: both staff tiers. Role management inside the panel is
+// further restricted to superadmin only -- see requireSuperAdmin().
 export async function requireAdmin() {
   const session = await requireUser();
-  if (session.profile?.role !== "admin") redirect("/dashboard");
+  if (!isStaff(session.profile?.role)) redirect("/dashboard");
+  return session;
+}
+
+export async function requireSuperAdmin() {
+  const session = await requireUser();
+  if (session.profile?.role !== "superadmin") redirect("/admin");
   return session;
 }

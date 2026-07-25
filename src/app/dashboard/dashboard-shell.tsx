@@ -19,15 +19,15 @@ export function DashboardShell({
   gradeName,
   medium,
   subjects,
-  isAdmin,
+  isStaffUser,
 }: {
   userName: string;
-  subscriptionId: string;
+  subscriptionId: string | null;
   boardName: string;
   gradeName: string;
-  medium: Medium;
+  medium: Medium | null;
   subjects: SubjectSummary[];
-  isAdmin: boolean;
+  isStaffUser: boolean;
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null
@@ -41,12 +41,12 @@ export function DashboardShell({
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-brand">TutorOps</span>
           <span className="hidden text-xs text-foreground/50 sm:inline">
-            {boardName} · {gradeName} · {medium}
+            {isStaffUser ? "Staff access · all subjects" : `${boardName} · ${gradeName} · ${medium}`}
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <span className="hidden text-foreground/70 sm:inline">{userName}</span>
-          {isAdmin && (
+          {isStaffUser && (
             <Link href="/admin" className="font-medium text-brand hover:underline">
               Admin
             </Link>
@@ -58,7 +58,7 @@ export function DashboardShell({
       <div className="flex min-h-0 flex-1">
         <aside className="w-56 shrink-0 overflow-y-auto border-r border-border bg-surface p-3 sm:w-64">
           <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-            Your subjects
+            {isStaffUser ? "All subjects" : "Your subjects"}
           </h2>
           <nav className="mt-2 space-y-1">
             {subjects.map((subject) => (
@@ -88,6 +88,7 @@ export function DashboardShell({
               subscriptionId={subscriptionId}
               subject={selectedSubject}
               medium={medium}
+              isStaffUser={isStaffUser}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-foreground/50">

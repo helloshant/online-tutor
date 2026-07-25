@@ -1,10 +1,14 @@
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { isStaff, requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { OnboardingWizard } from "./onboarding-wizard";
 
 export default async function OnboardingPage() {
-  const { user } = await requireUser();
+  const { user, profile } = await requireUser();
+  // Staff (admin/superadmin) never subscribe or pay -- they get unrestricted
+  // subject access straight from the dashboard.
+  if (isStaff(profile?.role)) redirect("/dashboard");
+
   const supabase = await createClient();
 
   const { data: existing } = await supabase

@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { isStaff, requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PRICE_PER_SUBJECT_INR } from "@/lib/pricing";
 import { RazorpayCheckout } from "./razorpay-checkout";
 
 export default async function SubscribePage() {
-  const { user } = await requireUser();
+  const { user, profile } = await requireUser();
+  // Staff never pay -- if they somehow land here, send them straight in.
+  if (isStaff(profile?.role)) redirect("/dashboard");
+
   const supabase = await createClient();
 
   const { data: subscription } = await supabase

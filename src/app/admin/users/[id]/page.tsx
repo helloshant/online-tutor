@@ -1,13 +1,22 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { requireAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cancelSubscription, setUserRole } from "../../actions";
+import type { ProfileRole } from "@/lib/supabase/types";
+
+const ROLE_LABEL: Record<ProfileRole, string> = {
+  user: "User",
+  admin: "Admin",
+  superadmin: "Superadmin",
+};
 
 export default async function AdminUserDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const { profile: actingProfile } = await requireAdmin();
   const { id } = await params;
   const admin = createAdminClient();
 
@@ -22,6 +31,9 @@ export default async function AdminUserDetailPage({
   ]);
 
   if (!authUser?.user) notFound();
+
+  const isSuperAdminViewer = actingProfile?.role === "superadmin";
+  const targetRole: ProfileRole = profile?.role ?? "user";
 
   return (
     <div>
@@ -38,20 +50,36 @@ export default async function AdminUserDetailPage({
           </p>
         </div>
 
-        <form
-          action={async () => {
-            "use server";
-            const nextRole = profile?.role === "admin" ? "user" : "admin";
-            await setUserRole(id, nextRole);
-          }}
-        >
-          <button
-            type="submit"
-            className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5"
-          >
-            {profile?.role === "admin" ? "Revoke admin" : "Make admin"}
-          </button>
-        </form>
+        {isSuperAdminViewer ? (
+          <div className="flex items-center gap-2">
+            {(["user", "admin", "superadmin"] as ProfileRole[]).map((role) => (
+              <form
+                key={role}
+                action={async () => {
+                  "use server";
+                  await setUserRole(id, role);
+                }}
+              >
+                <button
+                  type="submit"
+                  disabled={role === targetRole}
+                  className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                    role === targetRole
+                      ? "border-brand bg-brand/10 text-brand"
+                      : "border-border hover:bg-brand/5"
+                  }`}
+                >
+                  {ROLE_LABEL[role]}
+                </button>
+              </form>
+            ))}
+          </div>
+        ) : (
+          <span className="rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground/70">
+            {ROLE_LABEL[targetRole]}
+            <span className="ml-2 text-xs text-foreground/40">(only a superadmin can change this)</span>
+          </span>
+        )}
       </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">
@@ -135,7 +163,9 @@ export default async function AdminUserDetailPage({
 
         {(subscriptions ?? []).length === 0 && (
           <p className="rounded-xl border border-border bg-surface p-5 text-sm text-foreground/50">
-            This user hasn&apos;t started onboarding yet.
+            {targetRole === "admin" || targetRole === "superadmin"
+              ? "Staff accounts get full subject access without a subscription."
+              : "This user hasn't started onboarding yet."}
           </p>
         )}
       </div>

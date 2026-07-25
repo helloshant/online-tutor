@@ -75,7 +75,11 @@ export default async function AdminUsersPage() {
                 <td className="px-4 py-3">
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      row.role === "admin" ? "bg-brand text-white" : "bg-foreground/10 text-foreground/70"
+                      row.role === "superadmin"
+                        ? "bg-purple-600 text-white"
+                        : row.role === "admin"
+                          ? "bg-brand text-white"
+                          : "bg-foreground/10 text-foreground/70"
                     }`}
                   >
                     {row.role}
@@ -86,7 +90,11 @@ export default async function AdminUsersPage() {
                 <td className="px-4 py-3">{row.medium ?? "—"}</td>
                 <td className="px-4 py-3">{row.subjects.length ? row.subjects.join(", ") : "—"}</td>
                 <td className="px-4 py-3">
-                  {row.status ? (
+                  {row.role === "admin" || row.role === "superadmin" ? (
+                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                      Staff access
+                    </span>
+                  ) : row.status ? (
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                         row.status === "active"

@@ -14,10 +14,12 @@ export function ChatPanel({
   subscriptionId,
   subject,
   medium,
+  isStaffUser,
 }: {
-  subscriptionId: string;
+  subscriptionId: string | null;
   subject: SubjectSummary;
-  medium: Medium;
+  medium: Medium | null;
+  isStaffUser: boolean;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -30,18 +32,28 @@ export function ChatPanel({
     let cancelled = false;
     const supabase = createClient();
 
-    supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("subscription_id", subscriptionId)
-      .eq("subject_id", subject.id)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (!cancelled) {
-          setMessages((data as ChatMessage[]) ?? []);
-          setLoadingHistory(false);
-        }
-      });
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      // Always scope by user_id, not just subscription_id: staff chats carry
+      // a null subscription_id, so without this a query could otherwise mix
+      // together every staff member's conversation on the same subject.
+      let query = supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("subject_id", subject.id);
+      query = subscriptionId ? query.eq("subscription_id", subscriptionId) : query.is("subscription_id", null);
+
+      const { data } = await query.order("created_at", { ascending: true });
+      if (!cancelled) {
+        setMessages((data as ChatMessage[]) ?? []);
+        setLoadingHistory(false);
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -103,7 +115,9 @@ export function ChatPanel({
       <div className="shrink-0 border-b border-border bg-surface px-6 py-3">
         <h1 className="text-sm font-semibold">{subject.name}</h1>
         <p className="text-xs text-foreground/50">
-          Answers are limited to this subject&apos;s syllabus, in {medium}.
+          {isStaffUser
+            ? "Staff access: unrestricted, not limited to any one syllabus."
+            : `Answers are limited to this subject's syllabus, in ${medium}.`}
         </p>
       </div>
 

@@ -1,11 +1,29 @@
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { isStaff, requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { DashboardShell } from "./dashboard-shell";
 
 export default async function DashboardPage() {
   const { user, profile } = await requireUser();
   const supabase = await createClient();
+
+  // Staff (admin/superadmin) never subscribe or pay -- they get every
+  // subject in the catalog, unrestricted, straight away.
+  if (isStaff(profile?.role)) {
+    const { data: subjects } = await supabase.from("subjects").select("id, name, code").order("name");
+
+    return (
+      <DashboardShell
+        userName={profile?.full_name ?? user.email ?? "Staff"}
+        subscriptionId={null}
+        boardName="All boards"
+        gradeName="All grades"
+        medium={null}
+        subjects={subjects ?? []}
+        isStaffUser
+      />
+    );
+  }
 
   const { data: subscription } = await supabase
     .from("subscriptions")
@@ -39,7 +57,7 @@ export default async function DashboardPage() {
       gradeName={grade?.name ?? ""}
       medium={subscription.medium}
       subjects={subjects}
-      isAdmin={profile?.role === "admin"}
+      isStaffUser={false}
     />
   );
 }

@@ -4,7 +4,7 @@ export type SubscriptionStatus =
   | "active"
   | "cancelled"
   | "expired";
-export type ProfileRole = "user" | "admin";
+export type ProfileRole = "user" | "admin" | "superadmin";
 export type ChatRole = "user" | "assistant";
 
 // Plain `type` object literals (not `interface`) — Supabase's client types
@@ -80,7 +80,9 @@ export type SubscriptionSubject = {
 export type ChatMessage = {
   id: string;
   user_id: string;
-  subscription_id: string;
+  // Null for staff (admin/superadmin) chats, which aren't tied to a
+  // subscription -- staff never subscribe or pay.
+  subscription_id: string | null;
   subject_id: string;
   role: ChatRole;
   content: string;
