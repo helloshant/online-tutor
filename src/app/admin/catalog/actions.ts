@@ -82,14 +82,29 @@ export async function addSyllabusTopic(formData: FormData) {
   revalidatePath("/admin/catalog");
 }
 
+// Matches a leading list marker: "1.", "1)", "(i)", "(iii)", "a)", or a bare
+// bullet (-, *, •). The alphanumeric branch is ASCII-only by construction,
+// so it can never accidentally eat the start of a real Bengali/Hindi word --
+// those scripts have no code points in [a-zA-Z0-9], only actual Latin-letter
+// or digit list markers match.
+const LIST_MARKER_PATTERN = /^(\(?[a-zA-Z0-9]{1,4}[).:]|[-*•])\s*/;
+// Official syllabus documents commonly punctuate a chapter heading with a
+// trailing colon ("Real Numbers :") -- that's structural, not part of the
+// chapter's name.
+const TRAILING_COLON_PATTERN = /\s*[:：]\s*$/;
+
+function cleanLine(line: string): string {
+  return line.trim().replace(LIST_MARKER_PATTERN, "").replace(TRAILING_COLON_PATTERN, "").trim();
+}
+
 // Parses a pasted syllabus document into chapter/topic rows: an un-indented
-// line starts a new chapter, and each indented line under it (optionally
-// bulleted with -, *, or •, matching how these lists usually paste out of a
-// Word doc or PDF) becomes one topic under that chapter. This mirrors how
-// syllabus documents are actually structured (a chapter heading followed by
-// its topic list) far more closely than a flat "one row per line" format
-// would, so admins can paste close to verbatim from the official source
-// instead of manually repeating the chapter name on every line.
+// line starts a new chapter, and each indented line under it becomes one
+// topic under that chapter. Leading list markers ("1.", "(ii)", "-", "•", ...)
+// and a chapter heading's trailing colon are stripped automatically, so
+// admins can paste close to verbatim from the official source -- numbered
+// chapters, lettered/romanette sub-items and all -- instead of manually
+// repeating the chapter name on every line or hand-editing every marker out
+// first.
 function parseBulkSyllabus(text: string): { chapter: string; topic: string }[] {
   const rows: { chapter: string; topic: string }[] = [];
   let currentChapter = "";
@@ -97,7 +112,7 @@ function parseBulkSyllabus(text: string): { chapter: string; topic: string }[] {
   for (const rawLine of text.split("\n")) {
     if (!rawLine.trim()) continue;
     const isIndented = /^[ \t]/.test(rawLine);
-    const cleaned = rawLine.trim().replace(/^[-*•]\s*/, "");
+    const cleaned = cleanLine(rawLine);
     if (!cleaned) continue;
 
     if (!isIndented) {
