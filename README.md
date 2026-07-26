@@ -186,6 +186,16 @@ medium's syllabus straight from its own authoritative source document rather tha
 canonical version — Postgres `text` columns are UTF-8, so this needs no encoding-specific handling,
 just picking the right medium before pasting content in.
 
+Syllabus content is stored one row per chapter/topic line item, not as one large blob per subject —
+the orchestrator's relevance filter and chapter-list scope boundary both operate per row (see
+`services/orchestrator/src/syllabusFilter.ts`), so a single giant row would defeat the token-cost
+optimization those rely on. Entering dozens of rows one at a time through the single-topic form is
+tedious, so `/admin/catalog` also has a **bulk add** option: paste a syllabus with one chapter name
+per un-indented line and its topics indented underneath (bullets like `-`, `*`, `•` are stripped
+automatically) — close to how these documents are already structured in the official source — and
+it's parsed into individual rows in one submit, appended after whatever's already stored. Re-pasting
+the same lines is safe; duplicates are silently skipped rather than erroring or duplicating rows.
+
 ### Per-page admin authorization
 
 Role (`user`/`admin`/`superadmin`) still governs the big things — subscription/payment bypass,

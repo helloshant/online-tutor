@@ -82,6 +82,84 @@ export async function addSyllabusTopic(formData: FormData) {
   revalidatePath("/admin/catalog");
 }
 
+// Parses a pasted syllabus document into chapter/topic rows: an un-indented
+// line starts a new chapter, and each indented line under it (optionally
+// bulleted with -, *, or •, matching how these lists usually paste out of a
+// Word doc or PDF) becomes one topic under that chapter. This mirrors how
+// syllabus documents are actually structured (a chapter heading followed by
+// its topic list) far more closely than a flat "one row per line" format
+// would, so admins can paste close to verbatim from the official source
+// instead of manually repeating the chapter name on every line.
+function parseBulkSyllabus(text: string): { chapter: string; topic: string }[] {
+  const rows: { chapter: string; topic: string }[] = [];
+  let currentChapter = "";
+
+  for (const rawLine of text.split("\n")) {
+    if (!rawLine.trim()) continue;
+    const isIndented = /^[ \t]/.test(rawLine);
+    const cleaned = rawLine.trim().replace(/^[-*•]\s*/, "");
+    if (!cleaned) continue;
+
+    if (!isIndented) {
+      currentChapter = cleaned;
+      continue;
+    }
+    if (!currentChapter) continue;
+    rows.push({ chapter: currentChapter, topic: cleaned });
+  }
+
+  return rows;
+}
+
+export async function bulkAddSyllabusTopics(formData: FormData) {
+  await requireAdminPage("catalog");
+  const boardId = String(formData.get("boardId") ?? "");
+  const gradeId = String(formData.get("gradeId") ?? "");
+  const subjectId = String(formData.get("subjectId") ?? "");
+  const medium = String(formData.get("medium") ?? "") as Medium;
+  const bulkText = String(formData.get("bulkText") ?? "");
+  if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(medium)) return;
+
+  const parsed = parseBulkSyllabus(bulkText);
+  if (parsed.length === 0) return;
+
+  const supabase = await createClient();
+
+  // Append after whatever's already there, so pasting more chapters into a
+  // syllabus that's already partly entered doesn't reorder or clobber
+  // existing rows.
+  const { data: last } = await supabase
+    .from("syllabus_topics")
+    .select("sort_order")
+    .eq("board_id", boardId)
+    .eq("grade_id", gradeId)
+    .eq("subject_id", subjectId)
+    .eq("medium", medium)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let nextSortOrder = (last?.sort_order ?? 0) + 1;
+
+  const rows = parsed.map(({ chapter, topic }) => ({
+    board_id: boardId,
+    grade_id: gradeId,
+    subject_id: subjectId,
+    medium,
+    chapter,
+    topic,
+    sort_order: nextSortOrder++,
+  }));
+
+  // Upsert with duplicates ignored -- re-pasting a syllabus (e.g. after
+  // adding a few more chapters lower in the document) shouldn't error or
+  // duplicate the chapters/topics already stored.
+  await supabase
+    .from("syllabus_topics")
+    .upsert(rows, { onConflict: "board_id,grade_id,subject_id,medium,chapter,topic", ignoreDuplicates: true });
+
+  revalidatePath("/admin/catalog");
+}
+
 export async function updateSyllabusTopic(topicId: string, formData: FormData) {
   await requireAdminPage("catalog");
   const chapter = String(formData.get("chapter") ?? "").trim();

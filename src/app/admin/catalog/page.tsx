@@ -7,6 +7,7 @@ import {
   addOffering,
   addSubject,
   addSyllabusTopic,
+  bulkAddSyllabusTopics,
   removeOffering,
   removeSyllabusTopic,
   updateSyllabusTopic,
@@ -304,6 +305,36 @@ export default async function AdminCatalogPage({
                 Add topic
               </button>
             </form>
+
+            <details className="mt-4 rounded-lg border border-border">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-brand/5">
+                Bulk add from a pasted syllabus
+              </summary>
+              <form action={bulkAddSyllabusTopics} className="space-y-2 px-3 pb-3">
+                <input type="hidden" name="boardId" value={boardId} />
+                <input type="hidden" name="gradeId" value={gradeId} />
+                <input type="hidden" name="subjectId" value={subjectId} />
+                <input type="hidden" name="medium" value={medium} />
+                <p className="text-xs text-foreground/60">
+                  One chapter name per un-indented line; indent each topic underneath its chapter
+                  (bullets like <code>-</code>, <code>*</code>, or <code>•</code> are stripped
+                  automatically). Paste close to verbatim from the official syllabus document —
+                  new chapters/topics are appended after what&apos;s already stored, and re-pasting
+                  the same lines again is safe (duplicates are skipped).
+                </p>
+                <textarea
+                  name="bulkText"
+                  rows={8}
+                  placeholder={
+                    "Real Numbers\n  Euclid's division lemma\n  Fundamental theorem of arithmetic\nPolynomials\n  Zeros of a polynomial\n  Relationship between zeros and coefficients"
+                  }
+                  className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+                />
+                <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+                  Bulk add topics
+                </button>
+              </form>
+            </details>
 
             <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/40">
               {(topics ?? []).length} {medium} topic{(topics ?? []).length === 1 ? "" : "s"}
