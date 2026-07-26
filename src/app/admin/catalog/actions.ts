@@ -82,12 +82,14 @@ export async function addSyllabusTopic(formData: FormData) {
   revalidatePath("/admin/catalog");
 }
 
-// Matches a leading list marker: "1.", "1)", "(i)", "(iii)", "a)", or a bare
-// bullet (-, *, •). The alphanumeric branch is ASCII-only by construction,
-// so it can never accidentally eat the start of a real Bengali/Hindi word --
-// those scripts have no code points in [a-zA-Z0-9], only actual Latin-letter
-// or digit list markers match.
-const LIST_MARKER_PATTERN = /^(\(?[a-zA-Z0-9]{1,4}[).:]|[-*•])\s*/;
+// Matches a leading list marker: "1.", "1)", "(i)", "(iii)", "a)", "৬.",
+// "६.", or a bare bullet (-, *, •). Official documents often number chapter
+// headings with native-script digits (Bengali ০-৯, Devanagari ०-९) while
+// still using Latin roman numerals for sub-items -- both are matched here.
+// The character ranges are digit/letter-marker-only by construction, so
+// they can never accidentally eat the start of a real Bengali/Hindi word --
+// those scripts' actual letters live outside every range matched below.
+const LIST_MARKER_PATTERN = /^(\(?[a-zA-Z0-9০-৯०-९]{1,4}[).:]|[-*•])\s*/;
 // Official syllabus documents commonly punctuate a chapter heading with a
 // trailing colon ("Real Numbers :") -- that's structural, not part of the
 // chapter's name.
