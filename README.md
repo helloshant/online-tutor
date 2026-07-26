@@ -148,13 +148,27 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
 **Option A — Docker Compose** (builds and runs both containers):
 
 ```bash
-docker compose up --build
+docker compose --env-file .env.local up --build
 ```
+
+The `--env-file .env.local` flag is required (not just `docker compose up --build`) — Compose only
+auto-loads a file literally named `.env` for `${...}` substitution in `docker-compose.yml`, and two
+values (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) are needed *at build time* to
+pass through as Docker build args: Next.js inlines `NEXT_PUBLIC_*` vars into the client-side JS
+bundle when it compiles, so setting them only in the running container (which is what plain
+`env_file:`/`environment:` does) is too late — the bundle's already been built without them, and
+you'd hit `Uncaught Error: Missing NEXT_PUBLIC_SUPABASE_URL environment variable` in the browser.
+If you forget the flag, the build now fails immediately with a clear message rather than silently
+producing a broken image.
 
 Open [http://localhost:3000](http://localhost:3000). The orchestrator isn't published to your host
 — it's only reachable from the `web` container over the Compose network — so you won't see it on
 `localhost:4000`; that's intentional. To check it directly: `docker compose exec orchestrator wget
 -qO- localhost:4000/health`.
+
+If you ever change `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, you must rebuild
+(`--build`), not just restart — a plain `docker compose up` without `--build` reuses the existing
+image with the old values baked in.
 
 **Option B — two `npm run dev` processes** (no Docker), one per terminal:
 

@@ -11,10 +11,15 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# No env vars needed at build time: every route that touches Supabase,
-# Razorpay, or the orchestrator is dynamic (server-rendered per request),
-# not statically prerendered, so `next build` never evaluates them. Real
-# values are supplied at container runtime instead (docker-compose.yml).
+# NEXT_PUBLIC_* vars are inlined into the client-side JS bundle by `next
+# build` itself -- they must be real values at build time. (Everything
+# else -- Supabase service role key, Razorpay secret, orchestrator URL --
+# is only ever read server-side at runtime, so it's fine for those to be
+# absent here; see docker-compose.yml for how they're supplied.)
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 RUN npm run build
 
 FROM node:22-alpine AS runner

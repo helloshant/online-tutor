@@ -3,6 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* vars are inlined into the client JS bundle at build
+        # time, so they must be passed as build args, not just as runtime
+        # env vars (env_file/environment below only affect the running
+        # container, which is too late for these two). Sourced from
+        # .env.local via `docker compose --env-file .env.local ...` -- the
+        # `:?` fails the build loudly instead of silently baking in
+        # "undefined" if that flag is forgotten.
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?Set NEXT_PUBLIC_SUPABASE_URL in .env.local, and run compose with --env-file .env.local}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?Set NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, and run compose with --env-file .env.local}
     ports:
       - "3000:3000"
     env_file:
