@@ -1,6 +1,7 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, recordAnswer } from "./answerBank.js";
+import { validateAnswerForStorage } from "./answerValidation.js";
 import { getCachedAnswer, setCachedAnswer } from "./cache.js";
 import { getChatReply } from "./llm.js";
 import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "./prompts.js";
@@ -165,8 +166,17 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     });
 
     if (scope) {
-      void setCachedAnswer(scope, reply);
-      void recordAnswer(scope, reply);
+      const validation = validateAnswerForStorage(reply);
+      if (validation.store) {
+        void recordAnswer(scope, reply, validation.status);
+        // Only cache (i.e. let it be replayed to other students) once it's
+        // confident enough to auto-approve -- a pending_review answer stays
+        // out of both the cache and the servable side of the answer bank
+        // until an admin confirms it.
+        if (validation.status === "auto_approved") {
+          void setCachedAnswer(scope, reply);
+        }
+      }
     }
 
     const response: ChatOrchestrationResponse = { reply, source: "llm" };

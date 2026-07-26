@@ -42,7 +42,11 @@ export async function findAnswerInBank(scope: AnswerScope): Promise<string | nul
   return data.answer;
 }
 
-export async function recordAnswer(scope: AnswerScope, answer: string): Promise<void> {
+export async function recordAnswer(
+  scope: AnswerScope,
+  answer: string,
+  validationStatus: "auto_approved" | "pending_review"
+): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
@@ -53,6 +57,7 @@ export async function recordAnswer(scope: AnswerScope, answer: string): Promise<
     medium: scope.medium,
     question: scope.question,
     answer,
+    validation_status: validationStatus,
   });
 
   if (error) {

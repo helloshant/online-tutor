@@ -89,6 +89,27 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type AnswerValidationStatus = "auto_approved" | "pending_review" | "admin_approved" | "rejected";
+
+// Written only by the orchestrator service (service-role key) -- see
+// supabase/migrations/0005_answer_bank.sql and 0006_answer_bank_validation.sql.
+// The admin panel reads/updates/deletes this table through the ordinary
+// session (RLS + is_admin()), same pattern as the syllabus catalog tables;
+// it never inserts into it.
+export type AnsweredQuestion = {
+  id: string;
+  board_id: string;
+  grade_id: string;
+  subject_id: string;
+  medium: Medium;
+  question: string;
+  answer: string;
+  validation_status: AnswerValidationStatus;
+  hit_count: number;
+  created_at: string;
+  last_used_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -161,6 +182,16 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "chat_messages_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
           { foreignKeyName: "chat_messages_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+        ];
+      };
+      answered_questions: {
+        Row: AnsweredQuestion;
+        Insert: Partial<AnsweredQuestion>;
+        Update: Partial<AnsweredQuestion>;
+        Relationships: [
+          { foreignKeyName: "answered_questions_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
+          { foreignKeyName: "answered_questions_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
+          { foreignKeyName: "answered_questions_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
         ];
       };
     };

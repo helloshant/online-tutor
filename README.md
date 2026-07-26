@@ -45,8 +45,20 @@ Three containers:
      topically-similar-but-substantively-different question (e.g. "derivative of x²" vs. "integral
      of x²") must never confidently return the wrong cached answer, which is a real risk with
      embedding similarity but not with keyword matching.
-  4. **LLM (L3)** — only reached on a miss at both prior stages. The reply is then written through
-     to both Redis and the answer bank so the next ask of the same question is a cache hit.
+  4. **LLM (L3)** — only reached on a miss at both prior stages. The reply is then run through a
+     cheap, deterministic **validation gate** (`answerValidation.ts` — no extra LLM call) before
+     being written back:
+     - Empty replies, an echoed syllabus-rejection, or something that reads like a clarifying
+       question asked back at the student aren't stored at all.
+     - A short or hedging answer ("I'm not sure...") is stored as **pending review** — kept, but
+       not yet servable to other students until an admin confirms it.
+     - Everything else is **auto-approved** and immediately written through to both Redis and the
+       answer bank, so the next ask of the same question is a cache hit instead of another LLM
+       call.
+
+     Admins can review, promote, demote, or delete any answer-bank entry at `/admin/answer-bank`;
+     see `0006_answer_bank_validation.sql` for the full state machine
+     (`auto_approved` / `pending_review` / `admin_approved` / `rejected`).
 
      Cache/database lookups only apply to the *opening* message of a topic, not follow-ups
      ("explain more", "why?") — those depend on conversation context a scope-only lookup key can't
@@ -80,6 +92,8 @@ provider swapped without touching the web app, and vice versa.
 5. **Admin panel** (`/admin`) — lists every user with their board/grade/medium/subjects/status and
    lets an admin promote/demote admins and cancel subscriptions. `/admin/catalog` manages boards,
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
+   `/admin/answer-bank` is the review queue for the orchestrator's auto-populated answer bank —
+   approve, reject, or delete entries other students' questions get matched against.
 
 ## Data model & security
 
@@ -103,10 +117,15 @@ See `supabase/migrations/` for the full schema:
 - `0004_superadmin_and_staff_access.sql` — adds the `superadmin` role tier and its DB-level
   role-change guard.
 - `0005_answer_bank.sql` — the orchestrator's Postgres full-text answer bank (`answered_questions`
-  table + `search_answer_bank`/`bump_answer_bank_hit` RPCs). RLS is enabled with **no** client-facing
-  policies and `EXECUTE` on both RPCs is revoked from `public` and granted only to `service_role` —
-  this table is a backend implementation detail of `services/orchestrator`, never reachable from the
-  browser or from an ordinary authenticated user, even via a crafted RPC call.
+  table + `search_answer_bank`/`bump_answer_bank_hit` RPCs). `EXECUTE` on both RPCs is revoked from
+  `public` and granted only to `service_role` — a student can never read or search this table
+  directly, only through the orchestrator's scoped, ranked lookup.
+- `0006_answer_bank_validation.sql` — adds `validation_status` (`auto_approved` / `pending_review` /
+  `admin_approved` / `rejected`) to `answered_questions`; `search_answer_bank` only ever returns
+  `auto_approved`/`admin_approved` rows. Also adds admin-only RLS policies (`is_admin()`) so
+  `/admin/answer-bank` can read/update/delete entries through the ordinary session — the same
+  pattern as the syllabus catalog tables. There is still no insert policy: every row originates from
+  the orchestrator's service-role key, never directly from a client.
 
 ## Local setup
 
