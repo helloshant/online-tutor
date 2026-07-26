@@ -12,8 +12,11 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type ChatOrchestrationRequest =
   | {
       mode: "student";
+      subjectId: string;
       subjectName: string;
+      boardId: string;
       boardName: string;
+      gradeId: string;
       gradeName: string;
       medium: Medium;
       topics: { chapter: string; topic: string }[];
@@ -27,13 +30,21 @@ export type ChatOrchestrationRequest =
       history: ChatTurn[];
     };
 
+// "cache" = Redis hit, "database" = Postgres full-text answer bank hit,
+// "llm" = freshly generated, "rejected" = failed the syllabus scope gate.
+// Optional/best-effort -- purely for observability, callers shouldn't
+// branch on it.
+export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected";
+
 function getOrchestratorUrl(): string {
   const url = process.env.ORCHESTRATOR_URL;
   if (!url) throw new Error("Missing ORCHESTRATOR_URL environment variable");
   return url;
 }
 
-export async function getOrchestratedReply(request: ChatOrchestrationRequest): Promise<string> {
+export async function getOrchestratedReply(
+  request: ChatOrchestrationRequest
+): Promise<{ reply: string; source?: ChatOrchestrationSource }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chat`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -54,5 +65,5 @@ export async function getOrchestratedReply(request: ChatOrchestrationRequest): P
   if (!body || typeof body.reply !== "string") {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
-  return body.reply;
+  return { reply: body.reply, source: body.source };
 }

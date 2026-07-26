@@ -9,8 +9,11 @@ export type SyllabusTopic = { chapter: string; topic: string };
 export type ChatOrchestrationRequest =
   | {
       mode: "student";
+      subjectId: string;
       subjectName: string;
+      boardId: string;
       boardName: string;
+      gradeId: string;
       gradeName: string;
       medium: Medium;
       topics: SyllabusTopic[];
@@ -24,6 +27,20 @@ export type ChatOrchestrationRequest =
       history: ChatTurn[];
     };
 
+export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected";
+
 export type ChatOrchestrationResponse = {
   reply: string;
+  source?: ChatOrchestrationSource;
+};
+
+// Identifies a single question within the L1 (Redis) / L2 (Postgres answer
+// bank) lookup scope. Two students asking the same words under different
+// boards/grades/mediums must never share an answer.
+export type AnswerScope = {
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  question: string;
 };

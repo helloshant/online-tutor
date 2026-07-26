@@ -15,7 +15,7 @@ const STOPWORDS = new Set([
   "examples", "question", "questions", "problem", "solve", "find", "calculate",
 ]);
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)

@@ -98,8 +98,11 @@ async function handleChatRequest(request: Request) {
     subscriptionId = subscription.id;
     orchestrationRequest = {
       mode: "student",
+      subjectId,
       subjectName,
+      boardId: subscription.board_id,
       boardName: board?.name ?? "",
+      gradeId: subscription.grade_id,
       gradeName: grade?.name ?? "",
       medium: subscription.medium,
       topics: topics ?? [],
@@ -125,7 +128,7 @@ async function handleChatRequest(request: Request) {
 
   let assistantText: string;
   try {
-    assistantText = await getOrchestratedReply(orchestrationRequest);
+    ({ reply: assistantText } = await getOrchestratedReply(orchestrationRequest));
   } catch (err) {
     console.error("Orchestrator chat request failed:", err);
     return NextResponse.json(

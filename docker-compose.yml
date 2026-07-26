@@ -35,6 +35,12 @@ services:
       - ./services/orchestrator/.env.local
     environment:
       PORT: 4000
+      # Always the compose-network hostname, regardless of whatever
+      # REDIS_URL a local (non-Docker) .env.local might have.
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
     # Deliberately no `ports:` mapping -- this service is reachable only
     # from other containers on the compose network (i.e. `web`), never
     # from the host or the public internet directly. Use
@@ -42,6 +48,19 @@ services:
     # to check it from your host if needed.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # L1 cache for the orchestrator's answer pipeline. No `ports:` mapping
+    # or persistent volume -- purely an in-network cache, safe to lose on
+    # restart (the Postgres answer bank is the durable copy).
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5

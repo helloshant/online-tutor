@@ -7,35 +7,63 @@ panel to see every user's selections and manage the underlying board/grade/subje
 catalog.
 
 Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), Razorpay, and a
-separate LLM orchestration service (Anthropic Claude by default, or Azure OpenAI).
+separate LLM orchestration service (Anthropic Claude by default, or Azure OpenAI) with a
+cache/knowledge-base pipeline in front of the LLM.
 
 ## Architecture
 
-Two containers:
+Three containers:
 
 ```
  ┌──────────────┐   HTTP (internal only)   ┌──────────────────┐
  │   web (3000) │ ───────────────────────► │ orchestrator      │
  │   Next.js    │  x-internal-api-key      │ (4000, Express)   │
  │   App Router │ ◄─────────────────────── │                    │
- └──────┬───────┘        { reply }         └─────────┬──────────┘
-        │                                              │
-        ▼                                              ▼
-   Supabase (hosted)                         Anthropic Claude /
-   + Razorpay                                Azure OpenAI
+ └──────┬───────┘        { reply }         └───┬────────┬───────┘
+        │                                       │        │
+        ▼                                       ▼        ▼
+   Supabase (hosted)                   Redis (cache)  Anthropic Claude /
+   + Razorpay                          + Supabase       Azure OpenAI
+                                        (answer bank)
 ```
 
 - **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, Razorpay
   payment, subscription/entitlement checks, the admin panel, and persisting chat history. It never
   talks to an LLM SDK directly.
-- **`services/orchestrator`** owns everything about *how a question becomes an answer*: system
-  prompt construction (student vs. staff mode), syllabus-relevance filtering so token cost doesn't
-  scale with syllabus size, and LLM provider selection. It's a small stateless Express service with
-  a single endpoint (`POST /v1/chat`) gated by a shared-secret header, and isn't published to the
-  host or the internet — only `web` can reach it, over the Docker Compose network.
+- **`services/orchestrator`** owns everything about *how a question becomes an answer*. For every
+  student question it runs a 4-stage pipeline before ever spending an LLM call:
+  1. **Syllabus scope gate** — a keyword-overlap check against the subscribed board/grade/subject's
+     syllabus (skipped for short/conversational messages and mid-conversation follow-ups, since
+     those legitimately share no keywords with the syllabus on their own). Out-of-scope questions
+     get the fixed reply "Please restrict your questions to your syllabus" without calling anything
+     else.
+  2. **Redis cache (L1)** — exact/near-exact match on the normalized question, scoped by
+     board+grade+subject+medium.
+  3. **Postgres full-text answer bank (L2)** — `answered_questions` table
+     (`supabase/migrations/0005_answer_bank.sql`), searched with Postgres full-text search
+     (`ts_rank`, BM25-style lexical ranking) rather than vector/semantic search: a
+     topically-similar-but-substantively-different question (e.g. "derivative of x²" vs. "integral
+     of x²") must never confidently return the wrong cached answer, which is a real risk with
+     embedding similarity but not with keyword matching.
+  4. **LLM (L3)** — only reached on a miss at both prior stages. The reply is then written through
+     to both Redis and the answer bank so the next ask of the same question is a cache hit.
 
-This split means the orchestration/prompt layer can be redeployed, scaled, or have its LLM provider
-swapped without touching the web app, and vice versa.
+     Cache/database lookups only apply to the *opening* message of a topic, not follow-ups
+     ("explain more", "why?") — those depend on conversation context a scope-only lookup key can't
+     capture, so they go straight to the LLM and are never written back into cache/db.
+
+  Staff (admin/superadmin) chat bypasses this whole pipeline — no board/grade/syllabus, no
+  gate/cache/database, straight to the LLM, same as before.
+
+  The response optionally carries a `source: "cache" | "database" | "llm" | "rejected"` field for
+  observability.
+
+  This is a small stateless Express service with a single endpoint (`POST /v1/chat`) gated by a
+  shared-secret header, and isn't published to the host or the internet — only `web` can reach it,
+  over the Docker Compose network.
+
+This split means the orchestration/prompt/pipeline layer can be redeployed, scaled, or have its LLM
+provider swapped without touching the web app, and vice versa.
 
 ## How it works
 
@@ -72,6 +100,13 @@ See `supabase/migrations/` for the full schema:
   illustrative, not an authoritative reproduction of any board's official syllabus** — extend and
   correct it via `/admin/catalog` for every grade/board/subject you actually offer before going
   to production.
+- `0004_superadmin_and_staff_access.sql` — adds the `superadmin` role tier and its DB-level
+  role-change guard.
+- `0005_answer_bank.sql` — the orchestrator's Postgres full-text answer bank (`answered_questions`
+  table + `search_answer_bank`/`bump_answer_bank_hit` RPCs). RLS is enabled with **no** client-facing
+  policies and `EXECUTE` on both RPCs is revoked from `public` and granted only to `service_role` —
+  this table is a backend implementation detail of `services/orchestrator`, never reachable from the
+  browser or from an ordinary authenticated user, even via a crafted RPC call.
 
 ## Local setup
 
@@ -134,6 +169,14 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
 **`services/orchestrator/.env.local`** (the orchestration service):
 
 - `ORCHESTRATOR_SHARED_SECRET` — same value as above.
+- `REDIS_URL` — leave as `redis://redis:6379` for Docker Compose (a `redis` service is included in
+  `docker-compose.yml`); use `redis://localhost:6379` against a locally installed Redis if running
+  the orchestrator directly with `npm run dev`. Optional in the sense that the pipeline fails open
+  (caching is just skipped) if unset or unreachable — but every question then costs at least a
+  database lookup. `CACHE_TTL_SECONDS` optionally overrides the default 7-day cache lifetime.
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project as the web app (Project
+  Settings → API). Used only to query/populate the `answered_questions` full-text answer bank; the
+  service-role key is required since that table's RLS has no client-facing policies.
 - `LLM_PROVIDER` — `anthropic` (default) or `azure-openai`. Only fill in the section for
   whichever one you pick:
   - **Anthropic**: `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
@@ -145,7 +188,7 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
 
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs both containers):
+**Option A — Docker Compose** (builds and runs all three containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build
