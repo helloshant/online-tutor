@@ -1,5 +1,6 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import type { Medium } from "@/lib/supabase/types";
 import {
   addBoard,
   addGrade,
@@ -11,13 +12,15 @@ import {
   updateSyllabusTopic,
 } from "./actions";
 
+const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
+
 export default async function AdminCatalogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ board?: string; grade?: string; subject?: string }>;
+  searchParams: Promise<{ board?: string; grade?: string; subject?: string; medium?: string }>;
 }) {
   await requireAdminPage("catalog");
-  const { board: boardId, grade: gradeId, subject: subjectId } = await searchParams;
+  const { board: boardId, grade: gradeId, subject: subjectId, medium } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: boards }, { data: grades }, { data: subjects }, { data: offerings }] = await Promise.all([
@@ -31,7 +34,7 @@ export default async function AdminCatalogPage({
   ]);
 
   const topics =
-    boardId && gradeId && subjectId
+    boardId && gradeId && subjectId && medium
       ? (
           await supabase
             .from("syllabus_topics")
@@ -39,6 +42,7 @@ export default async function AdminCatalogPage({
             .eq("board_id", boardId)
             .eq("grade_id", gradeId)
             .eq("subject_id", subjectId)
+            .eq("medium", medium as Medium)
             .order("sort_order")
         ).data
       : [];
@@ -207,7 +211,10 @@ export default async function AdminCatalogPage({
         <h2 className="text-sm font-semibold">Syllabus topics</h2>
         <p className="mt-1 text-sm text-foreground/60">
           The topics used to keep student Q&amp;A confined to what they&apos;re actually meant to be
-          learning. Select a board, grade and subject to view or edit its syllabus.
+          learning. Each medium has its own syllabus — a board&apos;s vernacular syllabus (e.g. West
+          Bengal Board&apos;s Bengali-medium document) isn&apos;t assumed to be a translation of its
+          English-medium one, so enter each one from its own authoritative source. Select a board,
+          grade, subject and medium to view or edit that syllabus.
         </p>
 
         <form method="get" className="mt-4 flex flex-wrap items-end gap-2">
@@ -250,17 +257,31 @@ export default async function AdminCatalogPage({
               </option>
             ))}
           </select>
+          <select
+            name="medium"
+            defaultValue={medium ?? ""}
+            required
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">Medium</option>
+            {MEDIUMS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
           <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
             View syllabus
           </button>
         </form>
 
-        {boardId && gradeId && subjectId && (
+        {boardId && gradeId && subjectId && medium && (
           <div className="mt-6">
             <form action={addSyllabusTopic} className="flex flex-wrap items-end gap-2">
               <input type="hidden" name="boardId" value={boardId} />
               <input type="hidden" name="gradeId" value={gradeId} />
               <input type="hidden" name="subjectId" value={subjectId} />
+              <input type="hidden" name="medium" value={medium} />
               <input
                 name="chapter"
                 placeholder="Chapter"
@@ -285,7 +306,7 @@ export default async function AdminCatalogPage({
             </form>
 
             <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-              {(topics ?? []).length} topic{(topics ?? []).length === 1 ? "" : "s"}
+              {(topics ?? []).length} {medium} topic{(topics ?? []).length === 1 ? "" : "s"}
             </p>
             <div className="mt-2 max-h-[28rem] overflow-y-auto rounded-lg border border-border">
               <table className="w-full text-left text-sm">

@@ -51,6 +51,11 @@ export type SyllabusTopic = {
   board_id: string;
   grade_id: string;
   subject_id: string;
+  // The syllabus is scoped per medium, not just per board/grade/subject --
+  // a board's official vernacular syllabus (e.g. West Bengal Board's
+  // Bengali-medium document) isn't guaranteed to be a translation of its
+  // English-medium one.
+  medium: Medium;
   chapter: string;
   topic: string;
   sort_order: number;

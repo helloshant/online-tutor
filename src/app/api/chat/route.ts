@@ -96,6 +96,7 @@ async function handleChatRequest(request: Request) {
         .eq("board_id", subscription.board_id)
         .eq("grade_id", subscription.grade_id)
         .eq("subject_id", subjectId)
+        .eq("medium", subscription.medium)
         .order("sort_order"),
     ]);
 

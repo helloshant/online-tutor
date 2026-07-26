@@ -39,7 +39,11 @@ Four containers:
      syllabus (skipped for short/conversational messages and mid-conversation follow-ups, since
      those legitimately share no keywords with the syllabus on their own). Out-of-scope questions
      get the fixed reply "Please restrict your questions to your syllabus" without calling anything
-     else.
+     else. Tokenization is Unicode-aware (`\p{L}`/`\p{N}`/`\p{M}` property escapes, not `a-z0-9`) so
+     this works for Bengali/Hindi syllabi and questions, not just English — a naive ASCII split
+     would silently tokenize non-Latin scripts to nothing (and Bengali/Devanagari conjuncts need
+     `\p{M}` specifically, since the combining vowel signs/virama that build a word are category
+     Mark, not Letter — omitting it fractures every multi-syllable word at each vowel sign).
   2. **Redis cache (L1)** — exact/near-exact match on the normalized question, scoped by
      board+grade+subject+medium. A hit refreshes its own TTL (`GETEX`, not `GET`) — a sliding
      expiration, so a genuinely popular question stays cached as long as it keeps getting asked
@@ -164,6 +168,23 @@ See `supabase/migrations/` for the full schema:
   their own nav); only a superadmin can read everyone's or write at all. The migration grandfathers
   every existing `admin`-role user in with full access to every page that existed at the time, so
   applying it never silently locks anyone out.
+- `0009_syllabus_topics_medium.sql` — adds `medium` to `syllabus_topics`, so the same board/grade/
+  subject can have a genuinely separate syllabus per medium instead of one shared across all of
+  them (see "Medium-scoped syllabus storage" below). Existing rows are backfilled to `English`
+  (what the seed data was authored in); the unique constraint and scope index both grow the new
+  column.
+
+### Medium-scoped syllabus storage
+
+A board's official syllabus isn't always a mechanical translation across mediums of instruction —
+West Bengal Board's Bengali-medium Grade 9 Mathematics syllabus, for example, is authored in
+Bengali and isn't guaranteed to line up chapter-for-chapter with an English-medium version of the
+"same" course. `syllabus_topics` is therefore scoped by `(board, grade, subject, medium)`, not just
+`(board, grade, subject)` — `/admin/catalog` has a medium selector alongside board/grade/subject,
+and `/api/chat` fetches only the topics matching the student's subscribed medium. Enter each
+medium's syllabus straight from its own authoritative source document rather than translating one
+canonical version — Postgres `text` columns are UTF-8, so this needs no encoding-specific handling,
+just picking the right medium before pasting content in.
 
 ### Per-page admin authorization
 

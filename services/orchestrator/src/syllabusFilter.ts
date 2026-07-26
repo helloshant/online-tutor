@@ -15,10 +15,21 @@ const STOPWORDS = new Set([
   "examples", "question", "questions", "problem", "solve", "find", "calculate",
 ]);
 
+// Unicode-aware: \p{L}/\p{N} match letters/numbers in any script (Bengali,
+// Devanagari, Latin, ...), not just a-z0-9. A plain ASCII split here would
+// silently tokenize Bengali/Hindi text to nothing -- every character in
+// those scripts would be treated as a separator -- which would make this
+// gate a no-op for any non-Latin-script syllabus/question. \p{M} (combining
+// marks) must stay in the "keep" set too: Bengali/Devanagari conjuncts are
+// built from a base letter plus combining vowel signs/virama, which are
+// category Mark, not Letter -- excluding them would fracture every
+// multi-syllable word at each vowel sign instead of tokenizing whole words.
+const WORD_SPLIT_PATTERN = /[^\p{L}\p{N}\p{M}]+/u;
+
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(WORD_SPLIT_PATTERN)
     .filter((word) => word.length >= 3 && !STOPWORDS.has(word));
 }
 

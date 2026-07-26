@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import type { Medium } from "@/lib/supabase/types";
+
+const VALID_MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
 
 export async function addBoard(formData: FormData) {
   await requireAdminPage("catalog");
@@ -61,15 +64,17 @@ export async function addSyllabusTopic(formData: FormData) {
   const boardId = String(formData.get("boardId") ?? "");
   const gradeId = String(formData.get("gradeId") ?? "");
   const subjectId = String(formData.get("subjectId") ?? "");
+  const medium = String(formData.get("medium") ?? "") as Medium;
   const chapter = String(formData.get("chapter") ?? "").trim();
   const topic = String(formData.get("topic") ?? "").trim();
   const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
-  if (!boardId || !gradeId || !subjectId || !chapter || !topic) return;
+  if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(medium) || !chapter || !topic) return;
   const supabase = await createClient();
   await supabase.from("syllabus_topics").insert({
     board_id: boardId,
     grade_id: gradeId,
     subject_id: subjectId,
+    medium,
     chapter,
     topic,
     sort_order: sortOrder,
