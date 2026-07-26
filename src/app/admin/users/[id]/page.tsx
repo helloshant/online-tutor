@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cancelSubscription, setUserRole } from "../../actions";
 import type { ProfileRole } from "@/lib/supabase/types";
@@ -16,7 +16,7 @@ export default async function AdminUserDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { profile: actingProfile } = await requireAdmin();
+  const { profile: actingProfile } = await requireAdminPage("users");
   const { id } = await params;
   const admin = createAdminClient();
 

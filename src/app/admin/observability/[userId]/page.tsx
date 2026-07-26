@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ChatEventSource } from "@/lib/supabase/types";
 
@@ -21,6 +22,7 @@ export default async function UserObservabilityPage({
 }: {
   params: Promise<{ userId: string }>;
 }) {
+  await requireAdminPage("observability");
   const { userId } = await params;
   const admin = createAdminClient();
 

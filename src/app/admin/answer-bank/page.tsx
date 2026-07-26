@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { AnswerValidationStatus } from "@/lib/supabase/types";
 import { approveAnswer, deleteAnswer, rejectAnswer, restoreAnswer } from "./actions";
@@ -22,6 +23,7 @@ export default async function AnswerBankPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
+  await requireAdminPage("answer_bank");
   const { status } = await searchParams;
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
   const supabase = await createClient();

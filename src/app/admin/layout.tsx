@@ -1,9 +1,13 @@
 import Link from "next/link";
-import { requireAdmin } from "@/lib/auth";
+import { getAllowedAdminPages, requireAdmin } from "@/lib/auth";
 import { LogoutButton } from "@/components/logout-button";
+import type { AdminPageKey } from "@/lib/supabase/types";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  await requireAdmin();
+  const session = await requireAdmin();
+  const allowedPages = await getAllowedAdminPages();
+  const canSee = (page: AdminPageKey) => allowedPages === "all" || allowedPages.has(page);
+  const isSuperadmin = session.profile?.role === "superadmin";
 
   return (
     <div className="min-h-screen bg-background">
@@ -11,18 +15,31 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <div className="flex items-center gap-6">
           <span className="text-sm font-semibold text-brand">TutorOps Admin</span>
           <nav className="flex gap-4 text-sm">
-            <Link href="/admin" className="text-foreground/70 hover:text-foreground">
-              Users
-            </Link>
-            <Link href="/admin/catalog" className="text-foreground/70 hover:text-foreground">
-              Catalog
-            </Link>
-            <Link href="/admin/answer-bank" className="text-foreground/70 hover:text-foreground">
-              Answer bank
-            </Link>
-            <Link href="/admin/observability" className="text-foreground/70 hover:text-foreground">
-              Observability
-            </Link>
+            {canSee("users") && (
+              <Link href="/admin" className="text-foreground/70 hover:text-foreground">
+                Users
+              </Link>
+            )}
+            {canSee("catalog") && (
+              <Link href="/admin/catalog" className="text-foreground/70 hover:text-foreground">
+                Catalog
+              </Link>
+            )}
+            {canSee("answer_bank") && (
+              <Link href="/admin/answer-bank" className="text-foreground/70 hover:text-foreground">
+                Answer bank
+              </Link>
+            )}
+            {canSee("observability") && (
+              <Link href="/admin/observability" className="text-foreground/70 hover:text-foreground">
+                Observability
+              </Link>
+            )}
+            {isSuperadmin && (
+              <Link href="/admin/authorization" className="text-foreground/70 hover:text-foreground">
+                Authorization
+              </Link>
+            )}
           </nav>
         </div>
         <div className="flex items-center gap-4 text-sm">

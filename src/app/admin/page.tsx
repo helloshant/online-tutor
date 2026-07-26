@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export default async function AdminUsersPage() {
+  await requireAdminPage("users");
   const admin = createAdminClient();
 
   const [{ data: authUsers }, { data: profiles }, { data: subscriptions }] = await Promise.all([

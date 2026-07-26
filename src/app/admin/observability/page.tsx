@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const USD_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -18,6 +19,7 @@ type UserUsage = {
 };
 
 export default async function ObservabilityPage() {
+  await requireAdminPage("observability");
   const admin = createAdminClient();
 
   // JS-side aggregation (same pattern as /admin, which builds its

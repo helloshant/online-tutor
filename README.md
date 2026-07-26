@@ -120,6 +120,8 @@ touching the web app or each other.
    approve, reject, or delete entries other students' questions get matched against.
    `/admin/observability` shows total LLM cost/token usage by user, total database-hit count, and
    a per-user drilldown into individual queries and the tokens/cost each one consumed.
+   `/admin/authorization` (superadmin only) controls which of these pages each individual admin
+   can access — see "Per-page admin authorization" below.
 
 ## Data model & security
 
@@ -157,6 +159,30 @@ See `supabase/migrations/` for the full schema:
   when `source = 'llm'`, and a link to the matching `answered_questions` row when `source =
   'database'`. Admin-only RLS (`is_admin()`), no insert policy — every row originates from the
   observability service's service-role key.
+- `0008_admin_page_permissions.sql` — `admin_page_permissions` (`user_id`, `page`), one row per
+  admin page an admin has been explicitly granted. RLS: a user can read their own rows (to render
+  their own nav); only a superadmin can read everyone's or write at all. The migration grandfathers
+  every existing `admin`-role user in with full access to every page that existed at the time, so
+  applying it never silently locks anyone out.
+
+### Per-page admin authorization
+
+Role (`user`/`admin`/`superadmin`) still governs the big things — subscription/payment bypass,
+whether `/admin` is reachable at all, and role changes themselves (superadmin-only, DB-enforced —
+see `0004_superadmin_and_staff_access.sql`). Layered on top, `/admin/authorization` (superadmin
+only) controls a finer thing: **which individual admin pages a given admin can see** — Users,
+Catalog, Answer bank, Observability — independent of their role. A brand-new admin starts with
+every page granted (matches what "admin" meant before this existed); a superadmin can then narrow
+it per person from `/admin/authorization`. Superadmins themselves always have every page and can't
+be restricted here.
+
+This is enforced with the same defense-in-depth pattern used for role changes: `requireAdminPage()`
+(`src/lib/auth.ts`) gates both the page component (what renders) and every server action the page
+calls (what a crafted request could otherwise reach) — hiding a nav link is a UX nicety, not the
+security boundary. An admin who lands on a page they've been unauthorized from — e.g. a link they
+had bookmarked before a superadmin revoked it — is redirected to `/admin/no-access` rather than
+back into another permission check, which avoids a redirect loop for an admin with zero page
+grants.
 
 ## Local setup
 

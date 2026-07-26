@@ -138,6 +138,21 @@ export type ChatEvent = {
   created_at: string;
 };
 
+export type AdminPageKey = "users" | "catalog" | "answer_bank" | "observability";
+
+// Written by superadmins only (RLS: is_superadmin() for all writes; a user
+// can read their own rows to render their own nav). See
+// supabase/migrations/0008_admin_page_permissions.sql. Superadmins are
+// never gated by this table -- their access is always full, enforced in
+// application code (requireAdminPage() in src/lib/auth.ts), not by rows
+// here.
+export type AdminPagePermission = {
+  id: string;
+  user_id: string;
+  page: AdminPageKey;
+  created_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -232,6 +247,12 @@ export interface Database {
           { foreignKeyName: "chat_events_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
           { foreignKeyName: "chat_events_answer_bank_id_fkey"; columns: ["answer_bank_id"]; referencedRelation: "answered_questions"; referencedColumns: ["id"] },
         ];
+      };
+      admin_page_permissions: {
+        Row: AdminPagePermission;
+        Insert: Partial<AdminPagePermission>;
+        Update: Partial<AdminPagePermission>;
+        Relationships: [];
       };
     };
     Views: Record<string, never>;

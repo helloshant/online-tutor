@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
 export async function addBoard(formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const name = String(formData.get("name") ?? "").trim();
   const code = String(formData.get("code") ?? "").trim();
   if (!name || !code) return;
@@ -15,7 +15,7 @@ export async function addBoard(formData: FormData) {
 }
 
 export async function addGrade(formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const name = String(formData.get("name") ?? "").trim();
   const level = Number(formData.get("level"));
   if (!name || !Number.isFinite(level)) return;
@@ -25,7 +25,7 @@ export async function addGrade(formData: FormData) {
 }
 
 export async function addSubject(formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const name = String(formData.get("name") ?? "").trim();
   const code = String(formData.get("code") ?? "").trim();
   if (!name || !code) return;
@@ -35,7 +35,7 @@ export async function addSubject(formData: FormData) {
 }
 
 export async function addOffering(formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const boardId = String(formData.get("boardId") ?? "");
   const gradeId = String(formData.get("gradeId") ?? "");
   const subjectId = String(formData.get("subjectId") ?? "");
@@ -50,14 +50,14 @@ export async function addOffering(formData: FormData) {
 }
 
 export async function removeOffering(offeringId: string) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const supabase = await createClient();
   await supabase.from("board_grade_subjects").delete().eq("id", offeringId);
   revalidatePath("/admin/catalog");
 }
 
 export async function addSyllabusTopic(formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const boardId = String(formData.get("boardId") ?? "");
   const gradeId = String(formData.get("gradeId") ?? "");
   const subjectId = String(formData.get("subjectId") ?? "");
@@ -78,7 +78,7 @@ export async function addSyllabusTopic(formData: FormData) {
 }
 
 export async function updateSyllabusTopic(topicId: string, formData: FormData) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const chapter = String(formData.get("chapter") ?? "").trim();
   const topic = String(formData.get("topic") ?? "").trim();
   const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
@@ -92,7 +92,7 @@ export async function updateSyllabusTopic(topicId: string, formData: FormData) {
 }
 
 export async function removeSyllabusTopic(topicId: string) {
-  await requireAdmin();
+  await requireAdminPage("catalog");
   const supabase = await createClient();
   await supabase.from("syllabus_topics").delete().eq("id", topicId);
   revalidatePath("/admin/catalog");

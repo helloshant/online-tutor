@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
 import { createClient } from "@/lib/supabase/server";
 import type { Medium } from "@/lib/supabase/types";
@@ -19,14 +19,14 @@ export type AnswerBankScope = {
 };
 
 export async function approveAnswer(id: string) {
-  await requireAdmin();
+  await requireAdminPage("answer_bank");
   const supabase = await createClient();
   await supabase.from("answered_questions").update({ validation_status: "admin_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
 
 export async function rejectAnswer(scope: AnswerBankScope) {
-  await requireAdmin();
+  await requireAdminPage("answer_bank");
   const supabase = await createClient();
   await supabase.from("answered_questions").update({ validation_status: "rejected" }).eq("id", scope.id);
   // A rejected answer must stop being served immediately, not whenever its
@@ -40,14 +40,14 @@ export async function rejectAnswer(scope: AnswerBankScope) {
 // auto_approved row is servable again, and the next matching question just
 // repopulates the cache from the database as usual.
 export async function restoreAnswer(id: string) {
-  await requireAdmin();
+  await requireAdminPage("answer_bank");
   const supabase = await createClient();
   await supabase.from("answered_questions").update({ validation_status: "auto_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
 
 export async function deleteAnswer(scope: AnswerBankScope) {
-  await requireAdmin();
+  await requireAdminPage("answer_bank");
   const supabase = await createClient();
   await supabase.from("answered_questions").delete().eq("id", scope.id);
   await invalidateCachedAnswer(scope);

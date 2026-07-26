@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   addBoard,
@@ -15,6 +16,7 @@ export default async function AdminCatalogPage({
 }: {
   searchParams: Promise<{ board?: string; grade?: string; subject?: string }>;
 }) {
+  await requireAdminPage("catalog");
   const { board: boardId, grade: gradeId, subject: subjectId } = await searchParams;
   const supabase = await createClient();
 
