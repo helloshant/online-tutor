@@ -36,10 +36,14 @@ services:
     environment:
       PORT: 4000
       # Always the compose-network hostname, regardless of whatever
-      # REDIS_URL a local (non-Docker) .env.local might have.
+      # REDIS_URL / OBSERVABILITY_URL a local (non-Docker) .env.local might
+      # have.
       REDIS_URL: redis://redis:6379
+      OBSERVABILITY_URL: http://observability:4100
     depends_on:
       redis:
+        condition: service_healthy
+      observability:
         condition: service_healthy
     # Deliberately no `ports:` mapping -- this service is reachable only
     # from other containers on the compose network (i.e. `web`), never
@@ -61,6 +65,24 @@ services:
     # restart (the Postgres answer bank is the durable copy).
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  observability:
+    build:
+      context: ./services/observability
+      dockerfile: Dockerfile
+    env_file:
+      - ./services/observability/.env.local
+    environment:
+      PORT: 4100
+    # Deliberately no `ports:` mapping -- same internal-only pattern as
+    # `orchestrator`. Only `orchestrator` reports events to this service.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4100/health"]
       interval: 10s
       timeout: 3s
       retries: 5

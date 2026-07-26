@@ -110,6 +110,34 @@ export type AnsweredQuestion = {
   last_used_at: string;
 };
 
+export type ChatEventMode = "student" | "staff";
+export type ChatEventSource = "cache" | "database" | "llm" | "rejected";
+
+// Written only by the observability service (service-role key) -- see
+// supabase/migrations/0007_chat_events.sql. The admin panel reads this
+// table through the ordinary session (RLS + is_admin()), same pattern as
+// the syllabus catalog and answer bank tables; it never writes to it.
+export type ChatEvent = {
+  id: string;
+  user_id: string;
+  mode: ChatEventMode;
+  board_id: string | null;
+  grade_id: string | null;
+  subject_id: string;
+  medium: Medium | null;
+  question: string;
+  source: ChatEventSource;
+  provider: string | null;
+  model: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cost_usd: number | null;
+  answer_bank_id: string | null;
+  latency_ms: number | null;
+  created_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -192,6 +220,17 @@ export interface Database {
           { foreignKeyName: "answered_questions_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
           { foreignKeyName: "answered_questions_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
           { foreignKeyName: "answered_questions_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+        ];
+      };
+      chat_events: {
+        Row: ChatEvent;
+        Insert: Partial<ChatEvent>;
+        Update: Partial<ChatEvent>;
+        Relationships: [
+          { foreignKeyName: "chat_events_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
+          { foreignKeyName: "chat_events_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
+          { foreignKeyName: "chat_events_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          { foreignKeyName: "chat_events_answer_bank_id_fkey"; columns: ["answer_bank_id"]; referencedRelation: "answered_questions"; referencedColumns: ["id"] },
         ];
       };
     };

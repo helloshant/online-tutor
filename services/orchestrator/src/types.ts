@@ -9,6 +9,7 @@ export type SyllabusTopic = { chapter: string; topic: string };
 export type ChatOrchestrationRequest =
   | {
       mode: "student";
+      userId: string;
       subjectId: string;
       subjectName: string;
       boardId: string;
@@ -22,6 +23,8 @@ export type ChatOrchestrationRequest =
     }
   | {
       mode: "staff";
+      userId: string;
+      subjectId: string;
       subjectName: string;
       message: string;
       history: ChatTurn[];
@@ -43,4 +46,16 @@ export type AnswerScope = {
   subjectId: string;
   medium: Medium;
   question: string;
+};
+
+export type TokenUsage = { promptTokens: number; completionTokens: number };
+
+// What an LLM provider returns -- the model field echoes back the exact
+// model/deployment that served the request (not just what was configured),
+// since that's what determines the cost calculation in the observability
+// service.
+export type LlmReply = {
+  text: string;
+  model: string;
+  usage: TokenUsage;
 };

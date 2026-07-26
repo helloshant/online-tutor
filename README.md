@@ -12,19 +12,22 @@ cache/knowledge-base pipeline in front of the LLM.
 
 ## Architecture
 
-Three containers:
+Four containers:
 
 ```
  ┌──────────────┐   HTTP (internal only)   ┌──────────────────┐
  │   web (3000) │ ───────────────────────► │ orchestrator      │
  │   Next.js    │  x-internal-api-key      │ (4000, Express)   │
  │   App Router │ ◄─────────────────────── │                    │
- └──────┬───────┘        { reply }         └───┬────────┬───────┘
-        │                                       │        │
-        ▼                                       ▼        ▼
-   Supabase (hosted)                   Redis (cache)  Anthropic Claude /
-   + Razorpay                          + Supabase       Azure OpenAI
-                                        (answer bank)
+ └──────┬───────┘        { reply }         └───┬────┬─────┬─────┘
+        │                                       │    │     │
+        ▼                                       ▼    ▼     ▼
+   Supabase (hosted)                   Redis   Claude/   observability
+   + Razorpay                         (cache)  Azure     (4100, Express)
+        ▲                                      OpenAI         │
+        │                                                     ▼
+        └─────────────────────────── writes chat_events ──────┘
+                                      (token usage, cost, hit counts)
 ```
 
 - **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, Razorpay
@@ -69,18 +72,34 @@ Three containers:
      ("explain more", "why?") — those depend on conversation context a scope-only lookup key can't
      capture, so they go straight to the LLM and are never written back into cache/db.
 
-  Staff (admin/superadmin) chat bypasses this whole pipeline — no board/grade/syllabus, no
-  gate/cache/database, straight to the LLM, same as before.
+  Staff (admin/superadmin) chat bypasses the gate/cache/database stages — no board/grade/syllabus,
+  straight to the LLM, same as before — but is still reported to observability, since a staff LLM
+  call still costs real tokens.
 
-  The response optionally carries a `source: "cache" | "database" | "llm" | "rejected"` field for
-  observability.
+  The response carries a `source: "cache" | "database" | "llm" | "rejected"` field.
 
   This is a small stateless Express service with a single endpoint (`POST /v1/chat`) gated by a
   shared-secret header, and isn't published to the host or the internet — only `web` can reach it,
   over the Docker Compose network.
+- **`services/observability`** owns *how usage gets recorded and priced*. After every `/v1/chat`
+  request, the orchestrator reports the outcome — `POST /v1/events`, fire-and-forget, never blocks
+  or affects the student's reply — and this service writes one row to the `chat_events` table:
+  - **`source: "llm"`** — token counts (prompt/completion) and a computed USD cost, using built-in
+    Anthropic pricing (overridable, and required for Azure OpenAI, via `LLM_PRICING_JSON` — see
+    `services/observability/src/pricing.ts`). A model with no configured rate still gets its tokens
+    recorded, just with a null cost, rather than a silently wrong number.
+  - **`source: "cache" | "database" | "rejected"`** — just the occurrence; no LLM was called, so
+    there's nothing to price.
 
-This split means the orchestration/prompt/pipeline layer can be redeployed, scaled, or have its LLM
-provider swapped without touching the web app, and vice versa.
+  `/admin/observability` reads this table directly (RLS + `is_admin()`, same pattern as the
+  catalog and answer-bank pages) for two consolidated views — total LLM cost/tokens by user, and
+  total database-hit count — plus a per-user drilldown to the individual query that consumed a
+  given number of tokens. Like the orchestrator, it's shared-secret gated and not published to the
+  host.
+
+This split means the orchestration/prompt/pipeline layer and the usage-accounting layer can each be
+redeployed, scaled, or replaced (e.g. swapping in a real observability backend later) without
+touching the web app or each other.
 
 ## How it works
 
@@ -99,6 +118,8 @@ provider swapped without touching the web app, and vice versa.
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
    `/admin/answer-bank` is the review queue for the orchestrator's auto-populated answer bank —
    approve, reject, or delete entries other students' questions get matched against.
+   `/admin/observability` shows total LLM cost/token usage by user, total database-hit count, and
+   a per-user drilldown into individual queries and the tokens/cost each one consumed.
 
 ## Data model & security
 
@@ -131,18 +152,24 @@ See `supabase/migrations/` for the full schema:
   `/admin/answer-bank` can read/update/delete entries through the ordinary session — the same
   pattern as the syllabus catalog tables. There is still no insert policy: every row originates from
   the orchestrator's service-role key, never directly from a client.
+- `0007_chat_events.sql` — the `chat_events` table `services/observability` writes to: one row per
+  question, tagged with `source` (`cache`/`database`/`llm`/`rejected`), token counts + `cost_usd`
+  when `source = 'llm'`, and a link to the matching `answered_questions` row when `source =
+  'database'`. Admin-only RLS (`is_admin()`), no insert policy — every row originates from the
+  observability service's service-role key.
 
 ## Local setup
 
-You can run this either with Docker Compose (one command, both services) or by running the web
-app and the orchestrator as two separate `npm run dev` processes. Either way, steps 1–3 below
-(Supabase) are the same.
+You can run this either with Docker Compose (one command, all services) or by running the web app,
+orchestrator, and observability service as three separate `npm run dev` processes. Either way,
+steps 1–3 below (Supabase) are the same.
 
 ### 1. Install dependencies
 
 ```bash
 npm install
 cd services/orchestrator && npm install && cd ../..
+cd services/observability && npm install && cd ../..
 ```
 
 (Not needed if you're only going to run via Docker Compose — the images install their own
@@ -172,11 +199,12 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
-There are **two** env files — one per service:
+There are **three** env files — one per service:
 
 ```bash
 cp .env.example .env.local
 cp services/orchestrator/.env.example services/orchestrator/.env.local
+cp services/observability/.env.example services/observability/.env.local
 ```
 
 **Root `.env.local`** (the web app):
@@ -201,6 +229,11 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project as the web app (Project
   Settings → API). Used only to query/populate the `answered_questions` full-text answer bank; the
   service-role key is required since that table's RLS has no client-facing policies.
+- `OBSERVABILITY_URL` — leave as `http://observability:4100` for Docker Compose; use
+  `http://localhost:4100` if running the observability service directly with `npm run dev` instead.
+  `OBSERVABILITY_SHARED_SECRET` — any random string; must exactly match the same variable in
+  `services/observability/.env.local`. Both are optional in the sense that reporting fails open
+  (usage just goes unrecorded) if unset — the chat pipeline itself is unaffected either way.
 - `LLM_PROVIDER` — `anthropic` (default) or `azure-openai`. Only fill in the section for
   whichever one you pick:
   - **Anthropic**: `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
@@ -210,9 +243,20 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
     gave the model in Azure AI Foundry, e.g. `gpt-4o`), and `AZURE_OPENAI_API_VERSION` (e.g.
     `2024-08-01-preview`).
 
+**`services/observability/.env.local`** (the usage/cost tracking service):
+
+- `OBSERVABILITY_SHARED_SECRET` — same value as above.
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project again. Used only to write to
+  `chat_events`; the service-role key is required since that table has no client-facing insert
+  policy.
+- `LLM_PRICING_JSON` — optional. Anthropic model pricing is built in; set this to update a rate,
+  add pricing for Azure OpenAI (which varies by region/agreement and has no built-in default), or
+  reflect a promotional/negotiated rate. See `services/observability/src/pricing.ts` for the
+  built-in table and the exact JSON shape.
+
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs all three containers, including Redis):
+**Option A — Docker Compose** (builds and runs all four containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build
@@ -228,27 +272,32 @@ you'd hit `Uncaught Error: Missing NEXT_PUBLIC_SUPABASE_URL environment variable
 If you forget the flag, the build now fails immediately with a clear message rather than silently
 producing a broken image.
 
-Open [http://localhost:3000](http://localhost:3000). The orchestrator isn't published to your host
-— it's only reachable from the `web` container over the Compose network — so you won't see it on
-`localhost:4000`; that's intentional. To check it directly: `docker compose exec orchestrator wget
--qO- localhost:4000/health`.
+Open [http://localhost:3000](http://localhost:3000). Neither the orchestrator nor the observability
+service is published to your host — they're only reachable from other containers over the Compose
+network — so you won't see them on `localhost:4000`/`localhost:4100`; that's intentional. To check
+one directly: `docker compose exec orchestrator wget -qO- localhost:4000/health` (swap
+`orchestrator`/`4000` for `observability`/`4100` for the other one).
 
 If you ever change `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, you must rebuild
 (`--build`), not just restart — a plain `docker compose up` without `--build` reuses the existing
 image with the old values baked in.
 
-**Option B — two `npm run dev` processes** (no Docker), one per terminal:
+**Option B — three `npm run dev` processes** (no Docker), one per terminal:
 
 ```bash
 # terminal 1
 cd services/orchestrator && npm run dev
 
-# terminal 2 (repo root)
+# terminal 2
+cd services/observability && npm run dev
+
+# terminal 3 (repo root)
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL` in the root
-`.env.local` is `http://localhost:4000` for this mode.
+`.env.local` is `http://localhost:4000`, and `OBSERVABILITY_URL` in
+`services/orchestrator/.env.local` is `http://localhost:4100`, for this mode.
 
 ## Pricing
 
@@ -262,9 +311,13 @@ server-side when a subscription is created — the client never supplies the amo
 - Set up Razorpay webhooks if you want to handle payment failures/refunds beyond the
   checkout-success flow already implemented in `src/app/api/razorpay/verify/route.ts`.
 - Configure Supabase Auth email templates / SMTP for production-grade signup emails.
-- **Always set `ORCHESTRATOR_SHARED_SECRET`** in both env files in production. Without it the
-  orchestrator accepts requests from anyone who can reach it on the network — fine for a moment of
-  local experimentation, not for a real deployment.
+- **Always set `ORCHESTRATOR_SHARED_SECRET` and `OBSERVABILITY_SHARED_SECRET`** in every env file
+  in production. Without them, the orchestrator and observability service accept requests from
+  anyone who can reach them on the network — fine for a moment of local experimentation, not for a
+  real deployment.
+- If you're on Azure OpenAI, set `LLM_PRICING_JSON` in `services/observability/.env.local` —
+  without it, token counts are still recorded but cost stays unpriced (shown as unpriced in
+  `/admin/observability`, never silently reported as $0).
 - Whatever you deploy `docker-compose.yml` to (a VM, ECS, Kubernetes, etc.), keep the same
-  topology: only `web` should be internet-facing; `orchestrator` should stay on a private/internal
-  network, reachable only from `web`.
+  topology: only `web` should be internet-facing; `orchestrator` and `observability` should stay on
+  a private/internal network, reachable only from `web` and `orchestrator` respectively.

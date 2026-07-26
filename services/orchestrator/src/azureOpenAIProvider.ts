@@ -1,5 +1,5 @@
 import { AzureOpenAI } from "openai";
-import type { ChatTurn } from "./types.js";
+import type { ChatTurn, LlmReply } from "./types.js";
 
 const DEFAULT_DEPLOYMENT = "gpt-4o";
 const DEFAULT_API_VERSION = "2024-08-01-preview";
@@ -32,7 +32,7 @@ export async function getAzureOpenAIReply(params: {
   history: ChatTurn[];
   message: string;
   maxTokens: number;
-}): Promise<string> {
+}): Promise<LlmReply> {
   const { systemPrompt, history, message, maxTokens } = params;
   const client = getClient();
   const completion = await client.chat.completions.create({
@@ -44,5 +44,15 @@ export async function getAzureOpenAIReply(params: {
       { role: "user" as const, content: message },
     ],
   });
-  return completion.choices[0]?.message?.content ?? FALLBACK_TEXT;
+  return {
+    text: completion.choices[0]?.message?.content ?? FALLBACK_TEXT,
+    // The deployment name, not the underlying base model -- Azure bills and
+    // rate-limits against the deployment, so that's the identifier the
+    // observability service's pricing lookup needs.
+    model: AZURE_OPENAI_DEPLOYMENT,
+    usage: {
+      promptTokens: completion.usage?.prompt_tokens ?? 0,
+      completionTokens: completion.usage?.completion_tokens ?? 0,
+    },
+  };
 }

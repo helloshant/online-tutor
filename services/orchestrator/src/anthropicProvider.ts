@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ChatTurn } from "./types.js";
+import type { ChatTurn, LlmReply } from "./types.js";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 
@@ -23,7 +23,7 @@ export async function getAnthropicReply(params: {
   history: ChatTurn[];
   message: string;
   maxTokens: number;
-}): Promise<string> {
+}): Promise<LlmReply> {
   const { systemPrompt, history, message, maxTokens } = params;
   const client = getClient();
   const response = await client.messages.create({
@@ -33,5 +33,12 @@ export async function getAnthropicReply(params: {
     messages: [...history, { role: "user" as const, content: message }],
   });
   const textBlock = response.content.find((block) => block.type === "text");
-  return textBlock && textBlock.type === "text" ? textBlock.text : FALLBACK_TEXT;
+  return {
+    text: textBlock && textBlock.type === "text" ? textBlock.text : FALLBACK_TEXT,
+    model: response.model,
+    usage: {
+      promptTokens: response.usage.input_tokens,
+      completionTokens: response.usage.output_tokens,
+    },
+  };
 }

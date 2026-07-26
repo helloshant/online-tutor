@@ -12,6 +12,7 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type ChatOrchestrationRequest =
   | {
       mode: "student";
+      userId: string;
       subjectId: string;
       subjectName: string;
       boardId: string;
@@ -25,6 +26,8 @@ export type ChatOrchestrationRequest =
     }
   | {
       mode: "staff";
+      userId: string;
+      subjectId: string;
       subjectName: string;
       message: string;
       history: ChatTurn[];

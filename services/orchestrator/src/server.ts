@@ -3,7 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
-import { getChatReply } from "./llm.js";
+import { getActiveLlmProvider, getChatReply } from "./llm.js";
+import { recordChatEvent } from "./observabilityClient.js";
 import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
 import type { AnswerScope, ChatOrchestrationRequest, ChatOrchestrationResponse } from "./types.js";
@@ -40,10 +41,19 @@ function requireSharedSecret(req: Request, res: Response, next: NextFunction) {
 }
 
 app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) => {
+  const startedAt = Date.now();
   const body = req.body as Partial<ChatOrchestrationRequest> | undefined;
 
   if (!body || (body.mode !== "student" && body.mode !== "staff")) {
     res.status(400).json({ error: "mode must be 'student' or 'staff'" });
+    return;
+  }
+  if (typeof body.userId !== "string" || !body.userId) {
+    res.status(400).json({ error: "userId is required" });
+    return;
+  }
+  if (typeof body.subjectId !== "string" || !body.subjectId) {
+    res.status(400).json({ error: "subjectId is required" });
     return;
   }
   if (typeof body.subjectName !== "string" || !body.subjectName.trim()) {
@@ -59,15 +69,29 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
   // Staff chat is deliberately unrestricted (no board/grade/syllabus) and
   // isn't tied to a subscription, so it sits outside the whole
   // gate/cache/database pipeline below -- straight to the LLM, as before.
+  // It still gets reported to observability, since staff LLM calls consume
+  // real tokens and cost real money too.
   if (body.mode === "staff") {
     try {
-      const reply = await getChatReply({
+      const { text, model, usage } = await getChatReply({
         systemPrompt: buildStaffSystemPrompt(body.subjectName),
         history,
         message: body.message,
         maxTokens: MAX_TOKENS,
       });
-      const response: ChatOrchestrationResponse = { reply, source: "llm" };
+      void recordChatEvent({
+        userId: body.userId,
+        mode: "staff",
+        subjectId: body.subjectId,
+        question: body.message,
+        source: "llm",
+        provider: getActiveLlmProvider(),
+        model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        latencyMs: Date.now() - startedAt,
+      });
+      const response: ChatOrchestrationResponse = { reply: text, source: "llm" };
       res.json(response);
     } catch (err) {
       console.error("LLM chat completion failed:", err);
@@ -78,8 +102,6 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
 
   const studentBody = body as Extract<ChatOrchestrationRequest, { mode: "student" }>;
   if (
-    typeof studentBody.subjectId !== "string" ||
-    !studentBody.subjectId ||
     typeof studentBody.boardId !== "string" ||
     !studentBody.boardId ||
     typeof studentBody.gradeId !== "string" ||
@@ -90,8 +112,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     !Array.isArray(studentBody.topics)
   ) {
     res.status(400).json({
-      error:
-        "subjectId, boardId, gradeId, boardName, gradeName, medium, and topics are required for mode='student'",
+      error: "boardId, gradeId, boardName, gradeName, medium, and topics are required for mode='student'",
     });
     return;
   }
@@ -107,6 +128,17 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       history,
     })
   ) {
+    void recordChatEvent({
+      userId: studentBody.userId,
+      mode: "student",
+      boardId: studentBody.boardId,
+      gradeId: studentBody.gradeId,
+      subjectId: studentBody.subjectId,
+      medium: studentBody.medium,
+      question: studentBody.message,
+      source: "rejected",
+      latencyMs: Date.now() - startedAt,
+    });
     const response: ChatOrchestrationResponse = { reply: SYLLABUS_REJECTION_MESSAGE, source: "rejected" };
     res.json(response);
     return;
@@ -131,6 +163,17 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
   if (scope) {
     const cached = await getCachedAnswer(scope);
     if (cached) {
+      void recordChatEvent({
+        userId: studentBody.userId,
+        mode: "student",
+        boardId: scope.boardId,
+        gradeId: scope.gradeId,
+        subjectId: scope.subjectId,
+        medium: scope.medium,
+        question: scope.question,
+        source: "cache",
+        latencyMs: Date.now() - startedAt,
+      });
       const response: ChatOrchestrationResponse = { reply: cached, source: "cache" };
       res.json(response);
       return;
@@ -140,8 +183,20 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     if (fromBank) {
       // Cache missed but the database had it -- populate cache so the next
       // ask of this same question is an L1 hit.
-      void setCachedAnswer(scope, fromBank);
-      const response: ChatOrchestrationResponse = { reply: fromBank, source: "database" };
+      void setCachedAnswer(scope, fromBank.answer);
+      void recordChatEvent({
+        userId: studentBody.userId,
+        mode: "student",
+        boardId: scope.boardId,
+        gradeId: scope.gradeId,
+        subjectId: scope.subjectId,
+        medium: scope.medium,
+        question: scope.question,
+        source: "database",
+        answerBankId: fromBank.id,
+        latencyMs: Date.now() - startedAt,
+      });
+      const response: ChatOrchestrationResponse = { reply: fromBank.answer, source: "database" };
       res.json(response);
       return;
     }
@@ -158,7 +213,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
   });
 
   try {
-    const reply = await getChatReply({
+    const { text, model, usage } = await getChatReply({
       systemPrompt,
       history,
       message: studentBody.message,
@@ -166,20 +221,36 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     });
 
     if (scope) {
-      const validation = validateAnswerForStorage(reply);
+      const validation = validateAnswerForStorage(text);
       if (validation.store) {
-        void recordAnswer(scope, reply, validation.status);
+        void recordAnswer(scope, text, validation.status);
         // Only cache (i.e. let it be replayed to other students) once it's
         // confident enough to auto-approve -- a pending_review answer stays
         // out of both the cache and the servable side of the answer bank
         // until an admin confirms it.
         if (validation.status === "auto_approved") {
-          void setCachedAnswer(scope, reply);
+          void setCachedAnswer(scope, text);
         }
       }
     }
 
-    const response: ChatOrchestrationResponse = { reply, source: "llm" };
+    void recordChatEvent({
+      userId: studentBody.userId,
+      mode: "student",
+      boardId: studentBody.boardId,
+      gradeId: studentBody.gradeId,
+      subjectId: studentBody.subjectId,
+      medium: studentBody.medium,
+      question: studentBody.message,
+      source: "llm",
+      provider: getActiveLlmProvider(),
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    const response: ChatOrchestrationResponse = { reply: text, source: "llm" };
     res.json(response);
   } catch (err) {
     console.error("LLM chat completion failed:", err);

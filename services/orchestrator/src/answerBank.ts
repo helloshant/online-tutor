@@ -10,7 +10,9 @@ import type { AnswerScope } from "./types.js";
 // failure mode than falling through to the LLM.
 const MIN_RANK = 0.1;
 
-export async function findAnswerInBank(scope: AnswerScope): Promise<string | null> {
+export async function findAnswerInBank(
+  scope: AnswerScope
+): Promise<{ id: string; answer: string } | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -31,15 +33,14 @@ export async function findAnswerInBank(scope: AnswerScope): Promise<string | nul
   }
   if (!data) return null;
 
-  // Best-effort hit-count bump for observability -- never block the
-  // response on it.
+  // Best-effort hit-count bump -- never block the response on it.
   supabase
     .rpc("bump_answer_bank_hit", { p_id: data.id })
     .then(({ error: bumpError }) => {
       if (bumpError) console.error("Failed to bump answer bank hit count:", bumpError);
     });
 
-  return data.answer;
+  return { id: data.id, answer: data.answer };
 }
 
 export async function recordAnswer(

@@ -53,7 +53,14 @@ async function handleChatRequest(request: Request) {
     if (!subject) {
       return NextResponse.json({ error: "Unknown subject" }, { status: 404 });
     }
-    orchestrationRequest = { mode: "staff", subjectName: subject.name, message, history: [] };
+    orchestrationRequest = {
+      mode: "staff",
+      userId: user.id,
+      subjectId,
+      subjectName: subject.name,
+      message,
+      history: [],
+    };
   } else {
     const { data: subscription } = await supabase
       .from("subscriptions")
@@ -98,6 +105,7 @@ async function handleChatRequest(request: Request) {
     subscriptionId = subscription.id;
     orchestrationRequest = {
       mode: "student",
+      userId: user.id,
       subjectId,
       subjectName,
       boardId: subscription.board_id,
