@@ -4,6 +4,7 @@
 // list (much shorter than full topic descriptions) is always included in
 // full separately, so the model still knows the complete scope even when a
 // question doesn't keyword-match anything specific.
+import type { SyllabusTopic } from "./types.js";
 
 const STOPWORDS = new Set([
   "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "of", "in", "on", "at",
@@ -21,17 +22,12 @@ function tokenize(text: string): string[] {
     .filter((word) => word.length >= 3 && !STOPWORDS.has(word));
 }
 
-export interface SyllabusTopicLike {
-  chapter: string;
-  topic: string;
-}
-
 // Below this many topics, filtering isn't worth the complexity -- just
 // include everything, same as before.
 const FILTER_THRESHOLD = 25;
 const MAX_RELEVANT_TOPICS = 15;
 
-export function selectRelevantTopics<T extends SyllabusTopicLike>(
+export function selectRelevantTopics<T extends SyllabusTopic>(
   topics: T[],
   message: string,
   limit: number = MAX_RELEVANT_TOPICS

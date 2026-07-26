@@ -1,0 +1,39 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    environment:
+      # Always resolve to the orchestrator container's compose-network
+      # hostname here, regardless of whatever ORCHESTRATOR_URL a local
+      # (non-Docker) .env.local might have for `npm run dev`.
+      ORCHESTRATOR_URL: http://orchestrator:4000
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ./services/orchestrator
+      dockerfile: Dockerfile
+    env_file:
+      - ./services/orchestrator/.env.local
+    environment:
+      PORT: 4000
+    # Deliberately no `ports:` mapping -- this service is reachable only
+    # from other containers on the compose network (i.e. `web`), never
+    # from the host or the public internet directly. Use
+    # `docker compose exec orchestrator wget -qO- localhost:4000/health`
+    # to check it from your host if needed.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped

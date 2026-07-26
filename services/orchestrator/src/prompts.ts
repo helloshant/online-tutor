@@ -1,20 +1,21 @@
-import type { Medium } from "./supabase/types";
+import { selectRelevantTopics } from "./syllabusFilter.js";
+import type { Medium, SyllabusTopic } from "./types.js";
 
 export function buildTutorSystemPrompt(params: {
   subjectName: string;
   boardName: string;
   gradeName: string;
   medium: Medium;
-  // Full chapter list for this board/grade/subject -- cheap (titles only),
-  // always included in full so the model always knows the complete scope.
-  chapters: string[];
-  // Topics related to the current question, with full descriptions. A
-  // subset of the full syllabus when it's large -- see selectRelevantTopics
-  // in lib/syllabusFilter.ts -- so token cost doesn't scale with syllabus
-  // size on every single message.
-  relevantTopics: { chapter: string; topic: string }[];
+  topics: SyllabusTopic[];
+  message: string;
 }): string {
-  const { subjectName, boardName, gradeName, medium, chapters, relevantTopics } = params;
+  const { subjectName, boardName, gradeName, medium, topics, message } = params;
+
+  // Full chapter list (cheap: titles only) always defines the scope
+  // boundary. Only topics relevant to the current question get full detail,
+  // so token cost doesn't scale with syllabus size on every message.
+  const chapters = [...new Set(topics.map((t) => t.chapter))];
+  const relevantTopics = selectRelevantTopics(topics, message);
 
   const chapterList = chapters.length
     ? chapters.join(", ")

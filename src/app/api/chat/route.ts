@@ -2,13 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import { getChatReply } from "@/lib/llm";
-import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "@/lib/tutorPrompt";
-import { selectRelevantTopics } from "@/lib/syllabusFilter";
+import { getOrchestratedReply, type ChatOrchestrationRequest } from "@/lib/orchestratorClient";
 import type { ChatMessage } from "@/lib/supabase/types";
 
 const HISTORY_LIMIT = 20;
-const MAX_TOKENS = 1536;
 const MAX_MESSAGE_LENGTH = 2000;
 
 export async function POST(request: Request) {
@@ -48,7 +45,7 @@ async function handleChatRequest(request: Request) {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
 
   let subscriptionId: string | null = null;
-  let systemPrompt: string;
+  let orchestrationRequest: ChatOrchestrationRequest;
 
   if (isStaff(profile?.role)) {
     // Staff never subscribe: only requirement is that the subject exists.
@@ -56,7 +53,7 @@ async function handleChatRequest(request: Request) {
     if (!subject) {
       return NextResponse.json({ error: "Unknown subject" }, { status: 404 });
     }
-    systemPrompt = buildStaffSystemPrompt(subject.name);
+    orchestrationRequest = { mode: "staff", subjectName: subject.name, message, history: [] };
   } else {
     const { data: subscription } = await supabase
       .from("subscriptions")
@@ -98,18 +95,17 @@ async function handleChatRequest(request: Request) {
     const subjectName =
       (subjectLink as unknown as { subjects: { name: string } | null }).subjects?.name ?? "the subject";
 
-    const allTopics = topics ?? [];
-    const chapters = [...new Set(allTopics.map((t) => t.chapter))];
-
     subscriptionId = subscription.id;
-    systemPrompt = buildTutorSystemPrompt({
+    orchestrationRequest = {
+      mode: "student",
       subjectName,
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
       medium: subscription.medium,
-      chapters,
-      relevantTopics: selectRelevantTopics(allTopics, message),
-    });
+      topics: topics ?? [],
+      message,
+      history: [],
+    };
   }
 
   let historyQuery = supabase
@@ -122,21 +118,16 @@ async function handleChatRequest(request: Request) {
     : historyQuery.is("subscription_id", null);
   const { data: history } = await historyQuery.order("created_at", { ascending: false }).limit(HISTORY_LIMIT);
 
-  const orderedHistory = (history ?? []).slice().reverse();
+  orchestrationRequest.history = (history ?? [])
+    .slice()
+    .reverse()
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
   let assistantText: string;
   try {
-    assistantText = await getChatReply({
-      systemPrompt,
-      history: orderedHistory.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      message,
-      maxTokens: MAX_TOKENS,
-    });
+    assistantText = await getOrchestratedReply(orchestrationRequest);
   } catch (err) {
-    console.error("LLM chat completion failed:", err);
+    console.error("Orchestrator chat request failed:", err);
     return NextResponse.json(
       { error: "The tutor is temporarily unavailable. Please try again shortly." },
       { status: 502 }

@@ -6,8 +6,36 @@ subject and that grade/board's syllabus, always answering in the chosen language
 panel to see every user's selections and manage the underlying board/grade/subject/syllabus
 catalog.
 
-Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), Razorpay, and
-a pluggable LLM backend (Anthropic Claude by default, or Azure OpenAI).
+Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), Razorpay, and a
+separate LLM orchestration service (Anthropic Claude by default, or Azure OpenAI).
+
+## Architecture
+
+Two containers:
+
+```
+ ┌──────────────┐   HTTP (internal only)   ┌──────────────────┐
+ │   web (3000) │ ───────────────────────► │ orchestrator      │
+ │   Next.js    │  x-internal-api-key      │ (4000, Express)   │
+ │   App Router │ ◄─────────────────────── │                    │
+ └──────┬───────┘        { reply }         └─────────┬──────────┘
+        │                                              │
+        ▼                                              ▼
+   Supabase (hosted)                         Anthropic Claude /
+   + Razorpay                                Azure OpenAI
+```
+
+- **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, Razorpay
+  payment, subscription/entitlement checks, the admin panel, and persisting chat history. It never
+  talks to an LLM SDK directly.
+- **`services/orchestrator`** owns everything about *how a question becomes an answer*: system
+  prompt construction (student vs. staff mode), syllabus-relevance filtering so token cost doesn't
+  scale with syllabus size, and LLM provider selection. It's a small stateless Express service with
+  a single endpoint (`POST /v1/chat`) gated by a shared-secret header, and isn't published to the
+  host or the internet — only `web` can reach it, over the Docker Compose network.
+
+This split means the orchestration/prompt layer can be redeployed, scaled, or have its LLM provider
+swapped without touching the web app, and vice versa.
 
 ## How it works
 
@@ -47,11 +75,19 @@ See `supabase/migrations/` for the full schema:
 
 ## Local setup
 
+You can run this either with Docker Compose (one command, both services) or by running the web
+app and the orchestrator as two separate `npm run dev` processes. Either way, steps 1–3 below
+(Supabase) are the same.
+
 ### 1. Install dependencies
 
 ```bash
 npm install
+cd services/orchestrator && npm install && cd ../..
 ```
+
+(Not needed if you're only going to run via Docker Compose — the images install their own
+dependencies during `docker compose build`.)
 
 ### 2. Create a Supabase project
 
@@ -77,14 +113,27 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
+There are **two** env files — one per service:
+
 ```bash
 cp .env.example .env.local
+cp services/orchestrator/.env.example services/orchestrator/.env.local
 ```
 
-Fill in:
+**Root `.env.local`** (the web app):
 
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` —
   Supabase dashboard → Project Settings → API.
+- `ORCHESTRATOR_URL` — leave as `http://orchestrator:4000` for Docker Compose; use
+  `http://localhost:4000` if running the orchestrator directly with `npm run dev` instead.
+- `ORCHESTRATOR_SHARED_SECRET` — any random string; must exactly match the same variable in
+  `services/orchestrator/.env.local`.
+- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — Razorpay dashboard → Settings → API Keys. Use test
+  mode keys for local development.
+
+**`services/orchestrator/.env.local`** (the orchestration service):
+
+- `ORCHESTRATOR_SHARED_SECRET` — same value as above.
 - `LLM_PROVIDER` — `anthropic` (default) or `azure-openai`. Only fill in the section for
   whichever one you pick:
   - **Anthropic**: `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
@@ -93,16 +142,32 @@ Fill in:
     resource's Keys and Endpoint page, `AZURE_OPENAI_CHAT_DEPLOYMENT` (the deployment name you
     gave the model in Azure AI Foundry, e.g. `gpt-4o`), and `AZURE_OPENAI_API_VERSION` (e.g.
     `2024-08-01-preview`).
-- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — Razorpay dashboard → Settings → API Keys. Use test
-  mode keys for local development.
 
-### 5. Run the dev server
+### 5. Run it
+
+**Option A — Docker Compose** (builds and runs both containers):
 
 ```bash
+docker compose up --build
+```
+
+Open [http://localhost:3000](http://localhost:3000). The orchestrator isn't published to your host
+— it's only reachable from the `web` container over the Compose network — so you won't see it on
+`localhost:4000`; that's intentional. To check it directly: `docker compose exec orchestrator wget
+-qO- localhost:4000/health`.
+
+**Option B — two `npm run dev` processes** (no Docker), one per terminal:
+
+```bash
+# terminal 1
+cd services/orchestrator && npm run dev
+
+# terminal 2 (repo root)
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL` in the root
+`.env.local` is `http://localhost:4000` for this mode.
 
 ## Pricing
 
@@ -116,3 +181,9 @@ server-side when a subscription is created — the client never supplies the amo
 - Set up Razorpay webhooks if you want to handle payment failures/refunds beyond the
   checkout-success flow already implemented in `src/app/api/razorpay/verify/route.ts`.
 - Configure Supabase Auth email templates / SMTP for production-grade signup emails.
+- **Always set `ORCHESTRATOR_SHARED_SECRET`** in both env files in production. Without it the
+  orchestrator accepts requests from anyone who can reach it on the network — fine for a moment of
+  local experimentation, not for a real deployment.
+- Whatever you deploy `docker-compose.yml` to (a VM, ECS, Kubernetes, etc.), keep the same
+  topology: only `web` should be internet-facing; `orchestrator` should stay on a private/internal
+  network, reachable only from `web`.
