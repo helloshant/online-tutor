@@ -82,31 +82,38 @@ export async function addSyllabusTopic(formData: FormData) {
   revalidatePath("/admin/catalog");
 }
 
-// Matches a leading list marker: "1.", "1)", "(i)", "(iii)", "a)", "৬.",
-// "६.", or a bare bullet (-, *, •). Official documents often number chapter
-// headings with native-script digits (Bengali ০-৯, Devanagari ०-९) while
-// still using Latin roman numerals for sub-items -- both are matched here.
-// The character ranges are digit/letter-marker-only by construction, so
-// they can never accidentally eat the start of a real Bengali/Hindi word --
-// those scripts' actual letters live outside every range matched below.
+// Matches a leading list marker on a *topic* (indented) line: "1.", "1)",
+// "(i)", "(iii)", "a)", "৬.", "६.", or a bare bullet (-, *, •). The character
+// ranges are digit/letter-marker-only by construction, so they can never
+// accidentally eat the start of a real Bengali/Hindi word -- those scripts'
+// actual letters live outside every range matched below.
 const LIST_MARKER_PATTERN = /^(\(?[a-zA-Z0-9০-৯०-९]{1,4}[).:]|[-*•])\s*/;
 // Official syllabus documents commonly punctuate a chapter heading with a
 // trailing colon ("Real Numbers :") -- that's structural, not part of the
 // chapter's name.
 const TRAILING_COLON_PATTERN = /\s*[:：]\s*$/;
 
-function cleanLine(line: string): string {
+// Chapter numbering ("13.", "14.") is kept as-is: some official documents
+// reuse the same chapter title for multiple numbered entries (e.g. two
+// separate "Construction" chapters), so the number is often the only thing
+// that disambiguates them -- stripping it would silently merge distinct
+// chapters together.
+function cleanChapterLine(line: string): string {
+  return line.trim().replace(TRAILING_COLON_PATTERN, "").trim();
+}
+
+function cleanTopicLine(line: string): string {
   return line.trim().replace(LIST_MARKER_PATTERN, "").replace(TRAILING_COLON_PATTERN, "").trim();
 }
 
 // Parses a pasted syllabus document into chapter/topic rows: an un-indented
 // line starts a new chapter, and each indented line under it becomes one
-// topic under that chapter. Leading list markers ("1.", "(ii)", "-", "•", ...)
-// and a chapter heading's trailing colon are stripped automatically, so
-// admins can paste close to verbatim from the official source -- numbered
-// chapters, lettered/romanette sub-items and all -- instead of manually
-// repeating the chapter name on every line or hand-editing every marker out
-// first.
+// topic under that chapter. A topic line's leading list marker ("(ii)", "-",
+// "•", ...) and a chapter heading's trailing colon are stripped
+// automatically, so admins can paste close to verbatim from the official
+// source -- lettered/romanette sub-items and all -- instead of manually
+// hand-editing every marker out first. Chapter-line numbering is left
+// intact (see cleanChapterLine).
 function parseBulkSyllabus(text: string): { chapter: string; topic: string }[] {
   const rows: { chapter: string; topic: string }[] = [];
   let currentChapter = "";
@@ -114,7 +121,7 @@ function parseBulkSyllabus(text: string): { chapter: string; topic: string }[] {
   for (const rawLine of text.split("\n")) {
     if (!rawLine.trim()) continue;
     const isIndented = /^[ \t]/.test(rawLine);
-    const cleaned = cleanLine(rawLine);
+    const cleaned = isIndented ? cleanTopicLine(rawLine) : cleanChapterLine(rawLine);
     if (!cleaned) continue;
 
     if (!isIndented) {
