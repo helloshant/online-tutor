@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { getChatReply } from "@/lib/llm";
 import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "@/lib/tutorPrompt";
+import { selectRelevantTopics } from "@/lib/syllabusFilter";
 import type { ChatMessage } from "@/lib/supabase/types";
 
 const HISTORY_LIMIT = 20;
@@ -97,13 +98,17 @@ async function handleChatRequest(request: Request) {
     const subjectName =
       (subjectLink as unknown as { subjects: { name: string } | null }).subjects?.name ?? "the subject";
 
+    const allTopics = topics ?? [];
+    const chapters = [...new Set(allTopics.map((t) => t.chapter))];
+
     subscriptionId = subscription.id;
     systemPrompt = buildTutorSystemPrompt({
       subjectName,
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
       medium: subscription.medium,
-      topics: topics ?? [],
+      chapters,
+      relevantTopics: selectRelevantTopics(allTopics, message),
     });
   }
 

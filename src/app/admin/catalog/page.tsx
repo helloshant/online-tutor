@@ -7,6 +7,7 @@ import {
   addSyllabusTopic,
   removeOffering,
   removeSyllabusTopic,
+  updateSyllabusTopic,
 } from "./actions";
 
 export default async function AdminCatalogPage({
@@ -281,22 +282,72 @@ export default async function AdminCatalogPage({
               </button>
             </form>
 
-            <ul className="mt-4 divide-y divide-border">
-              {(topics ?? []).map((t) => (
-                <li key={t.id} className="flex items-center justify-between py-2 text-sm">
-                  <span>
-                    <span className="font-medium">{t.chapter}</span>
-                    <span className="text-foreground/60"> — {t.topic}</span>
-                  </span>
-                  <form action={removeSyllabusTopic.bind(null, t.id)}>
-                    <button className="text-xs text-red-600 hover:underline">Remove</button>
-                  </form>
-                </li>
-              ))}
-              {(topics ?? []).length === 0 && (
-                <li className="py-2 text-sm text-foreground/50">No topics yet for this selection.</li>
-              )}
-            </ul>
+            <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+              {(topics ?? []).length} topic{(topics ?? []).length === 1 ? "" : "s"}
+            </p>
+            <div className="mt-2 max-h-[28rem] overflow-y-auto rounded-lg border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-xs uppercase text-foreground/40">
+                  <tr>
+                    <th className="px-3 py-2">Chapter</th>
+                    <th className="px-3 py-2">Topic</th>
+                    <th className="w-20 px-3 py-2">Order</th>
+                    <th className="w-32 px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(topics ?? []).map((t) => (
+                    <tr key={t.id} className="border-t border-border align-top">
+                      <td colSpan={3} className="p-0">
+                        <form
+                          id={`syllabus-topic-${t.id}`}
+                          action={updateSyllabusTopic.bind(null, t.id)}
+                          className="flex items-start gap-2 px-3 py-2"
+                        >
+                          <input
+                            name="chapter"
+                            defaultValue={t.chapter}
+                            required
+                            className="w-40 shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-sm"
+                          />
+                          <input
+                            name="topic"
+                            defaultValue={t.topic}
+                            required
+                            className="min-w-[14rem] flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm"
+                          />
+                          <input
+                            name="sortOrder"
+                            type="number"
+                            defaultValue={t.sort_order}
+                            className="w-16 shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-sm"
+                          />
+                        </form>
+                      </td>
+                      <td className="p-0">
+                        <div className="flex items-start gap-2 px-3 py-2">
+                          <button
+                            type="submit"
+                            form={`syllabus-topic-${t.id}`}
+                            className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-brand/5"
+                          >
+                            Save
+                          </button>
+                          <form action={removeSyllabusTopic.bind(null, t.id)}>
+                            <button className="shrink-0 text-xs text-red-600 hover:underline">
+                              Remove
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {(topics ?? []).length === 0 && (
+              <p className="mt-2 text-sm text-foreground/50">No topics yet for this selection.</p>
+            )}
           </div>
         )}
       </section>

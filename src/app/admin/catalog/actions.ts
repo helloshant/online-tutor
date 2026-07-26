@@ -77,6 +77,20 @@ export async function addSyllabusTopic(formData: FormData) {
   revalidatePath("/admin/catalog");
 }
 
+export async function updateSyllabusTopic(topicId: string, formData: FormData) {
+  await requireAdmin();
+  const chapter = String(formData.get("chapter") ?? "").trim();
+  const topic = String(formData.get("topic") ?? "").trim();
+  const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
+  if (!chapter || !topic) return;
+  const supabase = await createClient();
+  await supabase
+    .from("syllabus_topics")
+    .update({ chapter, topic, sort_order: sortOrder })
+    .eq("id", topicId);
+  revalidatePath("/admin/catalog");
+}
+
 export async function removeSyllabusTopic(topicId: string) {
   await requireAdmin();
   const supabase = await createClient();
