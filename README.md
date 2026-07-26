@@ -38,7 +38,12 @@ Three containers:
      get the fixed reply "Please restrict your questions to your syllabus" without calling anything
      else.
   2. **Redis cache (L1)** — exact/near-exact match on the normalized question, scoped by
-     board+grade+subject+medium.
+     board+grade+subject+medium. A hit refreshes its own TTL (`GETEX`, not `GET`) — a sliding
+     expiration, so a genuinely popular question stays cached as long as it keeps getting asked
+     instead of expiring on a fixed clock from whenever it was first written. When an admin rejects
+     or deletes the matching answer-bank entry at `/admin/answer-bank`, the web app calls
+     `POST /v1/cache/invalidate` on the orchestrator to evict that Redis key immediately, so a
+     demoted answer can't keep being served from cache until its TTL happens to run out.
   3. **Postgres full-text answer bank (L2)** — `answered_questions` table
      (`supabase/migrations/0005_answer_bank.sql`), searched with Postgres full-text search
      (`ts_rank`, BM25-style lexical ranking) rather than vector/semantic search: a

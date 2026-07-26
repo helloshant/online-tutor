@@ -2,7 +2,7 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
-import { getCachedAnswer, setCachedAnswer } from "./cache.js";
+import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
 import { getChatReply } from "./llm.js";
 import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
@@ -185,6 +185,35 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     console.error("LLM chat completion failed:", err);
     res.status(502).json({ error: "The tutor is temporarily unavailable. Please try again shortly." });
   }
+});
+
+// Called by the web app's admin answer-bank review page when an entry is
+// rejected or deleted, so the demoted/removed answer stops being served
+// from cache right away instead of surviving until its TTL runs out. The
+// web app has the full scope (it's rendering the row already), so it's
+// passed through directly rather than looked up here.
+app.post("/v1/cache/invalidate", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<AnswerScope> | undefined;
+
+  if (
+    !body ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.medium !== "string" ||
+    !body.medium ||
+    typeof body.question !== "string" ||
+    !body.question
+  ) {
+    res.status(400).json({ error: "boardId, gradeId, subjectId, medium, and question are required" });
+    return;
+  }
+
+  await deleteCachedAnswer(body as AnswerScope);
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {

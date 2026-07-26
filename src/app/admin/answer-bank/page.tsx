@@ -100,7 +100,16 @@ export default async function AnswerBankPage({
                   </form>
                 )}
                 {row.validation_status !== "rejected" && (
-                  <form action={rejectAnswer.bind(null, row.id)}>
+                  <form
+                    action={rejectAnswer.bind(null, {
+                      id: row.id,
+                      boardId: row.board_id,
+                      gradeId: row.grade_id,
+                      subjectId: row.subject_id,
+                      medium: row.medium,
+                      question: row.question,
+                    })}
+                  >
                     <button className="font-medium text-red-600 hover:underline">Reject</button>
                   </form>
                 )}
@@ -109,7 +118,16 @@ export default async function AnswerBankPage({
                     <button className="text-foreground/60 hover:underline">Reset to auto</button>
                   </form>
                 )}
-                <form action={deleteAnswer.bind(null, row.id)}>
+                <form
+                  action={deleteAnswer.bind(null, {
+                    id: row.id,
+                    boardId: row.board_id,
+                    gradeId: row.grade_id,
+                    subjectId: row.subject_id,
+                    medium: row.medium,
+                    question: row.question,
+                  })}
+                >
                   <button className="text-foreground/40 hover:underline">Delete</button>
                 </form>
               </div>

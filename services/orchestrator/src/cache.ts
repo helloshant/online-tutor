@@ -46,9 +46,13 @@ export async function getCachedAnswer(scope: AnswerScope): Promise<string | null
   const c = await getClient();
   if (!c) return null;
   try {
-    return await c.get(cacheKey(scope));
+    // GETEX (not plain GET) resets the TTL on every hit -- a sliding
+    // expiration, so a genuinely popular question stays cached as long as
+    // it keeps getting asked, instead of expiring on a fixed clock from
+    // whenever it was first written regardless of how often it's reused.
+    return await c.getEx(cacheKey(scope), { EX: CACHE_TTL_SECONDS });
   } catch (err) {
-    console.error("Redis GET failed:", err);
+    console.error("Redis GETEX failed:", err);
     return null;
   }
 }
@@ -60,5 +64,18 @@ export async function setCachedAnswer(scope: AnswerScope, answer: string): Promi
     await c.set(cacheKey(scope), answer, { EX: CACHE_TTL_SECONDS });
   } catch (err) {
     console.error("Redis SET failed:", err);
+  }
+}
+
+// Used when an admin rejects or deletes the corresponding answer-bank
+// entry, so a demoted answer stops being served from cache immediately
+// instead of surviving until its TTL runs out.
+export async function deleteCachedAnswer(scope: AnswerScope): Promise<void> {
+  const c = await getClient();
+  if (!c) return;
+  try {
+    await c.del(cacheKey(scope));
+  } catch (err) {
+    console.error("Redis DEL failed:", err);
   }
 }

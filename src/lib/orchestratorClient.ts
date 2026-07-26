@@ -67,3 +67,37 @@ export async function getOrchestratedReply(
   }
   return { reply: body.reply, source: body.source };
 }
+
+export type CacheInvalidationScope = {
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  question: string;
+};
+
+// Best-effort: called after an admin rejects or deletes an answer-bank
+// entry so the demoted/removed answer stops being served from the
+// orchestrator's Redis cache immediately, instead of surviving until its
+// TTL runs out. Never throws -- the Postgres update/delete is the source of
+// truth and must still succeed even if the orchestrator or Redis is
+// unreachable; worst case is a stale cache entry for up to the TTL.
+export async function invalidateCachedAnswer(scope: CacheInvalidationScope): Promise<void> {
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+  try {
+    const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/cache/invalidate`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+      },
+      body: JSON.stringify(scope),
+    });
+    if (!res.ok) {
+      console.error(`Cache invalidation request failed with status ${res.status}`);
+    }
+  } catch (err) {
+    console.error("Cache invalidation request failed:", err);
+  }
+}
