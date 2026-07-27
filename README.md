@@ -107,7 +107,9 @@ touching the web app or each other.
 
 ## How it works
 
-1. **Sign up** — email/password via Supabase Auth (`/signup`, `/login`).
+1. **Sign up** — email/password or "Continue with Google" via Supabase Auth (`/signup`, `/login`).
+   See "Authentication" below for OAuth setup, password reset, and the native-password expiry
+   policy.
 2. **Onboarding** (`/onboarding`) — pick a board (e.g. CBSE, ICSE, West Bengal Board), a grade,
    the subjects offered for that board+grade, and a medium of instruction (English / Hindi /
    Bengali). This creates a `pending_payment` subscription.
@@ -178,6 +180,11 @@ See `supabase/migrations/` for the full schema:
 - `0010_topic_exercises.sql` — `topic_exercises` (`topic_id`, `question`, `solution`, `sort_order`),
   FK'd to `syllabus_topics` with `on delete cascade`. Same RLS shape as the syllabus tables:
   readable by any authenticated user, writable only by admins. See "Topic exercises" below.
+- `0011_password_lifecycle.sql` — adds `profiles.password_changed_at`; updates
+  `handle_new_tutorops_user()` to also coalesce Google's `'name'` metadata key (not just the app's
+  own `'full_name'`) and to stamp `password_changed_at` at signup when a password was set; adds an
+  `auth.users` update trigger that re-stamps it on every later password change. See
+  "Authentication" below.
 
 ### Medium-scoped syllabus storage
 
@@ -224,6 +231,47 @@ history), not a dedicated API route: `syllabus_topics` and `topic_exercises` are
 by any authenticated user under RLS (the same policy the admin catalog itself relies on), so a
 proxy route would add a network hop without adding any actual access control. Staff accounts skip
 this panel entirely — they aren't scoped to one board/grade, which is what the panel is keyed on.
+
+### Authentication
+
+Three additions on top of Supabase Auth's default email/password:
+
+- **Google sign-in.** Both `/login` and `/signup` have a "Continue with Google" button
+  (`src/components/google-signin-button.tsx`) alongside the native form — additive, not a
+  replacement, since not every student has a personal Google account. `src/app/auth/callback/route.ts`
+  is the single landing spot for every flow that redirects back with a `code` to exchange for a
+  session: Google OAuth and the password-recovery email link both go through it, distinguished only
+  by a `?next=` query param (`/dashboard` vs `/reset-password`).
+
+  **Setup required in two places**, since this app doesn't have its own Google OAuth client:
+  1. Google Cloud Console → APIs & Services → Credentials → create an OAuth Client ID (Web
+     application). Add `https://<your-project-ref>.supabase.co/auth/v1/callback` as an authorized
+     redirect URI.
+  2. Supabase Dashboard → Authentication → Providers → Google → paste that Client ID/Secret in and
+     enable the provider. Also add your app's own origin(s) (e.g. `http://localhost:3000`, your
+     production domain) to Authentication → URL Configuration → Redirect URLs, or the callback
+     route's redirect will be rejected.
+
+  Google's OAuth payload doesn't populate `raw_user_meta_data ->> 'full_name'` the way the app's
+  own signup form does — it uses `'name'` instead — so `handle_new_tutorops_user()`
+  (`0011_password_lifecycle.sql`) coalesces both.
+
+- **Password reset.** "Forgot password?" on `/login` → `/forgot-password` (enter email, calls
+  `resetPasswordForEmail`) → emailed link → `/auth/callback?next=/reset-password` → `/reset-password`
+  (set a new password via `updateUser`). The forgot-password confirmation message is identical
+  whether or not the email is actually registered, so the form can't be used to enumerate accounts.
+
+- **Password expiry (native accounts only).** `profiles.password_changed_at` is stamped by two
+  triggers in `0011_password_lifecycle.sql`: once at signup (only if the account was created with a
+  password — null for a Google-only signup) and again on every subsequent password change, so
+  application code never has to remember to update it manually. `isPasswordExpired()` /
+  `requireFreshPassword()` (`src/lib/auth.ts`) treat a null `password_changed_at` as "not
+  applicable" rather than "expired" — a Google-only account has no password with this app to expire.
+  The expiry window is a constant, `PASSWORD_EXPIRY_DAYS = 90`, in the same file. `requireAdmin()`
+  and `requireSuperAdmin()` call `requireFreshPassword()` (so every admin page is covered), and
+  `/dashboard` calls it directly; an expired native account is redirected to `/change-password`,
+  which reuses the same form and action as `/reset-password` (the underlying operation is
+  identical, just reached from an active session instead of a recovery link).
 
 ### User management (CRUD)
 

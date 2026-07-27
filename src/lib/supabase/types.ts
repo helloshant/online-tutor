@@ -15,6 +15,10 @@ export type Profile = {
   id: string;
   full_name: string | null;
   role: ProfileRole;
+  // Null for an OAuth-only (Google) account -- it has no password with this
+  // app to expire. Set at signup for a native account and re-stamped on
+  // every password change (see 0011_password_lifecycle.sql).
+  password_changed_at: string | null;
   created_at: string;
 };
 

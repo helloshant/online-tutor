@@ -31,6 +31,27 @@ export async function requireUser() {
   return session;
 }
 
+// Only native (email/password) accounts have a password to expire --
+// password_changed_at is null for an OAuth-only (Google) account, since it
+// never set one with this app. See 0011_password_lifecycle.sql.
+const PASSWORD_EXPIRY_DAYS = 90;
+
+export function isPasswordExpired(profile: Profile | null): boolean {
+  if (!profile?.password_changed_at) return false;
+  const ageMs = Date.now() - new Date(profile.password_changed_at).getTime();
+  return ageMs > PASSWORD_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+}
+
+// Like requireUser(), but also forces a native-account user with an expired
+// password to set a new one before continuing. Callers that are themselves
+// reached from /change-password (i.e. the change-password page) must use
+// requireUser() directly instead, or this would redirect-loop.
+export async function requireFreshPassword() {
+  const session = await requireUser();
+  if (isPasswordExpired(session.profile)) redirect("/change-password");
+  return session;
+}
+
 export function isStaff(role: Profile["role"] | undefined): boolean {
   return role === "admin" || role === "superadmin";
 }
@@ -38,13 +59,13 @@ export function isStaff(role: Profile["role"] | undefined): boolean {
 // Admin panel access: both staff tiers. Role management inside the panel is
 // further restricted to superadmin only -- see requireSuperAdmin().
 export async function requireAdmin() {
-  const session = await requireUser();
+  const session = await requireFreshPassword();
   if (!isStaff(session.profile?.role)) redirect("/dashboard");
   return session;
 }
 
 export async function requireSuperAdmin() {
-  const session = await requireUser();
+  const session = await requireFreshPassword();
   if (session.profile?.role !== "superadmin") redirect("/admin");
   return session;
 }

@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
-import { isStaff, requireUser } from "@/lib/auth";
+import { isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { DashboardShell } from "./dashboard-shell";
 
 export default async function DashboardPage() {
-  const { user, profile } = await requireUser();
+  const { user, profile } = await requireFreshPassword();
   const supabase = await createClient();
 
   // Staff (admin/superadmin) never subscribe or pay -- they get every
