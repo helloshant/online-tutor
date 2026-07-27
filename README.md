@@ -116,11 +116,13 @@ touching the web app or each other.
 3. **Payment** (`/subscribe`) — Razorpay Checkout. On success the payment signature is verified
    server-side and the subscription is flipped to `active`.
 4. **Dashboard** (`/dashboard`) — left panel lists the subscribed subjects; selecting one scopes
-   the right-hand chat panel to that subject, and opens a middle syllabus panel listing every
-   chapter and topic for that subject. Every message is answered by Claude, constrained by
-   a system prompt built from the syllabus topics stored for that board/grade/subject, in the
-   subscribed medium. Clicking a topic opens an LLM-generated summary of it, plus a "Relevant
-   Exercises" button — see "Topic summaries and relevant exercises" below.
+   the right-hand chat panel to that subject, and opens a syllabus panel listing every chapter and
+   topic for that subject. Every message is answered by Claude, constrained by a system prompt
+   built from the syllabus topics stored for that board/grade/subject, in the subscribed medium.
+   Clicking a topic opens a further panel alongside the syllabus list and the chat (not a modal
+   over them) with an LLM-generated summary and a "Relevant Exercises" button, so a student can
+   keep both visible while asking the tutor about it in the same view — see "Topic summaries and
+   relevant exercises" below.
 5. **Admin panel** (`/admin`) — lists every user with their board/grade/medium/subjects/status and
    lets an admin promote/demote admins and cancel subscriptions. `/admin/catalog` manages boards,
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
@@ -225,13 +227,17 @@ pattern the chat panel uses for message history), since that table is already re
 authenticated user under RLS. Staff accounts skip this panel entirely — they aren't scoped to one
 board/grade, which is what the panel is keyed on.
 
-Clicking a topic opens a modal with two things, both LLM-backed and unlike the syllabus topics
-themselves, generated rather than hand-entered:
+Clicking a topic opens a third panel (`TopicDetailPanel` in `syllabus-panel.tsx`) alongside the
+syllabus list and the chat, not a modal over them — a student can keep a topic's summary/exercises
+visible while still typing questions to the tutor about it in the same view. Both panels are
+siblings in the same flex row (`SyllabusPanel` returns them as a fragment), so the layout reads
+left-to-right as subjects → syllabus → topic detail → chat. It shows two things, both LLM-backed
+and unlike the syllabus topics themselves, generated rather than hand-entered:
 
 - **Summary.** `GET /api/topics/[id]/summary` resolves the topic's board/grade/subject names
   server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks
   `topic_summaries` for an existing row before calling the LLM. A summary is generated once per
-  topic and reused by every student who clicks it after that — the modal never regenerates one
+  topic and reused by every student who clicks it after that — the panel never regenerates one
   that already exists.
 - **Relevant Exercises**, a separate button shown once the summary loads. `GET
   /api/topics/[id]/exercises` proxies to `/v1/topic-exercises`, which searches the existing answer
