@@ -18,6 +18,8 @@ import type {
   AnswerScope,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
+  ImageAttachment,
+  ImageMediaType,
   Medium,
   TopicExercisesRequest,
   TopicExercisesResponse,
@@ -32,6 +34,12 @@ const EXERCISE_MAX_TOKENS = 2048;
 const EXERCISE_GENERATION_COUNT = 5;
 const SHARED_SECRET = process.env.ORCHESTRATOR_SHARED_SECRET;
 
+const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+// ~4.3MB decoded (base64 runs ~37% larger than raw bytes) -- comfortably
+// under the JSON body limit below, which also has to fit the rest of the
+// request (history, syllabus topics, etc).
+const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
+
 if (!SHARED_SECRET) {
   console.warn(
     "WARNING: ORCHESTRATOR_SHARED_SECRET is not set. This service will accept requests from " +
@@ -41,7 +49,28 @@ if (!SHARED_SECRET) {
 }
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// Raised from the original 1mb to fit a base64-encoded screenshot/photo.
+app.use(express.json({ limit: "8mb" }));
+
+// Returns `undefined` when no image was sent (valid -- most requests have
+// none), an ImageAttachment when one was and it's valid, or throws-shaped
+// via the returned `error` string when one was sent but malformed.
+function parseImageField(raw: unknown): { image?: ImageAttachment; error?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object") return { error: "image must be an object" };
+
+  const { mediaType, base64 } = raw as { mediaType?: unknown; base64?: unknown };
+  if (typeof mediaType !== "string" || !ALLOWED_IMAGE_TYPES.has(mediaType as ImageMediaType)) {
+    return { error: "image.mediaType must be one of image/jpeg, image/png, image/gif, image/webp" };
+  }
+  if (typeof base64 !== "string" || !base64) {
+    return { error: "image.base64 is required" };
+  }
+  if (base64.length > MAX_IMAGE_BASE64_LENGTH) {
+    return { error: "image is too large" };
+  }
+  return { image: { mediaType: mediaType as ImageMediaType, base64 } };
+}
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -79,8 +108,19 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     res.status(400).json({ error: "subjectName is required" });
     return;
   }
-  if (typeof body.message !== "string" || !body.message.trim()) {
+  if (typeof body.message !== "string") {
     res.status(400).json({ error: "message is required" });
+    return;
+  }
+  const { image, error: imageError } = parseImageField((body as { image?: unknown }).image);
+  if (imageError) {
+    res.status(400).json({ error: imageError });
+    return;
+  }
+  // A screenshot/photo carries its own content -- an empty caption is only
+  // invalid when there's nothing else attached.
+  if (!body.message.trim() && !image) {
+    res.status(400).json({ error: "message or image is required" });
     return;
   }
   const history = Array.isArray(body.history) ? body.history : [];
@@ -93,16 +133,17 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
   if (body.mode === "staff") {
     try {
       const { text, model, usage } = await getChatReply({
-        systemPrompt: buildStaffSystemPrompt(body.subjectName),
+        systemPrompt: buildStaffSystemPrompt(body.subjectName, Boolean(image)),
         history,
         message: body.message,
+        image,
         maxTokens: MAX_TOKENS,
       });
       void recordChatEvent({
         userId: body.userId,
         mode: "staff",
         subjectId: body.subjectId,
-        question: body.message,
+        question: body.message.trim() || "[Image question]",
         source: "llm",
         provider: getActiveLlmProvider(),
         model,
@@ -154,7 +195,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       gradeId: studentBody.gradeId,
       subjectId: studentBody.subjectId,
       medium: studentBody.medium,
-      question: studentBody.message,
+      question: studentBody.message.trim() || "[Image question]",
       source: "rejected",
       latencyMs: Date.now() - startedAt,
     });
@@ -163,21 +204,26 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     return;
   }
 
-  // Stages 2-3 (cache, then the Postgres answer bank) only apply to a fresh
-  // question, not a follow-up ("explain more", "why?") -- those depend on
-  // conversation context that a scope-only lookup key can't capture, so
-  // serving one from cache/db risks answering the wrong thing. Follow-ups go
-  // straight to the LLM and are never written back into cache/db.
+  // Stages 2-3 (cache, then the Postgres answer bank) only apply to a fresh,
+  // text-only question, not a follow-up ("explain more", "why?") -- those
+  // depend on conversation context that a scope-only lookup key can't
+  // capture, so serving one from cache/db risks answering the wrong thing.
+  // An image-bearing question is excluded the same way: the lookup key is
+  // the message text, which doesn't represent what's actually in the image,
+  // so a text match here would be coincidental at best and wrong at worst.
+  // Both cases go straight to the LLM and are never written back into
+  // cache/db.
   const isFreshQuestion = history.length === 0;
-  const scope: AnswerScope | null = isFreshQuestion
-    ? {
-        boardId: studentBody.boardId,
-        gradeId: studentBody.gradeId,
-        subjectId: studentBody.subjectId,
-        medium: studentBody.medium,
-        question: studentBody.message,
-      }
-    : null;
+  const scope: AnswerScope | null =
+    isFreshQuestion && !image
+      ? {
+          boardId: studentBody.boardId,
+          gradeId: studentBody.gradeId,
+          subjectId: studentBody.subjectId,
+          medium: studentBody.medium,
+          question: studentBody.message,
+        }
+      : null;
 
   if (scope) {
     const cached = await getCachedAnswer(scope);
@@ -229,6 +275,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     medium: studentBody.medium,
     topics: studentBody.topics,
     message: studentBody.message,
+    hasImage: Boolean(image),
   });
 
   try {
@@ -236,6 +283,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       systemPrompt,
       history,
       message: studentBody.message,
+      image,
       maxTokens: MAX_TOKENS,
     });
 
@@ -260,7 +308,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       gradeId: studentBody.gradeId,
       subjectId: studentBody.subjectId,
       medium: studentBody.medium,
-      question: studentBody.message,
+      question: studentBody.message.trim() || "[Image question]",
       source: "llm",
       provider: getActiveLlmProvider(),
       model,

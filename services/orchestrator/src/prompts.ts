@@ -8,8 +8,9 @@ export function buildTutorSystemPrompt(params: {
   medium: Medium;
   topics: SyllabusTopic[];
   message: string;
+  hasImage?: boolean;
 }): string {
-  const { subjectName, boardName, gradeName, medium, topics, message } = params;
+  const { subjectName, boardName, gradeName, medium, topics, message, hasImage } = params;
 
   // Full chapter list (cheap: titles only) always defines the scope
   // boundary. Only topics relevant to the current question get full detail,
@@ -24,8 +25,14 @@ export function buildTutorSystemPrompt(params: {
   const detailSection = relevantTopics.length
     ? `\n\nDetailed topics most relevant to the current question (use these for specifics; the chapter list above is the overall boundary, not everything in the syllabus has detail loaded here):\n${relevantTopics.map((t) => `- ${t.chapter}: ${t.topic}`).join("\n")}`
     : "";
+  // The image itself is a separate content block the model reads directly
+  // (vision), not OCR'd into text first -- this just tells it what to
+  // expect and how to treat a missing/short caption.
+  const imageNote = hasImage
+    ? "\n\nThe student has attached a screenshot or photo (e.g. of a textbook question or their own handwritten work). Read whatever text, problem, or working is shown in it and treat that as their question, even if their typed message is empty or just a short caption."
+    : "";
 
-  return `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.
+  return `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.${imageNote}
 
 Hard rules, in order of priority:
 1. Respond ONLY in ${medium}, regardless of what language the student writes in.
@@ -84,8 +91,12 @@ ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 // subscribe, so their chat isn't locked to one board/grade/syllabus/medium --
 // this is deliberately the "all privileges" unrestricted mode, mainly for
 // platform staff to explore and QA subject coverage.
-export function buildStaffSystemPrompt(subjectName: string): string {
-  return `You are a knowledgeable tutor and subject-matter expert in ${subjectName}, talking with a member of the platform's staff (not a specific student). They have full access and are not restricted to any single board, grade, or syllabus.
+export function buildStaffSystemPrompt(subjectName: string, hasImage?: boolean): string {
+  const imageNote = hasImage
+    ? "\n\nThey've attached a screenshot or photo. Read whatever text, problem, or working is shown in it and treat that as their question, even if their typed message is empty or just a short caption."
+    : "";
+
+  return `You are a knowledgeable tutor and subject-matter expert in ${subjectName}, talking with a member of the platform's staff (not a specific student). They have full access and are not restricted to any single board, grade, or syllabus.${imageNote}
 
 Guidelines:
 1. Only answer questions about ${subjectName}. If they ask about a different subject, point out they can switch subjects using the left panel.

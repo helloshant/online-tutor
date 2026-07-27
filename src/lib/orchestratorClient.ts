@@ -4,6 +4,12 @@ import type { Medium } from "@/lib/supabase/types";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
+// Mirrors the orchestrator's ImageMediaType/ImageAttachment exactly (see
+// services/orchestrator/src/types.ts) -- kept in sync by hand, same as
+// every other request/response shape duplicated in this file.
+export type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+export type ImageAttachment = { mediaType: ImageMediaType; base64: string };
+
 // Everything the orchestration service needs to build a system prompt and
 // call the active LLM provider. Prompt engineering, syllabus-relevance
 // filtering, and provider selection all live in that service now -- this
@@ -22,6 +28,7 @@ export type ChatOrchestrationRequest =
       medium: Medium;
       topics: { chapter: string; topic: string }[];
       message: string;
+      image?: ImageAttachment | null;
       history: ChatTurn[];
     }
   | {
@@ -30,6 +37,7 @@ export type ChatOrchestrationRequest =
       subjectId: string;
       subjectName: string;
       message: string;
+      image?: ImageAttachment | null;
       history: ChatTurn[];
     };
 

@@ -2,10 +2,19 @@ export type Medium = "English" | "Hindi" | "Bengali";
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type SyllabusTopic = { chapter: string; topic: string };
 
+// Matches Anthropic's Base64ImageSource media_type union exactly, so no
+// runtime cast is needed when building the content block.
+export type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+export type ImageAttachment = { mediaType: ImageMediaType; base64: string };
+
 // What the web app sends. `mode: "student"` requires board/grade/medium/
 // topics (the full, unfiltered syllabus for that board+grade+subject --
 // filtering to what's relevant happens in here, not in the caller).
 // `mode: "staff"` is deliberately unrestricted: no board/grade/syllabus.
+// `image` is optional in both modes -- a screenshot/photo of a problem,
+// read directly by the vision-capable model rather than run through a
+// separate OCR step (see server.ts for why this also means skipping the
+// cache/answer-bank stages).
 export type ChatOrchestrationRequest =
   | {
       mode: "student";
@@ -19,6 +28,7 @@ export type ChatOrchestrationRequest =
       medium: Medium;
       topics: SyllabusTopic[];
       message: string;
+      image?: ImageAttachment | null;
       history: ChatTurn[];
     }
   | {
@@ -27,6 +37,7 @@ export type ChatOrchestrationRequest =
       subjectId: string;
       subjectName: string;
       message: string;
+      image?: ImageAttachment | null;
       history: ChatTurn[];
     };
 

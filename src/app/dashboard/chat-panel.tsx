@@ -17,9 +17,42 @@ interface SubjectSummary {
 // dashboard-shell.tsx's topicClick prop below) -- never persisted, just
 // slotted into the same visual timeline so a student can ask a follow-up
 // about it without leaving the conversation.
+//
+// previewImageUrl is client-only too: the image itself is never persisted
+// (see chat/route.ts), so this only keeps a just-sent screenshot visible in
+// the timeline for the rest of the browser session -- it's lost on reload,
+// same as the image on the server side.
 type TimelineEntry =
-  | { kind: "message"; message: ChatMessage }
+  | { kind: "message"; message: ChatMessage; previewImageUrl?: string }
   | { kind: "topic"; entryId: string; topic: SyllabusTopic };
+
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+// Mirrors the server-side cap (~4.3MB decoded) so an oversized file is
+// rejected client-side with an immediate message instead of a round trip.
+const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
+
+type SelectedImage = { mediaType: string; base64: string; dataUrl: string };
+
+function readImageFile(file: File): Promise<SelectedImage> {
+  return new Promise((resolve, reject) => {
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      reject(new Error("Please attach a JPEG, PNG, GIF, or WebP image."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that image. Please try again."));
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      if (base64.length > MAX_IMAGE_BASE64_LENGTH) {
+        reject(new Error("That image is too large. Please attach something under ~4MB."));
+        return;
+      }
+      resolve({ mediaType: file.type, base64, dataUrl });
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export function ChatPanel({
   subscriptionId,
@@ -39,8 +72,10 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,13 +124,27 @@ export function ChatPanel({
     ]);
   }, [topicClick]);
 
+  async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      setError(null);
+      setSelectedImage(await readImageFile(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that image.");
+    }
+  }
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed || sending) return;
+    const image = selectedImage;
+    if ((!trimmed && !image) || sending) return;
 
     setError(null);
     setInput("");
+    setSelectedImage(null);
     setSending(true);
 
     const optimisticMessage: ChatMessage = {
@@ -104,16 +153,23 @@ export function ChatPanel({
       subscription_id: subscriptionId,
       subject_id: subject.id,
       role: "user",
-      content: trimmed,
+      content: trimmed || "[Image]",
       created_at: new Date().toISOString(),
     };
-    setTimeline((prev) => [...prev, { kind: "message", message: optimisticMessage }]);
+    setTimeline((prev) => [
+      ...prev,
+      { kind: "message", message: optimisticMessage, previewImageUrl: image?.dataUrl },
+    ]);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjectId: subject.id, message: trimmed }),
+        body: JSON.stringify({
+          subjectId: subject.id,
+          message: trimmed,
+          image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
+        }),
       });
       const body = await res.json();
 
@@ -123,7 +179,7 @@ export function ChatPanel({
 
       setTimeline((prev) => [
         ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
-        { kind: "message", message: body.userMessage as ChatMessage },
+        { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
         { kind: "message", message: body.assistantMessage as ChatMessage },
       ]);
     } catch (err) {
@@ -131,6 +187,7 @@ export function ChatPanel({
         prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id)
       );
       setInput(trimmed);
+      setSelectedImage(image);
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setSending(false);
@@ -170,7 +227,17 @@ export function ChatPanel({
                     : "border border-border bg-surface text-foreground"
                 }`}
               >
-                <MathText text={entry.message.content} />
+                {entry.previewImageUrl && (
+                  // A transient client-side data URL, never persisted, so
+                  // next/image's remote-loader/optimization machinery doesn't apply.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={entry.previewImageUrl}
+                    alt="Attached"
+                    className="mb-2 max-h-48 rounded-lg border border-white/20"
+                  />
+                )}
+                {entry.message.content !== "[Image]" && <MathText text={entry.message.content} />}
               </div>
             </div>
           )
@@ -186,7 +253,37 @@ export function ChatPanel({
 
       <form onSubmit={sendMessage} className="shrink-0 border-t border-border bg-surface p-4">
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+        {selectedImage && (
+          <div className="mb-2 flex w-fit items-center gap-2 rounded-lg border border-border bg-background p-1.5 pr-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- transient local preview, never persisted */}
+            <img src={selectedImage.dataUrl} alt="Selected" className="h-10 w-10 rounded object-cover" />
+            <button
+              type="button"
+              onClick={() => setSelectedImage(null)}
+              className="text-xs text-foreground/50 hover:text-foreground"
+            >
+              Remove
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            onChange={handleImagePick}
+            disabled={sending}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending}
+            title="Attach a screenshot or photo"
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
+          >
+            📎
+          </button>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -196,7 +293,7 @@ export function ChatPanel({
           />
           <button
             type="submit"
-            disabled={sending || !input.trim()}
+            disabled={sending || (!input.trim() && !selectedImage)}
             // Browser extensions (password managers, Grammarly, etc.) commonly
             // patch the `disabled` attribute on form buttons before React
             // hydrates, which triggers a false-positive hydration mismatch

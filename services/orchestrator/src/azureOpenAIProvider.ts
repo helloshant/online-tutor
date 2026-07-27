@@ -1,5 +1,5 @@
 import { AzureOpenAI } from "openai";
-import type { ChatTurn, LlmReply } from "./types.js";
+import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
 
 const DEFAULT_DEPLOYMENT = "gpt-4o";
 const DEFAULT_API_VERSION = "2024-08-01-preview";
@@ -32,16 +32,28 @@ export async function getAzureOpenAIReply(params: {
   history: ChatTurn[];
   message: string;
   maxTokens: number;
+  image?: ImageAttachment | null;
 }): Promise<LlmReply> {
-  const { systemPrompt, history, message, maxTokens } = params;
+  const { systemPrompt, history, message, maxTokens, image } = params;
   const client = getClient();
+
+  // OpenAI's vision format: an image_url part with a data: URI, alongside
+  // the caption if one was typed -- same reasoning as the Anthropic
+  // provider's text-part omission when there's no caption.
+  const userContent = image
+    ? [
+        { type: "image_url" as const, image_url: { url: `data:${image.mediaType};base64,${image.base64}` } },
+        ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
+      ]
+    : message;
+
   const completion = await client.chat.completions.create({
     model: AZURE_OPENAI_DEPLOYMENT,
     max_tokens: maxTokens,
     messages: [
       { role: "system", content: systemPrompt },
       ...history.map((turn) => ({ role: turn.role, content: turn.content })),
-      { role: "user" as const, content: message },
+      { role: "user" as const, content: userContent },
     ],
   });
   return {

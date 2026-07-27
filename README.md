@@ -276,6 +276,40 @@ arbitrary HTML injection through its LaTeX parser, so this is safe even though t
 rendered is LLM-generated. `throwOnError: false` renders a parse error inline (in red) rather than
 crashing the message it's in.
 
+### Image / screenshot questions (vision, not OCR)
+
+Students and staff can attach a screenshot or photo to a chat message — e.g. a textbook question or
+their own handwritten working — via the paperclip button next to the chat input
+(`src/app/dashboard/chat-panel.tsx`). There's no separate OCR pass: the image is sent to the LLM
+directly as an image content block (Anthropic's `image`/`base64` source, or OpenAI/Azure's
+`image_url` data URI in `azureOpenAIProvider.ts`), and the model reads whatever text, diagram, or
+handwriting is in it as part of answering — simpler and higher-quality than OCR-then-prompt, since
+the model reasons over the actual image rather than a lossy text transcription of it. A typed
+caption is optional; an image with no caption is still a complete question.
+
+A few deliberate scope decisions:
+
+- **Images are never persisted.** There's no Supabase Storage bucket for them — the browser reads
+  the file as a base64 data URL (`FileReader`, no upload step) and sends it straight through to
+  `/api/chat` → the orchestrator → the LLM for that one exchange only. `chat_messages.content`
+  (`NOT NULL`) stores the typed caption, or the placeholder `"[Image]"` when the message was
+  image-only, so history stays legible — but the image itself is gone once you leave the page. The
+  attached thumbnail is shown inline in the timeline only for the rest of that browser session
+  (`previewImageUrl` on the client-side `TimelineEntry`, never written to the database); reloading
+  the page keeps the caption/placeholder text but loses the picture.
+- **Image-bearing questions skip the cache and answer bank.** Both are keyed on the message's text
+  (`services/orchestrator/src/server.ts`); an image's content isn't represented in that text, so a
+  text-only lookup key would risk serving (or writing back) an answer that doesn't actually match
+  what's in the picture. Every image question goes straight to stage 4 (the LLM) and is never
+  cached or written into the answer bank, the same way a follow-up question in an existing
+  conversation already bypasses those stages.
+- **Size and type caps**, enforced independently at the browser (`chat-panel.tsx`), the Next.js API
+  route (`src/app/api/chat/route.ts`), and the orchestrator (`server.ts`) — a request that skips the
+  browser check (e.g. a direct API call) is still rejected server-side: JPEG/PNG/GIF/WebP only, and
+  roughly 4.3MB decoded (6,000,000 base64 characters, accounting for base64's ~37% size overhead).
+  The orchestrator's Express JSON body limit was raised from `1mb` to `8mb` to fit a base64-encoded
+  image alongside the rest of a chat request (history, syllabus topics, etc).
+
 ### Authentication
 
 Three additions on top of Supabase Auth's default email/password:

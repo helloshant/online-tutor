@@ -2,11 +2,44 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import { getOrchestratedReply, type ChatOrchestrationRequest } from "@/lib/orchestratorClient";
+import {
+  getOrchestratedReply,
+  type ChatOrchestrationRequest,
+  type ImageAttachment,
+  type ImageMediaType,
+} from "@/lib/orchestratorClient";
 import type { ChatMessage } from "@/lib/supabase/types";
 
 const HISTORY_LIMIT = 20;
 const MAX_MESSAGE_LENGTH = 2000;
+
+// Mirrors the orchestrator's own caps (services/orchestrator/src/server.ts)
+// so an oversized/unsupported image is rejected here, before it's even sent
+// over the wire.
+const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
+
+// Placeholder stored in chat_messages.content (NOT NULL) when a message is
+// image-only -- the image itself is never persisted (see route body), so
+// this keeps history legible without claiming to store the image.
+const IMAGE_ONLY_PLACEHOLDER = "[Image]";
+
+function parseImageField(raw: unknown): { image?: ImageAttachment; error?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object") return { error: "image must be an object" };
+
+  const { mediaType, base64 } = raw as { mediaType?: unknown; base64?: unknown };
+  if (typeof mediaType !== "string" || !ALLOWED_IMAGE_TYPES.has(mediaType as ImageMediaType)) {
+    return { error: "image.mediaType must be one of image/jpeg, image/png, image/gif, image/webp" };
+  }
+  if (typeof base64 !== "string" || !base64) {
+    return { error: "image.base64 is required" };
+  }
+  if (base64.length > MAX_IMAGE_BASE64_LENGTH) {
+    return { error: "image is too large" };
+  }
+  return { image: { mediaType: mediaType as ImageMediaType, base64 } };
+}
 
 export async function POST(request: Request) {
   // Every code path below must return through NextResponse.json — this
@@ -34,9 +67,18 @@ async function handleChatRequest(request: Request) {
   const body = await request.json().catch(() => null);
   const subjectId = typeof body?.subjectId === "string" ? body.subjectId : "";
   const message = typeof body?.message === "string" ? body.message.trim() : "";
+  const { image, error: imageError } = parseImageField(body?.image);
 
-  if (!subjectId || !message) {
-    return NextResponse.json({ error: "subjectId and message are required" }, { status: 400 });
+  if (!subjectId) {
+    return NextResponse.json({ error: "subjectId is required" }, { status: 400 });
+  }
+  if (imageError) {
+    return NextResponse.json({ error: imageError }, { status: 400 });
+  }
+  // A screenshot/photo carries its own question -- an empty typed message is
+  // only invalid when there's nothing else attached.
+  if (!message && !image) {
+    return NextResponse.json({ error: "message or image is required" }, { status: 400 });
   }
   if (message.length > MAX_MESSAGE_LENGTH) {
     return NextResponse.json({ error: "Message is too long" }, { status: 400 });
@@ -59,6 +101,7 @@ async function handleChatRequest(request: Request) {
       subjectId,
       subjectName: subject.name,
       message,
+      image,
       history: [],
     };
   } else {
@@ -116,6 +159,7 @@ async function handleChatRequest(request: Request) {
       medium: subscription.medium,
       topics: topics ?? [],
       message,
+      image,
       history: [],
     };
   }
@@ -158,7 +202,11 @@ async function handleChatRequest(request: Request) {
         subscription_id: subscriptionId,
         subject_id: subjectId,
         role: "user",
-        content: message,
+        // The image itself is never persisted (not written to storage, only
+        // passed through to the LLM for this one exchange) -- content is
+        // NOT NULL, so an image-only message needs a placeholder to keep
+        // history legible after a reload, when the image is already gone.
+        content: message || IMAGE_ONLY_PLACEHOLDER,
       },
       {
         user_id: user.id,

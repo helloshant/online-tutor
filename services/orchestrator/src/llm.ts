@@ -1,6 +1,6 @@
 import { getAnthropicReply } from "./anthropicProvider.js";
 import { getAzureOpenAIReply } from "./azureOpenAIProvider.js";
-import type { ChatTurn, LlmReply } from "./types.js";
+import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
 
 export type LlmProvider = "anthropic" | "azure-openai";
 
@@ -14,6 +14,7 @@ export async function getChatReply(params: {
   history: ChatTurn[];
   message: string;
   maxTokens: number;
+  image?: ImageAttachment | null;
 }): Promise<LlmReply> {
   return getActiveLlmProvider() === "azure-openai" ? getAzureOpenAIReply(params) : getAnthropicReply(params);
 }
