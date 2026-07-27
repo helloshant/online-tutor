@@ -294,14 +294,25 @@ Three additions on top of Supabase Auth's default email/password:
 
 - **Admin-facing controls.** Both `/admin` (a Password column: `active` / `expired` / `Google
   only`) and `/admin/users/[id]` (a Password panel with the last-changed date and status) surface
-  this rather than it being purely self-service. From the detail page an admin can **send a
-  password reset email** on a user's behalf (`sendPasswordResetEmail` — same
-  `resetPasswordForEmail` call the self-service form uses, just looking up the target's email via
-  the service-role client instead of trusting a submitted one) or **force-expire** a password
-  immediately, e.g. after a suspected compromise, rather than waiting for it to age out
-  (`forcePasswordExpiry` — back-dates `password_changed_at` past the expiry window; a no-op for a
-  Google-only account, which has no password to expire). Both are gated by `requireAdminPage("users")`,
-  same as every other action on that page.
+  this rather than it being purely self-service. `password_changed_at` alone can't distinguish "no
+  password at all" from "has one but predates the 0011 tracking migration" — both are null — so
+  the real signal used for "does this account have a password" is whether Supabase's own
+  `identities` array for that user includes an `"email"` entry, not `password_changed_at`.
+
+  From the detail page an admin can:
+  - **Send a password reset email** on the user's behalf (`sendPasswordResetEmail` — same
+    `resetPasswordForEmail` call the self-service form uses, looking up the target's email via the
+    service-role client rather than trusting a submitted one).
+  - **Set a password directly** (`setUserPassword`, via `admin.auth.admin.updateUserById`) — works
+    even on a Google-only account, since Supabase allows attaching a password to any account
+    regardless of how it originally signed up; doing so is what gives that account an `"email"`
+    identity and turns on the rest of this panel.
+  - **Toggle expiry** with a checkbox (`setAccountExpired`) once a password exists: checking it
+    back-dates `password_changed_at` past the expiry window (e.g. after a suspected compromise);
+    unchecking it sets `password_changed_at` to now, the same effect a real password change would
+    have.
+
+  All three are gated by `requireAdminPage("users")`, same as every other action on that page.
 
 ### User management (CRUD)
 

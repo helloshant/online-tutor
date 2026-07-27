@@ -5,8 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   cancelSubscription,
   deleteUser,
-  forcePasswordExpiry,
   sendPasswordResetEmail,
+  setAccountExpired,
+  setUserPassword,
   setUserRole,
   updateUserProfile,
 } from "../../actions";
@@ -46,6 +47,10 @@ export default async function AdminUserDetailPage({
   // superadmin) so the button doesn't invite an action that's a no-op.
   const canDeleteTarget = id !== actingUser.id && (targetRole === "user" || isSuperAdminViewer);
   const passwordExpired = isPasswordExpired(profile);
+  // password_changed_at alone can't tell "no password" apart from "has a
+  // password but predates the tracking migration (0011)" -- both are null.
+  // Whether an "email" identity is actually linked is the real signal.
+  const hasPasswordIdentity = authUser.user.identities?.some((i) => i.provider === "email") ?? false;
 
   return (
     <div>
@@ -125,35 +130,58 @@ export default async function AdminUserDetailPage({
       <div className="mt-4 rounded-xl border border-border bg-surface p-6">
         <h2 className="text-sm font-semibold">Password</h2>
 
-        {!profile?.password_changed_at ? (
+        {hasPasswordIdentity ? (
           <p className="mt-1 text-sm text-foreground/60">
-            Signed in with Google only — no password with this app to reset or expire.
+            {profile?.password_changed_at ? (
+              <>Last changed {new Date(profile.password_changed_at).toLocaleDateString()} — </>
+            ) : (
+              "Last changed: unknown (predates tracking) — "
+            )}
+            <span className={passwordExpired ? "font-medium text-red-600" : "font-medium text-green-700"}>
+              {passwordExpired ? "expired" : "active"}
+            </span>
+            , same as any native account after {PASSWORD_EXPIRY_DAYS} days.
           </p>
         ) : (
-          <>
-            <p className="mt-1 text-sm text-foreground/60">
-              Last changed {new Date(profile.password_changed_at).toLocaleDateString()} —{" "}
-              <span className={passwordExpired ? "font-medium text-red-600" : "font-medium text-green-700"}>
-                {passwordExpired ? "expired" : "active"}
-              </span>
-              , same as any native account after {PASSWORD_EXPIRY_DAYS} days.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <form action={sendPasswordResetEmail.bind(null, id)}>
-                <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
-                  Send password reset email
-                </button>
-              </form>
-              {!passwordExpired && (
-                <form action={forcePasswordExpiry.bind(null, id)}>
-                  <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
-                    Force expire now
-                  </button>
-                </form>
-              )}
-            </div>
-          </>
+          <p className="mt-1 text-sm text-foreground/60">
+            Signed in with Google only — no password with this app yet. Setting one below also
+            lets this account sign in with email/password from then on.
+          </p>
         )}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <form action={sendPasswordResetEmail.bind(null, id)}>
+            <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+              Send password reset email
+            </button>
+          </form>
+
+          {hasPasswordIdentity && (
+            <form action={setAccountExpired.bind(null, id)} className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-sm text-foreground/70">
+                <input type="checkbox" name="expired" defaultChecked={passwordExpired} className="h-4 w-4" />
+                Account expired
+              </label>
+              <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+                Save
+              </button>
+            </form>
+          )}
+        </div>
+
+        <form action={setUserPassword.bind(null, id)} className="mt-3 flex flex-wrap items-end gap-2">
+          <input
+            name="password"
+            type="password"
+            required
+            minLength={8}
+            placeholder={hasPasswordIdentity ? "New password (min. 8 characters)" : "Set a password (min. 8 characters)"}
+            className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+            {hasPasswordIdentity ? "Set new password" : "Set password"}
+          </button>
+        </form>
       </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">

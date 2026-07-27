@@ -46,9 +46,13 @@ export default async function AdminUsersPage() {
       medium: sub?.medium,
       status: sub?.status,
       subjects,
-      passwordStatus: !profile?.password_changed_at
+      // password_changed_at alone can't tell "no password" apart from "has
+      // one but predates the tracking migration" -- both are null. Whether
+      // an "email" identity is actually linked is the real signal (see the
+      // same reasoning on the user detail page).
+      passwordStatus: !u.identities?.some((i) => i.provider === "email")
         ? ("google" as const)
-        : isPasswordExpired(profile)
+        : isPasswordExpired(profile ?? null)
           ? ("expired" as const)
           : ("active" as const),
     };

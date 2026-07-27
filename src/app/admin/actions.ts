@@ -151,26 +151,42 @@ export async function sendPasswordResetEmail(userId: string) {
   });
 }
 
-// Manually expires a native account's password immediately, rather than
-// waiting for PASSWORD_EXPIRY_DAYS to elapse -- e.g. after a suspected
-// compromise. No-op for a Google-only account (password_changed_at is
-// already null there, meaning "no password to expire" -- see
-// isPasswordExpired() in lib/auth.ts).
-export async function forcePasswordExpiry(userId: string) {
+// Lets an admin directly set (or replace) a user's password, rather than
+// only being able to email them a reset link -- e.g. the account has no
+// working inbox, or the admin needs the change to take effect immediately.
+// Works even for an account that signed up via Google: Supabase allows
+// attaching a password to any account regardless of how it originally
+// authenticated, which is exactly the escape hatch this form exists for.
+// password_changed_at is stamped automatically by the auth.users update
+// trigger (0011_password_lifecycle.sql) -- no app-side write needed here.
+export async function setUserPassword(userId: string, formData: FormData) {
   await requireAdminPage("users");
+  const password = String(formData.get("password") ?? "");
+  if (password.length < 8) return;
+
+  const admin = createAdminClient();
+  await admin.auth.admin.updateUserById(userId, { password });
+
+  revalidatePath(`/admin/users/${userId}`);
+}
+
+// Toggles whether a native account's password is currently treated as
+// expired -- checking the box back-dates password_changed_at past
+// PASSWORD_EXPIRY_DAYS (forcing a reset on next login, e.g. after a
+// suspected compromise); unchecking it sets password_changed_at to now
+// (the same effect a fresh password change would have). Only meaningful
+// once a password actually exists -- the page only renders this control
+// once setUserPassword (or a prior native signup) has set one.
+export async function setAccountExpired(userId: string, formData: FormData) {
+  await requireAdminPage("users");
+  const expired = formData.get("expired") === "on";
+
+  const newTimestamp = expired
+    ? new Date(Date.now() - (PASSWORD_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString()
+    : new Date().toISOString();
 
   const supabase = await createClient();
-  const { data: target } = await supabase
-    .from("profiles")
-    .select("password_changed_at")
-    .eq("id", userId)
-    .maybeSingle();
-  if (!target?.password_changed_at) return;
-
-  const staleDate = new Date(
-    Date.now() - (PASSWORD_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000
-  ).toISOString();
-  await supabase.from("profiles").update({ password_changed_at: staleDate }).eq("id", userId);
+  await supabase.from("profiles").update({ password_changed_at: newTimestamp }).eq("id", userId);
 
   revalidatePath(`/admin/users/${userId}`);
 }
