@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { MathText } from "@/components/math-text";
 import { TopicSummaryMessage } from "./topic-summary-message";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -169,7 +170,7 @@ export function ChatPanel({
                     : "border border-border bg-surface text-foreground"
                 }`}
               >
-                {entry.message.content}
+                <MathText text={entry.message.content} />
               </div>
             </div>
           )

@@ -262,6 +262,20 @@ generate-and-store), tagged with a descriptive `question` string (`topic-summary
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
 
+### Math rendering
+
+Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since
+that's how an LLM naturally writes math — rendered as plain text that shows up as literal
+backslashes and braces instead of the notation it's meant to be. `src/components/math-text.tsx`
+(`MathText`) splits a string on those four delimiter styles and renders each math segment with
+[KaTeX](https://katex.org/), leaving everything else as plain text; both chat message bubbles
+(`chat-panel.tsx`) and topic summaries/exercises (`topic-summary-message.tsx`) render their content
+through it instead of directly interpolating the raw string. `katex.renderToString`'s output is
+inserted via `dangerouslySetInnerHTML` — the standard, intended way to use KaTeX; it does not permit
+arbitrary HTML injection through its LaTeX parser, so this is safe even though the string being
+rendered is LLM-generated. `throwOnError: false` renders a parse error inline (in red) rather than
+crashing the message it's in.
+
 ### Authentication
 
 Three additions on top of Supabase Auth's default email/password:

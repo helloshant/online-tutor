@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MathText } from "@/components/math-text";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
 type ExerciseItem = { question: string; answer: string };
@@ -74,7 +75,9 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
         ) : summaryError ? (
           <p className="text-red-600">{summaryError}</p>
         ) : (
-          <p className="whitespace-pre-wrap text-foreground/80">{summary}</p>
+          <p className="whitespace-pre-wrap text-foreground/80">
+            <MathText text={summary ?? ""} />
+          </p>
         )}
 
         {!loadingSummary && !summaryError && (
@@ -101,10 +104,10 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
                   {exercises.map((ex, i) => (
                     <li key={i}>
                       <p className="font-medium">
-                        {i + 1}. {ex.question}
+                        {i + 1}. <MathText text={ex.question} />
                       </p>
                       <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                        {ex.answer}
+                        <MathText text={ex.answer} />
                       </p>
                     </li>
                   ))}
