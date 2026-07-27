@@ -114,9 +114,11 @@ touching the web app or each other.
 3. **Payment** (`/subscribe`) — Razorpay Checkout. On success the payment signature is verified
    server-side and the subscription is flipped to `active`.
 4. **Dashboard** (`/dashboard`) — left panel lists the subscribed subjects; selecting one scopes
-   the right-hand chat panel to that subject. Every message is answered by Claude, constrained by
+   the right-hand chat panel to that subject, and opens a middle syllabus panel listing every
+   chapter and topic for that subject. Every message is answered by Claude, constrained by
    a system prompt built from the syllabus topics stored for that board/grade/subject, in the
-   subscribed medium.
+   subscribed medium. Clicking a topic in the syllabus panel opens its hand-curated practice
+   exercises and worked solutions, if any have been entered — see "Topic exercises" below.
 5. **Admin panel** (`/admin`) — lists every user with their board/grade/medium/subjects/status and
    lets an admin promote/demote admins and cancel subscriptions. `/admin/catalog` manages boards,
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
@@ -173,6 +175,9 @@ See `supabase/migrations/` for the full schema:
   them (see "Medium-scoped syllabus storage" below). Existing rows are backfilled to `English`
   (what the seed data was authored in); the unique constraint and scope index both grow the new
   column.
+- `0010_topic_exercises.sql` — `topic_exercises` (`topic_id`, `question`, `solution`, `sort_order`),
+  FK'd to `syllabus_topics` with `on delete cascade`. Same RLS shape as the syllabus tables:
+  readable by any authenticated user, writable only by admins. See "Topic exercises" below.
 
 ### Medium-scoped syllabus storage
 
@@ -195,6 +200,30 @@ per un-indented line and its topics indented underneath (bullets like `-`, `*`, 
 automatically) — close to how these documents are already structured in the official source — and
 it's parsed into individual rows in one submit, appended after whatever's already stored. Re-pasting
 the same lines is safe; duplicates are silently skipped rather than erroring or duplicating rows.
+
+### Topic exercises
+
+Each syllabus topic can have its own set of practice questions with worked solutions, visible to
+students from the dashboard's syllabus panel. These are hand-curated by admins, not LLM-generated —
+the point is that they match what's actually in the textbook, the same reasoning behind the
+syllabus itself being transcribed from the official source rather than synthesized.
+
+From `/admin/catalog`, each topic row has an **Exercises** link to `/admin/catalog/topics/[id]`,
+which has the same single-add-or-bulk-paste shape as the syllabus importer. The bulk format is
+block-based rather than indentation-based, since a worked solution is rarely one line: a line
+starting with `Q:` opens the question, a line starting with `A:` opens the solution (either may
+span multiple lines), and a line of three or more dashes (`---`) separates one exercise from the
+next. Pasted exercises are appended after whatever's already stored for that topic.
+
+On the student side, selecting a subject opens a syllabus panel (desktop only) listing every
+chapter and topic for that board/grade/subject/medium. Clicking a topic opens its exercises in a
+modal, question followed immediately by its solution — no separate reveal step, since these are
+meant to be used as a worked answer key, not a quiz. Both the topic list and the exercise fetch
+run as direct client-side Supabase queries (same pattern the chat panel already uses for message
+history), not a dedicated API route: `syllabus_topics` and `topic_exercises` are already readable
+by any authenticated user under RLS (the same policy the admin catalog itself relies on), so a
+proxy route would add a network hop without adding any actual access control. Staff accounts skip
+this panel entirely — they aren't scoped to one board/grade, which is what the panel is keyed on.
 
 ### User management (CRUD)
 

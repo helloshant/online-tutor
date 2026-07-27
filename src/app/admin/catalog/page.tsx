@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { Medium } from "@/lib/supabase/types";
@@ -346,7 +347,7 @@ export default async function AdminCatalogPage({
                     <th className="px-3 py-2">Chapter</th>
                     <th className="px-3 py-2">Topic</th>
                     <th className="w-20 px-3 py-2">Order</th>
-                    <th className="w-32 px-3 py-2" />
+                    <th className="w-48 px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -379,7 +380,7 @@ export default async function AdminCatalogPage({
                         </form>
                       </td>
                       <td className="p-0">
-                        <div className="flex items-start gap-2 px-3 py-2">
+                        <div className="flex flex-wrap items-start gap-2 px-3 py-2">
                           <button
                             type="submit"
                             form={`syllabus-topic-${t.id}`}
@@ -387,6 +388,12 @@ export default async function AdminCatalogPage({
                           >
                             Save
                           </button>
+                          <Link
+                            href={`/admin/catalog/topics/${t.id}`}
+                            className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-brand/5"
+                          >
+                            Exercises
+                          </Link>
                           <form action={removeSyllabusTopic.bind(null, t.id)}>
                             <button className="shrink-0 text-xs text-red-600 hover:underline">
                               Remove

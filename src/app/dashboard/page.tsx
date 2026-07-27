@@ -16,6 +16,8 @@ export default async function DashboardPage() {
       <DashboardShell
         userName={profile?.full_name ?? user.email ?? "Staff"}
         subscriptionId={null}
+        boardId={null}
+        gradeId={null}
         boardName="All boards"
         gradeName="All grades"
         medium={null}
@@ -53,6 +55,8 @@ export default async function DashboardPage() {
     <DashboardShell
       userName={profile?.full_name ?? user.email ?? "Student"}
       subscriptionId={subscription.id}
+      boardId={subscription.board_id}
+      gradeId={subscription.grade_id}
       boardName={board?.name ?? ""}
       gradeName={grade?.name ?? ""}
       medium={subscription.medium}

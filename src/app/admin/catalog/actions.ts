@@ -204,3 +204,97 @@ export async function removeSyllabusTopic(topicId: string) {
   await supabase.from("syllabus_topics").delete().eq("id", topicId);
   revalidatePath("/admin/catalog");
 }
+
+export async function addExercise(topicId: string, formData: FormData) {
+  await requireAdminPage("catalog");
+  const question = String(formData.get("question") ?? "").trim();
+  const solution = String(formData.get("solution") ?? "").trim();
+  const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
+  if (!question || !solution) return;
+  const supabase = await createClient();
+  await supabase.from("topic_exercises").insert({
+    topic_id: topicId,
+    question,
+    solution,
+    sort_order: sortOrder,
+  });
+  revalidatePath(`/admin/catalog/topics/${topicId}`);
+}
+
+// Splits a pasted block of exercises into question/solution pairs. Each
+// exercise is separated by a line of three or more dashes, and within a
+// block a line starting with "Q:" opens the question and a line starting
+// with "A:" opens the solution -- both may span multiple lines (worked
+// solutions are rarely one line), so the markers are what's parsed on, not
+// line breaks.
+const EXERCISE_BLOCK_PATTERN = /^Q:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*)$/im;
+
+function parseBulkExercises(text: string): { question: string; solution: string }[] {
+  const blocks = text.split(/\n-{3,}\n/);
+  const rows: { question: string; solution: string }[] = [];
+
+  for (const rawBlock of blocks) {
+    const block = rawBlock.trim();
+    if (!block) continue;
+    const match = block.match(EXERCISE_BLOCK_PATTERN);
+    if (!match) continue;
+    const question = match[1].trim();
+    const solution = match[2].trim();
+    if (!question || !solution) continue;
+    rows.push({ question, solution });
+  }
+
+  return rows;
+}
+
+export async function bulkAddExercises(topicId: string, formData: FormData) {
+  await requireAdminPage("catalog");
+  const bulkText = String(formData.get("bulkText") ?? "");
+  const parsed = parseBulkExercises(bulkText);
+  if (parsed.length === 0) return;
+
+  const supabase = await createClient();
+
+  // Append after whatever's already there, same rationale as the syllabus
+  // bulk importer -- pasting more exercises later shouldn't reorder or
+  // clobber ones already entered.
+  const { data: last } = await supabase
+    .from("topic_exercises")
+    .select("sort_order")
+    .eq("topic_id", topicId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let nextSortOrder = (last?.sort_order ?? 0) + 1;
+
+  const rows = parsed.map(({ question, solution }) => ({
+    topic_id: topicId,
+    question,
+    solution,
+    sort_order: nextSortOrder++,
+  }));
+
+  await supabase.from("topic_exercises").insert(rows);
+  revalidatePath(`/admin/catalog/topics/${topicId}`);
+}
+
+export async function updateExercise(exerciseId: string, topicId: string, formData: FormData) {
+  await requireAdminPage("catalog");
+  const question = String(formData.get("question") ?? "").trim();
+  const solution = String(formData.get("solution") ?? "").trim();
+  const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
+  if (!question || !solution) return;
+  const supabase = await createClient();
+  await supabase
+    .from("topic_exercises")
+    .update({ question, solution, sort_order: sortOrder })
+    .eq("id", exerciseId);
+  revalidatePath(`/admin/catalog/topics/${topicId}`);
+}
+
+export async function removeExercise(exerciseId: string, topicId: string) {
+  await requireAdminPage("catalog");
+  const supabase = await createClient();
+  await supabase.from("topic_exercises").delete().eq("id", exerciseId);
+  revalidatePath(`/admin/catalog/topics/${topicId}`);
+}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
+import { SyllabusPanel } from "./syllabus-panel";
 import type { Medium } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -15,6 +16,8 @@ interface SubjectSummary {
 export function DashboardShell({
   userName,
   subscriptionId,
+  boardId,
+  gradeId,
   boardName,
   gradeName,
   medium,
@@ -23,6 +26,8 @@ export function DashboardShell({
 }: {
   userName: string;
   subscriptionId: string | null;
+  boardId: string | null;
+  gradeId: string | null;
   boardName: string;
   gradeName: string;
   medium: Medium | null;
@@ -80,6 +85,16 @@ export function DashboardShell({
             )}
           </nav>
         </aside>
+
+        {selectedSubject && boardId && gradeId && medium && !isStaffUser && (
+          <SyllabusPanel
+            key={`${selectedSubject.id}-syllabus`}
+            boardId={boardId}
+            gradeId={gradeId}
+            subjectId={selectedSubject.id}
+            medium={medium}
+          />
+        )}
 
         <main className="flex min-h-0 flex-1 flex-col">
           {selectedSubject ? (
