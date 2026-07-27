@@ -42,12 +42,17 @@ export function DashboardShell({
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
+  // Collapsed as soon as a subject is active (including the default
+  // preselected one on first load) so the syllabus panel gets the room --
+  // expanded back only via the explicit toggle below.
+  const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
 
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
+    setSubjectsCollapsed(true);
   }
 
   return (
@@ -71,26 +76,48 @@ export function DashboardShell({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-56 shrink-0 overflow-y-auto border-r border-border bg-surface p-3 sm:w-64">
-          <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-            {isStaffUser ? "All subjects" : "Your subjects"}
-          </h2>
-          <nav className="mt-2 space-y-1">
+        <aside
+          className={`shrink-0 overflow-y-auto border-r border-border bg-surface transition-[width] ${
+            subjectsCollapsed ? "w-14 p-2" : "w-56 p-3 sm:w-64"
+          }`}
+        >
+          <div className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}>
+            {!subjectsCollapsed && (
+              <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                {isStaffUser ? "All subjects" : "Your subjects"}
+              </h2>
+            )}
+            <button
+              type="button"
+              onClick={() => setSubjectsCollapsed((collapsed) => !collapsed)}
+              title={subjectsCollapsed ? "Expand subjects" : "Collapse subjects"}
+              aria-label={subjectsCollapsed ? "Expand subjects" : "Collapse subjects"}
+              className="rounded p-1.5 text-foreground/50 transition hover:bg-brand/5 hover:text-foreground"
+            >
+              {subjectsCollapsed ? "»" : "«"}
+            </button>
+          </div>
+          <nav className={`mt-2 space-y-1 ${subjectsCollapsed ? "flex flex-col items-center" : ""}`}>
             {subjects.map((subject) => (
               <button
                 key={subject.id}
                 type="button"
                 onClick={() => handleSelectSubject(subject.id)}
-                className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                title={subject.name}
+                className={`rounded-lg text-sm transition ${
+                  subjectsCollapsed
+                    ? "flex h-9 w-9 items-center justify-center text-xs font-semibold"
+                    : "block w-full px-3 py-2 text-left"
+                } ${
                   subject.id === selectedSubjectId
                     ? "bg-brand text-white font-medium"
                     : "text-foreground/80 hover:bg-brand/5"
                 }`}
               >
-                {subject.name}
+                {subjectsCollapsed ? subject.code.slice(0, 2).toUpperCase() : subject.name}
               </button>
             ))}
-            {subjects.length === 0 && (
+            {subjects.length === 0 && !subjectsCollapsed && (
               <p className="px-2 text-sm text-foreground/50">No subjects subscribed.</p>
             )}
           </nav>
