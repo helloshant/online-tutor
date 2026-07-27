@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { ChatMessage, Medium } from "@/lib/supabase/types";
+import { TopicSummaryMessage } from "./topic-summary-message";
+import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
   id: string;
@@ -10,23 +11,35 @@ interface SubjectSummary {
   code: string;
 }
 
+// A chat message loaded from/saved to chat_messages, or a topic-summary
+// entry dropped in locally when a syllabus topic is clicked (see
+// dashboard-shell.tsx's topicClick prop below) -- never persisted, just
+// slotted into the same visual timeline so a student can ask a follow-up
+// about it without leaving the conversation.
+type TimelineEntry =
+  | { kind: "message"; message: ChatMessage }
+  | { kind: "topic"; entryId: string; topic: SyllabusTopic };
+
 export function ChatPanel({
   subscriptionId,
   subject,
   medium,
   isStaffUser,
+  topicClick,
 }: {
   subscriptionId: string | null;
   subject: SubjectSummary;
   medium: Medium | null;
   isStaffUser: boolean;
+  topicClick: { clickId: string; topic: SyllabusTopic } | null;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastClickIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +63,7 @@ export function ChatPanel({
 
       const { data } = await query.order("created_at", { ascending: true });
       if (!cancelled) {
-        setMessages((data as ChatMessage[]) ?? []);
+        setTimeline(((data as ChatMessage[]) ?? []).map((message) => ({ kind: "message", message })));
         setLoadingHistory(false);
       }
     })();
@@ -62,7 +75,18 @@ export function ChatPanel({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [timeline]);
+
+  // A fresh clickId (even for the same topic clicked twice) drops a new
+  // summary bubble at the end of the timeline, same as a message arriving.
+  useEffect(() => {
+    if (!topicClick || topicClick.clickId === lastClickIdRef.current) return;
+    lastClickIdRef.current = topicClick.clickId;
+    setTimeline((prev) => [
+      ...prev,
+      { kind: "topic", entryId: topicClick.clickId, topic: topicClick.topic },
+    ]);
+  }, [topicClick]);
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -82,7 +106,7 @@ export function ChatPanel({
       content: trimmed,
       created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimisticMessage]);
+    setTimeline((prev) => [...prev, { kind: "message", message: optimisticMessage }]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -96,13 +120,15 @@ export function ChatPanel({
         throw new Error(body.error ?? "Something went wrong. Please try again.");
       }
 
-      setMessages((prev) => [
-        ...prev.filter((m) => m.id !== optimisticMessage.id),
-        body.userMessage as ChatMessage,
-        body.assistantMessage as ChatMessage,
+      setTimeline((prev) => [
+        ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
+        { kind: "message", message: body.userMessage as ChatMessage },
+        { kind: "message", message: body.assistantMessage as ChatMessage },
       ]);
     } catch (err) {
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
+      setTimeline((prev) =>
+        prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id)
+      );
       setInput(trimmed);
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -123,24 +149,31 @@ export function ChatPanel({
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
         {loadingHistory && <p className="text-sm text-foreground/40">Loading chat history…</p>}
-        {!loadingHistory && messages.length === 0 && (
+        {!loadingHistory && timeline.length === 0 && (
           <p className="text-sm text-foreground/40">
             Ask your first {subject.name} question below to get started.
           </p>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+        {timeline.map((entry) =>
+          entry.kind === "topic" ? (
+            <TopicSummaryMessage key={entry.entryId} topic={entry.topic} />
+          ) : (
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
-                m.role === "user"
-                  ? "bg-brand text-white"
-                  : "border border-border bg-surface text-foreground"
-              }`}
+              key={entry.message.id}
+              className={`flex ${entry.message.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {m.content}
+              <div
+                className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
+                  entry.message.role === "user"
+                    ? "bg-brand text-white"
+                    : "border border-border bg-surface text-foreground"
+                }`}
+              >
+                {entry.message.content}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        )}
         {sending && (
           <div className="flex justify-start">
             <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/40">

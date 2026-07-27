@@ -119,10 +119,10 @@ touching the web app or each other.
    the right-hand chat panel to that subject, and opens a syllabus panel listing every chapter and
    topic for that subject. Every message is answered by Claude, constrained by a system prompt
    built from the syllabus topics stored for that board/grade/subject, in the subscribed medium.
-   Clicking a topic opens a further panel alongside the syllabus list and the chat (not a modal
-   over them) with an LLM-generated summary and a "Relevant Exercises" button, so a student can
-   keep both visible while asking the tutor about it in the same view — see "Topic summaries and
-   relevant exercises" below.
+   Clicking a topic drops its LLM-generated summary and a "Relevant Exercises" button straight into
+   the chat, as a message bubble in the same conversation — not a separate panel or modal — so a
+   student can immediately ask the tutor a follow-up about it without leaving the thread. See
+   "Topic summaries and relevant exercises" below.
 5. **Admin panel** (`/admin`) — lists every user with their board/grade/medium/subjects/status and
    lets an admin promote/demote admins and cancel subscriptions. `/admin/catalog` manages boards,
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
@@ -227,17 +227,22 @@ pattern the chat panel uses for message history), since that table is already re
 authenticated user under RLS. Staff accounts skip this panel entirely — they aren't scoped to one
 board/grade, which is what the panel is keyed on.
 
-Clicking a topic opens a third panel (`TopicDetailPanel` in `syllabus-panel.tsx`) alongside the
-syllabus list and the chat, not a modal over them — a student can keep a topic's summary/exercises
-visible while still typing questions to the tutor about it in the same view. Both panels are
-siblings in the same flex row (`SyllabusPanel` returns them as a fragment), so the layout reads
-left-to-right as subjects → syllabus → topic detail → chat. It shows two things, both LLM-backed
-and unlike the syllabus topics themselves, generated rather than hand-entered:
+Clicking a topic drops a message bubble (`TopicSummaryMessage`) straight into the chat timeline,
+not a separate panel or modal — a student can ask the tutor a follow-up about it without leaving
+the conversation. `ChatPanel` maintains a unified `TimelineEntry[]` of real `chat_messages` rows
+interleaved with these topic entries (never persisted — purely local, so reloading the page drops
+them but keeps the real conversation), rather than two disconnected message lists. `SyllabusPanel`
+itself is now just the clickable chapter/topic list; the click is lifted up to `DashboardShell`
+(`topicClick: { clickId, topic }`, a fresh `clickId` even for the same topic clicked twice, so it
+always drops a new bubble the same way sending a duplicate message would) and passed down into
+`ChatPanel` as a prop, since the two are siblings with no direct connection otherwise. It shows two
+things, both LLM-backed and unlike the syllabus topics themselves, generated rather than
+hand-entered:
 
 - **Summary.** `GET /api/topics/[id]/summary` resolves the topic's board/grade/subject names
   server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks
   `topic_summaries` for an existing row before calling the LLM. A summary is generated once per
-  topic and reused by every student who clicks it after that — the panel never regenerates one
+  topic and reused by every student who clicks it after that — the bubble never regenerates one
   that already exists.
 - **Relevant Exercises**, a separate button shown once the summary loads. `GET
   /api/topics/[id]/exercises` proxies to `/v1/topic-exercises`, which searches the existing answer

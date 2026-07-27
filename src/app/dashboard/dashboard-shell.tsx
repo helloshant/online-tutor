@@ -5,7 +5,7 @@ import Link from "next/link";
 import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
-import type { Medium } from "@/lib/supabase/types";
+import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
   id: string;
@@ -37,8 +37,18 @@ export function DashboardShell({
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null
   );
+  // A fresh id per click (not just the topic) so clicking the same topic
+  // twice still drops a new summary bubble into the chat, same as sending
+  // the same message twice would. Cleared on subject switch so a topic
+  // clicked under one subject never leaks into another subject's chat.
+  const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
+
+  function handleSelectSubject(subjectId: string) {
+    setSelectedSubjectId(subjectId);
+    setTopicClick(null);
+  }
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -70,7 +80,7 @@ export function DashboardShell({
               <button
                 key={subject.id}
                 type="button"
-                onClick={() => setSelectedSubjectId(subject.id)}
+                onClick={() => handleSelectSubject(subject.id)}
                 className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
                   subject.id === selectedSubjectId
                     ? "bg-brand text-white font-medium"
@@ -93,6 +103,8 @@ export function DashboardShell({
             gradeId={gradeId}
             subjectId={selectedSubject.id}
             medium={medium}
+            selectedTopicId={topicClick?.topic.id ?? null}
+            onSelectTopic={(topic) => setTopicClick({ clickId: crypto.randomUUID(), topic })}
           />
         )}
 
@@ -104,6 +116,7 @@ export function DashboardShell({
               subject={selectedSubject}
               medium={medium}
               isStaffUser={isStaffUser}
+              topicClick={topicClick}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-foreground/50">
