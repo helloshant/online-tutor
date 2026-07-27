@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ADMIN_PAGES, requireAdminPage, requireSuperAdmin } from "@/lib/auth";
+import { headers } from "next/headers";
+import { ADMIN_PAGES, PASSWORD_EXPIRY_DAYS, requireAdminPage, requireSuperAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ProfileRole } from "@/lib/supabase/types";
@@ -123,4 +124,53 @@ export async function deleteUser(userId: string) {
   await admin.auth.admin.deleteUser(userId);
 
   revalidatePath("/admin");
+}
+
+// Lets an admin send a password reset link on a user's behalf (e.g. they're
+// locked out and can't reach /forgot-password themselves). Same
+// resetPasswordForEmail call the self-service form uses -- no special
+// privilege needed for that part, just the target's email, which the
+// service-role client can always look up regardless of what an admin's own
+// session can see.
+export async function sendPasswordResetEmail(userId: string) {
+  await requireAdminPage("users");
+
+  const admin = createAdminClient();
+  const { data } = await admin.auth.admin.getUserById(userId);
+  const email = data?.user?.email;
+  if (!email) return;
+
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const protocol = h.get("x-forwarded-proto") ?? "http";
+  const origin = `${protocol}://${host}`;
+
+  const supabase = await createClient();
+  await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/callback?next=/reset-password`,
+  });
+}
+
+// Manually expires a native account's password immediately, rather than
+// waiting for PASSWORD_EXPIRY_DAYS to elapse -- e.g. after a suspected
+// compromise. No-op for a Google-only account (password_changed_at is
+// already null there, meaning "no password to expire" -- see
+// isPasswordExpired() in lib/auth.ts).
+export async function forcePasswordExpiry(userId: string) {
+  await requireAdminPage("users");
+
+  const supabase = await createClient();
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("password_changed_at")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!target?.password_changed_at) return;
+
+  const staleDate = new Date(
+    Date.now() - (PASSWORD_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000
+  ).toISOString();
+  await supabase.from("profiles").update({ password_changed_at: staleDate }).eq("id", userId);
+
+  revalidatePath(`/admin/users/${userId}`);
 }

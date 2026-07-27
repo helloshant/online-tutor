@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAdminPage } from "@/lib/auth";
+import { isPasswordExpired, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createUser } from "./actions";
 import type { ProfileRole } from "@/lib/supabase/types";
@@ -46,6 +46,11 @@ export default async function AdminUsersPage() {
       medium: sub?.medium,
       status: sub?.status,
       subjects,
+      passwordStatus: !profile?.password_changed_at
+        ? ("google" as const)
+        : isPasswordExpired(profile)
+          ? ("expired" as const)
+          : ("active" as const),
     };
   });
 
@@ -114,6 +119,7 @@ export default async function AdminUsersPage() {
               <th className="px-4 py-3">Medium</th>
               <th className="px-4 py-3">Subjects</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Password</th>
             </tr>
           </thead>
           <tbody>
@@ -163,11 +169,24 @@ export default async function AdminUsersPage() {
                     "—"
                   )}
                 </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      row.passwordStatus === "expired"
+                        ? "bg-red-100 text-red-700"
+                        : row.passwordStatus === "google"
+                          ? "bg-foreground/10 text-foreground/60"
+                          : "bg-green-100 text-green-700"
+                    }`}
+                  >
+                    {row.passwordStatus === "google" ? "Google only" : row.passwordStatus}
+                  </span>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-foreground/50">
+                <td colSpan={9} className="px-4 py-8 text-center text-foreground/50">
                   No users yet.
                 </td>
               </tr>

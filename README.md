@@ -292,6 +292,17 @@ Three additions on top of Supabase Auth's default email/password:
   which reuses the same form and action as `/reset-password` (the underlying operation is
   identical, just reached from an active session instead of a recovery link).
 
+- **Admin-facing controls.** Both `/admin` (a Password column: `active` / `expired` / `Google
+  only`) and `/admin/users/[id]` (a Password panel with the last-changed date and status) surface
+  this rather than it being purely self-service. From the detail page an admin can **send a
+  password reset email** on a user's behalf (`sendPasswordResetEmail` — same
+  `resetPasswordForEmail` call the self-service form uses, just looking up the target's email via
+  the service-role client instead of trusting a submitted one) or **force-expire** a password
+  immediately, e.g. after a suspected compromise, rather than waiting for it to age out
+  (`forcePasswordExpiry` — back-dates `password_changed_at` past the expiry window; a no-op for a
+  Google-only account, which has no password to expire). Both are gated by `requireAdminPage("users")`,
+  same as every other action on that page.
+
 ### User management (CRUD)
 
 `/admin` (the Users page) covers the full lifecycle of an account, not just viewing it:

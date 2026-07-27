@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireAdminPage } from "@/lib/auth";
+import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { cancelSubscription, deleteUser, setUserRole, updateUserProfile } from "../../actions";
+import {
+  cancelSubscription,
+  deleteUser,
+  forcePasswordExpiry,
+  sendPasswordResetEmail,
+  setUserRole,
+  updateUserProfile,
+} from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import type { ProfileRole } from "@/lib/supabase/types";
 
@@ -38,6 +45,7 @@ export default async function AdminUserDetailPage({
   // Mirrors deleteUser's own guards (no self-delete; staff accounts need a
   // superadmin) so the button doesn't invite an action that's a no-op.
   const canDeleteTarget = id !== actingUser.id && (targetRole === "user" || isSuperAdminViewer);
+  const passwordExpired = isPasswordExpired(profile);
 
   return (
     <div>
@@ -113,6 +121,40 @@ export default async function AdminUserDetailPage({
           </button>
         </form>
       </details>
+
+      <div className="mt-4 rounded-xl border border-border bg-surface p-6">
+        <h2 className="text-sm font-semibold">Password</h2>
+
+        {!profile?.password_changed_at ? (
+          <p className="mt-1 text-sm text-foreground/60">
+            Signed in with Google only — no password with this app to reset or expire.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-foreground/60">
+              Last changed {new Date(profile.password_changed_at).toLocaleDateString()} —{" "}
+              <span className={passwordExpired ? "font-medium text-red-600" : "font-medium text-green-700"}>
+                {passwordExpired ? "expired" : "active"}
+              </span>
+              , same as any native account after {PASSWORD_EXPIRY_DAYS} days.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <form action={sendPasswordResetEmail.bind(null, id)}>
+                <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+                  Send password reset email
+                </button>
+              </form>
+              {!passwordExpired && (
+                <form action={forcePasswordExpiry.bind(null, id)}>
+                  <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+                    Force expire now
+                  </button>
+                </form>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">
         Subscriptions

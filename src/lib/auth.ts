@@ -34,7 +34,7 @@ export async function requireUser() {
 // Only native (email/password) accounts have a password to expire --
 // password_changed_at is null for an OAuth-only (Google) account, since it
 // never set one with this app. See 0011_password_lifecycle.sql.
-const PASSWORD_EXPIRY_DAYS = 90;
+export const PASSWORD_EXPIRY_DAYS = 90;
 
 export function isPasswordExpired(profile: Profile | null): boolean {
   if (!profile?.password_changed_at) return false;
