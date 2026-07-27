@@ -50,6 +50,26 @@ export async function cancelSubscription(subscriptionId: string, userId: string)
   revalidatePath(`/admin/users/${userId}`);
 }
 
+// Admin-side counterpart to /api/razorpay/verify's activation -- same two
+// fields (status, activated_at), just skipping the Razorpay signature check
+// entirely rather than mimicking it. razorpay_payment_id is deliberately
+// left null (not backfilled with a fake value), so a subscription active
+// through this path stays distinguishable in the data from one that was
+// actually paid for. Scoped to a currently-pending subscription, same as
+// the real activation route, so this can't accidentally reactivate a
+// cancelled one.
+export async function activateSubscriptionWithoutPayment(subscriptionId: string, userId: string) {
+  await requireAdminPage("users");
+  const supabase = await createClient();
+  await supabase
+    .from("subscriptions")
+    .update({ status: "active", activated_at: new Date().toISOString() })
+    .eq("id", subscriptionId)
+    .eq("status", "pending_payment");
+  revalidatePath("/admin");
+  revalidatePath(`/admin/users/${userId}`);
+}
+
 export async function createUser(formData: FormData) {
   const session = await requireAdminPage("users");
   const fullName = String(formData.get("fullName") ?? "").trim();

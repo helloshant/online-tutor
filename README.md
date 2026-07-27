@@ -330,8 +330,13 @@ Three additions on top of Supabase Auth's default email/password:
   also shows every subscription for that user.
 - **Update** — "Edit profile" on the detail page changes `full_name` and email (email lives on
   `auth.users`, so this goes through the service-role client). Role changes are still their own
-  control (superadmin-only, DB-enforced — see `0004_superadmin_and_staff_access.sql`), and
-  subscriptions can be cancelled from the same page.
+  control (superadmin-only, DB-enforced — see `0004_superadmin_and_staff_access.sql`), and an
+  active subscription can be cancelled from the same page. A `pending_payment` one instead gets
+  an **"Activate without payment"** button (`activateSubscriptionWithoutPayment`) — the admin-side
+  counterpart to `/api/razorpay/verify`'s activation, setting the same `status`/`activated_at`
+  fields but skipping the signature check entirely rather than mimicking it.
+  `razorpay_payment_id` is deliberately left null, so a subscription activated this way stays
+  distinguishable in the data from one that was actually paid for.
 - **Delete** — the detail page's "Danger zone" permanently deletes the auth user, which cascades
   (`on delete cascade`) to their profile, subscriptions, subscription subjects, chat history, and
   admin page permissions. Gated so an admin can't delete themselves or another staff account —

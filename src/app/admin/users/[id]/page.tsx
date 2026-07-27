@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  activateSubscriptionWithoutPayment,
   cancelSubscription,
   deleteUser,
   sendPasswordResetEmail,
@@ -228,6 +229,21 @@ export default async function AdminUserDetailPage({
                       className="rounded-lg border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                     >
                       Cancel subscription
+                    </button>
+                  </form>
+                )}
+                {sub.status === "pending_payment" && (
+                  <form
+                    action={async () => {
+                      "use server";
+                      await activateSubscriptionWithoutPayment(sub.id, id);
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      className="rounded-lg border border-green-200 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+                    >
+                      Activate without payment
                     </button>
                   </form>
                 )}
