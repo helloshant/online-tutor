@@ -552,6 +552,14 @@ network — so you won't see them on `localhost:4000`/`localhost:4100`; that's i
 one directly: `docker compose exec orchestrator wget -qO- localhost:4000/health` (swap
 `orchestrator`/`4000` for `observability`/`4100` for the other one).
 
+The orchestrator's `/health` response includes non-secret configuration presence for its three
+optional dependencies (`answerBank`, `cache`, `observability` — each `{ configured: boolean }`,
+plus `answerBank.supabaseUrl` so you can eyeball whether it's pointed at the right Supabase
+project), specifically so a "the tutor answers fine but nothing shows up in the Answer Bank /
+Observability admin pages" report can be diagnosed with one request instead of digging through
+container logs — LLM calls don't depend on any of these three, so generation succeeding is no
+signal that storage/caching/reporting are actually configured.
+
 If you ever change `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, you must rebuild
 (`--build`), not just restart — a plain `docker compose up` without `--build` reuses the existing
 image with the old values baked in.

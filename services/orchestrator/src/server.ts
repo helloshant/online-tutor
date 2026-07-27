@@ -72,8 +72,23 @@ function parseImageField(raw: unknown): { image?: ImageAttachment; error?: strin
   return { image: { mediaType: mediaType as ImageMediaType, base64 } };
 }
 
+// Includes non-secret configuration presence (never the keys themselves) so
+// a deployment where LLM calls succeed but nothing lands in Postgres --
+// exactly the failure mode of a missing/misconfigured SUPABASE_URL /
+// SUPABASE_SERVICE_ROLE_KEY -- can be diagnosed with a single request
+// instead of having to dig through container logs or guess at env vars.
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+    answerBank: {
+      // The URL itself isn't secret and is the fastest way to spot "pointed
+      // at the wrong Supabase project" from outside the container.
+      supabaseUrl: process.env.SUPABASE_URL || null,
+      configured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    },
+    cache: { configured: Boolean(process.env.REDIS_URL) },
+    observability: { configured: Boolean(process.env.OBSERVABILITY_URL) },
+  });
 });
 
 function requireSharedSecret(req: Request, res: Response, next: NextFunction) {
