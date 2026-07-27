@@ -75,13 +75,18 @@ export async function findRelevantExercises(
   return (data ?? []) as { id: string; question: string; answer: string }[];
 }
 
+// Returns whether the row actually landed, rather than swallowing the
+// outcome entirely -- callers fail open (a write failure never blocks the
+// student's reply), but silently discarding success/failure here is exactly
+// what made past storage failures invisible until someone noticed the
+// answer bank staying empty. Callers should log when this comes back false.
 export async function recordAnswer(
   scope: AnswerScope,
   answer: string,
   validationStatus: "auto_approved" | "pending_review"
-): Promise<void> {
+): Promise<boolean> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return false;
 
   const { error } = await supabase.from("answered_questions").insert({
     board_id: scope.boardId,
@@ -95,5 +100,7 @@ export async function recordAnswer(
 
   if (error) {
     console.error("Failed to record answer in answer bank:", error);
+    return false;
   }
+  return true;
 }

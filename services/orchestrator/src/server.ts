@@ -290,7 +290,9 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     if (scope) {
       const validation = validateAnswerForStorage(text);
       if (validation.store) {
-        void recordAnswer(scope, text, validation.status);
+        void recordAnswer(scope, text, validation.status).then((saved) => {
+          if (!saved) console.error("Failed to store this chat answer in the answer bank.");
+        });
         // Only cache (i.e. let it be replayed to other students) once it's
         // confident enough to auto-approve -- a pending_review answer stays
         // out of both the cache and the servable side of the answer bank
@@ -495,12 +497,33 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     });
 
     const parsed = parseGeneratedExercises(text);
+    // Shown to the student regardless of whether the write below succeeds --
+    // a storage failure shouldn't cost them the exercises they just asked
+    // for, only get logged so it doesn't go unnoticed (see recordAnswer).
     const stored: { question: string; answer: string }[] = [];
     for (const exercise of parsed) {
       const validation = validateAnswerForStorage(exercise.answer);
       if (!validation.store) continue;
-      await recordAnswer({ ...scope, question: exercise.question }, exercise.answer, validation.status);
       stored.push(exercise);
+
+      // The topic-level search above (findRelevantExercises) can still miss
+      // a near-duplicate of one specific generated exercise -- e.g. the same
+      // question worded slightly differently, or filed under a different
+      // topic query -- so check per-exercise before writing, rather than
+      // trusting the batch-level miss to mean every exercise is new.
+      const existing = await findAnswerInBank({ ...scope, question: exercise.question });
+      if (existing) continue;
+
+      const saved = await recordAnswer(
+        { ...scope, question: exercise.question },
+        exercise.answer,
+        validation.status
+      );
+      if (!saved) {
+        console.error(
+          `Failed to store generated exercise in the answer bank: "${exercise.question.slice(0, 80)}"`
+        );
+      }
     }
 
     void recordChatEvent({

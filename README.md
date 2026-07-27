@@ -250,9 +250,18 @@ hand-entered:
   the query. A hit returns whatever's already there; a miss generates
   `EXERCISE_GENERATION_COUNT` (5) fresh question+solution pairs, runs each solution through the
   same `validateAnswerForStorage` heuristic the chat pipeline already uses (filtering out anything
-  that reads as hedging or a question asked back rather than an answer), and stores the ones that
-  pass into `answered_questions` — so a later "relevant exercises" click on this topic, or even an
-  organic chat question that happens to match one of these, can hit them too.
+  that reads as hedging or a question asked back rather than an answer), and attempts to store the
+  ones that pass into `answered_questions` — so a later "relevant exercises" click on this topic, or
+  even an organic chat question that happens to match one of these, can hit them too. The student
+  always sees every exercise that passed validation regardless of whether the store actually
+  succeeds (a write failure never costs them the exercises they just asked for), but before each
+  individual write, `findAnswerInBank` (the same single-best-match lookup `/v1/chat` uses) checks
+  whether that specific question already exists anywhere in the bank — since the topic-level search
+  above only misses when *nothing* for the topic exists yet, not when one particular generated
+  question happens to duplicate something already banked under a different topic query — so a
+  near-duplicate is skipped rather than written twice. Any write failure (e.g. the orchestrator's
+  Supabase connection isn't configured) is logged rather than silently dropped, the same fix applied
+  to the chat pipeline's own answer-bank write.
 
 Both endpoints are entirely orchestrator-owned (its existing service-role Supabase connection), the
 same division of responsibility as the rest of the pipeline: the web app's role is resolving
