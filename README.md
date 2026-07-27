@@ -196,6 +196,28 @@ automatically) — close to how these documents are already structured in the of
 it's parsed into individual rows in one submit, appended after whatever's already stored. Re-pasting
 the same lines is safe; duplicates are silently skipped rather than erroring or duplicating rows.
 
+### User management (CRUD)
+
+`/admin` (the Users page) covers the full lifecycle of an account, not just viewing it:
+
+- **Create** — "Add a new user" creates the account directly (email + password, `email_confirm:
+  true`) rather than sending an invite email, since the app has no transactional email configured.
+  Only a superadmin can create it with a staff role (`admin`/`superadmin`) from this form; a plain
+  admin can only create ordinary `user` accounts, mirroring the restriction on `setUserRole` below.
+- **Read** — the users table (this page) and the per-user detail page (`/admin/users/[id]`), which
+  also shows every subscription for that user.
+- **Update** — "Edit profile" on the detail page changes `full_name` and email (email lives on
+  `auth.users`, so this goes through the service-role client). Role changes are still their own
+  control (superadmin-only, DB-enforced — see `0004_superadmin_and_staff_access.sql`), and
+  subscriptions can be cancelled from the same page.
+- **Delete** — the detail page's "Danger zone" permanently deletes the auth user, which cascades
+  (`on delete cascade`) to their profile, subscriptions, subscription subjects, chat history, and
+  admin page permissions. Gated so an admin can't delete themselves or another staff account —
+  deleting a staff account requires a superadmin, same restriction as creating one.
+
+All four operations are enforced server-side in `src/app/admin/actions.ts`, not just hidden in the
+UI — the same defense-in-depth pattern as the rest of the admin panel.
+
 ### Per-page admin authorization
 
 Role (`user`/`admin`/`superadmin`) still governs the big things — subscription/payment bypass,

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { cancelSubscription, setUserRole } from "../../actions";
+import { cancelSubscription, deleteUser, setUserRole, updateUserProfile } from "../../actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const ROLE_LABEL: Record<ProfileRole, string> = {
@@ -16,7 +17,7 @@ export default async function AdminUserDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { profile: actingProfile } = await requireAdminPage("users");
+  const { user: actingUser, profile: actingProfile } = await requireAdminPage("users");
   const { id } = await params;
   const admin = createAdminClient();
 
@@ -34,6 +35,9 @@ export default async function AdminUserDetailPage({
 
   const isSuperAdminViewer = actingProfile?.role === "superadmin";
   const targetRole: ProfileRole = profile?.role ?? "user";
+  // Mirrors deleteUser's own guards (no self-delete; staff accounts need a
+  // superadmin) so the button doesn't invite an action that's a no-op.
+  const canDeleteTarget = id !== actingUser.id && (targetRole === "user" || isSuperAdminViewer);
 
   return (
     <div>
@@ -81,6 +85,34 @@ export default async function AdminUserDetailPage({
           </span>
         )}
       </div>
+
+      <details className="mt-4 rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
+          Edit profile
+        </summary>
+        <form
+          action={updateUserProfile.bind(null, id)}
+          className="grid gap-3 border-t border-border p-4 sm:grid-cols-2"
+        >
+          <input
+            name="fullName"
+            defaultValue={profile?.full_name ?? ""}
+            placeholder="Full name"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          <input
+            name="email"
+            type="email"
+            required
+            defaultValue={authUser.user.email ?? ""}
+            placeholder="Email"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          <button className="rounded-lg bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand/90 sm:col-span-2 sm:w-fit">
+            Save changes
+          </button>
+        </form>
+      </details>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">
         Subscriptions
@@ -169,6 +201,24 @@ export default async function AdminUserDetailPage({
           </p>
         )}
       </div>
+
+      {canDeleteTarget && (
+        <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-5">
+          <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
+          <p className="mt-1 text-sm text-red-700/80">
+            Permanently deletes this account: profile, subscriptions, and chat history. This cannot be
+            undone.
+          </p>
+          <form action={deleteUser.bind(null, id)} className="mt-3">
+            <ConfirmSubmitButton
+              confirmMessage={`Delete ${authUser.user.email}? This permanently removes their account, subscriptions, and chat history.`}
+              className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-100"
+            >
+              Delete user
+            </ConfirmSubmitButton>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

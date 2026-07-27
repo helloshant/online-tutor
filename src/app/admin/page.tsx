@@ -1,9 +1,14 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createUser } from "./actions";
+import type { ProfileRole } from "@/lib/supabase/types";
+
+const ROLES: ProfileRole[] = ["user", "admin", "superadmin"];
 
 export default async function AdminUsersPage() {
-  await requireAdminPage("users");
+  const { profile: viewerProfile } = await requireAdminPage("users");
+  const isSuperAdminViewer = viewerProfile?.role === "superadmin";
   const admin = createAdminClient();
 
   const [{ data: authUsers }, { data: profiles }, { data: subscriptions }] = await Promise.all([
@@ -50,6 +55,52 @@ export default async function AdminUsersPage() {
       <p className="mt-1 text-sm text-foreground/60">
         Every signed-up user, their selections, and subscription status.
       </p>
+
+      <details className="mt-6 rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
+          Add a new user
+        </summary>
+        <form action={createUser} className="grid gap-3 border-t border-border p-4 sm:grid-cols-2">
+          <input
+            name="fullName"
+            placeholder="Full name"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          <input
+            name="email"
+            type="email"
+            required
+            placeholder="Email"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          <input
+            name="password"
+            type="password"
+            required
+            minLength={8}
+            placeholder="Password (min. 8 characters)"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+          {isSuperAdminViewer ? (
+            <select
+              name="role"
+              defaultValue="user"
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+            >
+              {ROLES.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input type="hidden" name="role" value="user" />
+          )}
+          <button className="rounded-lg bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand/90 sm:col-span-2 sm:w-fit">
+            Create user
+          </button>
+        </form>
+      </details>
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full min-w-[900px] text-left text-sm">
