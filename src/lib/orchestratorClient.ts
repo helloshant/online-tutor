@@ -82,6 +82,7 @@ export async function getOrchestratedReply(
 export type TopicSummaryRequest = {
   userId: string;
   topicId: string;
+  subjectId: string;
   subjectName: string;
   boardName: string;
   gradeName: string;

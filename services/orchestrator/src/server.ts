@@ -385,6 +385,8 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     !body.userId ||
     typeof body.topicId !== "string" ||
     !body.topicId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
     typeof body.subjectName !== "string" ||
     typeof body.boardName !== "string" ||
     typeof body.gradeName !== "string" ||
@@ -393,13 +395,22 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     typeof body.topic !== "string"
   ) {
     res.status(400).json({
-      error: "userId, topicId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
+      error:
+        "userId, topicId, subjectId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
     });
     return;
   }
 
   const existing = await getStoredTopicSummary(body.topicId);
   if (existing) {
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      subjectId: body.subjectId,
+      question: `topic-summary: ${body.chapter} / ${body.topic}`,
+      source: "database",
+      latencyMs: Date.now() - startedAt,
+    });
     const response: TopicSummaryResponse = { summary: existing, source: "database" };
     res.json(response);
     return;
@@ -426,7 +437,7 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     void recordChatEvent({
       userId: body.userId,
       mode: "student",
-      subjectId: "",
+      subjectId: body.subjectId,
       question: `topic-summary: ${body.chapter} / ${body.topic}`,
       source: "llm",
       provider: getActiveLlmProvider(),
@@ -486,6 +497,17 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
 
   const found = await findRelevantExercises(scope, query);
   if (found.length > 0) {
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `topic-exercises: ${body.chapter} / ${body.topic}`,
+      source: "database",
+      latencyMs: Date.now() - startedAt,
+    });
     const response: TopicExercisesResponse = {
       exercises: found.map(({ question, answer }) => ({ question, answer })),
       source: "database",

@@ -47,6 +47,7 @@ async function handleGetSummary({ id: topicId }: { id: string }) {
     const { summary } = await getTopicSummary({
       userId: user.id,
       topicId,
+      subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
