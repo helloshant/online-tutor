@@ -40,6 +40,18 @@ export async function recordChatEvent(event: ChatEventInput): Promise<void> {
     });
     if (!res.ok) {
       console.error(`Observability event request failed with status ${res.status}`);
+      return;
+    }
+    // A 200 here only means the service accepted the request -- it still
+    // reports recorded: false when its own Supabase connection isn't
+    // configured (see services/observability/src/supabaseClient.ts), which
+    // would otherwise fail this silently and leave chat_events looking
+    // empty with nothing in either service's logs explaining why.
+    const body = (await res.json().catch(() => null)) as { recorded?: boolean } | null;
+    if (body && body.recorded === false) {
+      console.error(
+        "Observability service acknowledged the event but did not record it -- check its SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY configuration."
+      );
     }
   } catch (err) {
     console.error("Observability event request failed:", err);
