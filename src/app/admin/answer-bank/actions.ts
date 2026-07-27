@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
 
 // The scope fields needed to evict the matching Redis entry -- the review
@@ -20,14 +20,14 @@ export type AnswerBankScope = {
 
 export async function approveAnswer(id: string) {
   await requireAdminPage("answer_bank");
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   await supabase.from("answered_questions").update({ validation_status: "admin_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
 
 export async function rejectAnswer(scope: AnswerBankScope) {
   await requireAdminPage("answer_bank");
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   await supabase.from("answered_questions").update({ validation_status: "rejected" }).eq("id", scope.id);
   // A rejected answer must stop being served immediately, not whenever its
   // Redis TTL happens to expire.
@@ -41,14 +41,14 @@ export async function rejectAnswer(scope: AnswerBankScope) {
 // repopulates the cache from the database as usual.
 export async function restoreAnswer(id: string) {
   await requireAdminPage("answer_bank");
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   await supabase.from("answered_questions").update({ validation_status: "auto_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
 
 export async function deleteAnswer(scope: AnswerBankScope) {
   await requireAdminPage("answer_bank");
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   await supabase.from("answered_questions").delete().eq("id", scope.id);
   await invalidateCachedAnswer(scope);
   revalidatePath("/admin/answer-bank");

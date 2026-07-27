@@ -1,5 +1,5 @@
 import { requireAdminPage } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { AnswerValidationStatus } from "@/lib/supabase/types";
 import { approveAnswer, deleteAnswer, rejectAnswer, restoreAnswer } from "./actions";
 
@@ -26,7 +26,12 @@ export default async function AnswerBankPage({
   await requireAdminPage("answer_bank");
   const { status } = await searchParams;
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
-  const supabase = await createClient();
+  // answered_questions has RLS enabled with zero policies (see
+  // supabase/migrations/0005_answer_bank.sql) -- it's a backend
+  // implementation detail the orchestrator writes to with its service-role
+  // key, so this admin page needs the same service-role client to read it;
+  // the ordinary session-scoped client would silently see zero rows.
+  const supabase = createAdminClient();
 
   let query = supabase
     .from("answered_questions")
