@@ -1,16 +1,35 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
-import { findAnswerInBank, recordAnswer } from "./answerBank.js";
+import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
+import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
-import { buildStaffSystemPrompt, buildTutorSystemPrompt } from "./prompts.js";
+import {
+  buildExerciseGenerationPrompt,
+  buildStaffSystemPrompt,
+  buildTopicSummaryPrompt,
+  buildTutorSystemPrompt,
+} from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
-import type { AnswerScope, ChatOrchestrationRequest, ChatOrchestrationResponse } from "./types.js";
+import { getStoredTopicSummary, storeTopicSummary } from "./topicSummary.js";
+import type {
+  AnswerScope,
+  ChatOrchestrationRequest,
+  ChatOrchestrationResponse,
+  Medium,
+  TopicExercisesRequest,
+  TopicExercisesResponse,
+  TopicSummaryRequest,
+  TopicSummaryResponse,
+} from "./types.js";
 
 const PORT = Number(process.env.PORT) || 4000;
 const MAX_TOKENS = 1536;
+const SUMMARY_MAX_TOKENS = 700;
+const EXERCISE_MAX_TOKENS = 2048;
+const EXERCISE_GENERATION_COUNT = 5;
 const SHARED_SECRET = process.env.ORCHESTRATOR_SHARED_SECRET;
 
 if (!SHARED_SECRET) {
@@ -285,6 +304,179 @@ app.post("/v1/cache/invalidate", requireSharedSecret, async (req: Request, res: 
 
   await deleteCachedAnswer(body as AnswerScope);
   res.json({ ok: true });
+});
+
+// Reached when a student clicks a topic in the syllabus panel. Checks the
+// durable store first (one summary per topic, reused by every student who
+// clicks that same topic); only calls the LLM on a miss, and stores the
+// result so the next click of this topic -- by anyone -- is a database hit.
+app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  const body = req.body as Partial<TopicSummaryRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !body.userId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.subjectName !== "string" ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.medium !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string"
+  ) {
+    res.status(400).json({
+      error: "userId, topicId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
+    });
+    return;
+  }
+
+  const existing = await getStoredTopicSummary(body.topicId);
+  if (existing) {
+    const response: TopicSummaryResponse = { summary: existing, source: "database" };
+    res.json(response);
+    return;
+  }
+
+  try {
+    const systemPrompt = buildTopicSummaryPrompt({
+      subjectName: body.subjectName,
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      medium: body.medium as Medium,
+      chapter: body.chapter,
+      topic: body.topic,
+    });
+    const { text, model, usage } = await getChatReply({
+      systemPrompt,
+      history: [],
+      message: "Write the summary now.",
+      maxTokens: SUMMARY_MAX_TOKENS,
+    });
+
+    await storeTopicSummary(body.topicId, text);
+
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      subjectId: "",
+      question: `topic-summary: ${body.chapter} / ${body.topic}`,
+      source: "llm",
+      provider: getActiveLlmProvider(),
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    const response: TopicSummaryResponse = { summary: text, source: "llm" };
+    res.json(response);
+  } catch (err) {
+    console.error("Topic summary generation failed:", err);
+    res.status(502).json({ error: "Could not generate a summary right now. Please try again shortly." });
+  }
+});
+
+// Reached when a student clicks "Relevant Exercises" under a topic summary.
+// Searches the answer bank for exercises already generated for this topic
+// (by anyone) before generating fresh ones -- same fall-through-to-LLM
+// philosophy as the chat pipeline's cache/database/LLM stages.
+app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  const body = req.body as Partial<TopicExercisesRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !body.userId ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.subjectName !== "string" ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.medium !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string"
+  ) {
+    res.status(400).json({
+      error:
+        "userId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
+    });
+    return;
+  }
+
+  const scope = {
+    boardId: body.boardId,
+    gradeId: body.gradeId,
+    subjectId: body.subjectId,
+    medium: body.medium as Medium,
+  };
+  const query = `${body.chapter} ${body.topic}`;
+
+  const found = await findRelevantExercises(scope, query);
+  if (found.length > 0) {
+    const response: TopicExercisesResponse = {
+      exercises: found.map(({ question, answer }) => ({ question, answer })),
+      source: "database",
+    };
+    res.json(response);
+    return;
+  }
+
+  try {
+    const systemPrompt = buildExerciseGenerationPrompt({
+      subjectName: body.subjectName,
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      medium: scope.medium,
+      chapter: body.chapter,
+      topic: body.topic,
+      count: EXERCISE_GENERATION_COUNT,
+    });
+    const { text, model, usage } = await getChatReply({
+      systemPrompt,
+      history: [],
+      message: "Generate the exercises now.",
+      maxTokens: EXERCISE_MAX_TOKENS,
+    });
+
+    const parsed = parseGeneratedExercises(text);
+    const stored: { question: string; answer: string }[] = [];
+    for (const exercise of parsed) {
+      const validation = validateAnswerForStorage(exercise.answer);
+      if (!validation.store) continue;
+      await recordAnswer({ ...scope, question: exercise.question }, exercise.answer, validation.status);
+      stored.push(exercise);
+    }
+
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `topic-exercises: ${body.chapter} / ${body.topic}`,
+      source: "llm",
+      provider: getActiveLlmProvider(),
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    const response: TopicExercisesResponse = { exercises: stored, source: "llm" };
+    res.json(response);
+  } catch (err) {
+    console.error("Exercise generation failed:", err);
+    res.status(502).json({ error: "Could not generate exercises right now. Please try again shortly." });
+  }
 });
 
 app.listen(PORT, () => {

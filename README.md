@@ -119,8 +119,8 @@ touching the web app or each other.
    the right-hand chat panel to that subject, and opens a middle syllabus panel listing every
    chapter and topic for that subject. Every message is answered by Claude, constrained by
    a system prompt built from the syllabus topics stored for that board/grade/subject, in the
-   subscribed medium. Clicking a topic in the syllabus panel opens its hand-curated practice
-   exercises and worked solutions, if any have been entered — see "Topic exercises" below.
+   subscribed medium. Clicking a topic opens an LLM-generated summary of it, plus a "Relevant
+   Exercises" button — see "Topic summaries and relevant exercises" below.
 5. **Admin panel** (`/admin`) — lists every user with their board/grade/medium/subjects/status and
    lets an admin promote/demote admins and cancel subscriptions. `/admin/catalog` manages boards,
    grades, subjects, which subjects each board/grade offers, and the syllabus topics themselves.
@@ -177,14 +177,23 @@ See `supabase/migrations/` for the full schema:
   them (see "Medium-scoped syllabus storage" below). Existing rows are backfilled to `English`
   (what the seed data was authored in); the unique constraint and scope index both grow the new
   column.
-- `0010_topic_exercises.sql` — `topic_exercises` (`topic_id`, `question`, `solution`, `sort_order`),
-  FK'd to `syllabus_topics` with `on delete cascade`. Same RLS shape as the syllabus tables:
-  readable by any authenticated user, writable only by admins. See "Topic exercises" below.
+- `0010_topic_exercises.sql` — **superseded, see 0012.** Originally added a `topic_exercises` table
+  for hand-curated, admin-authored practice questions. Kept in the migration history for the
+  record; the feature it supported was replaced before shipping.
 - `0011_password_lifecycle.sql` — adds `profiles.password_changed_at`; updates
   `handle_new_tutorops_user()` to also coalesce Google's `'name'` metadata key (not just the app's
   own `'full_name'`) and to stamp `password_changed_at` at signup when a password was set; adds an
   `auth.users` update trigger that re-stamps it on every later password change. See
   "Authentication" below.
+- `0012_drop_topic_exercises.sql` — drops `topic_exercises` (0010). Hand-curated exercises turned
+  out to be the wrong shape for this: see "Topic summaries and relevant exercises" below for what
+  replaced it.
+- `0013_topic_summaries_and_exercise_search.sql` — adds `topic_summaries` (one generated summary
+  per topic, RLS enabled with zero client-facing policies — service-role only, same lockdown as
+  `answered_questions`) and `search_topic_exercises`, a new RPC alongside the existing
+  `search_answer_bank`: returns several ranked `(question, answer)` matches for a chapter+topic
+  query instead of the single best match for one exact question, without touching the signature
+  the chat pipeline already depends on.
 
 ### Medium-scoped syllabus storage
 
@@ -208,29 +217,39 @@ automatically) — close to how these documents are already structured in the of
 it's parsed into individual rows in one submit, appended after whatever's already stored. Re-pasting
 the same lines is safe; duplicates are silently skipped rather than erroring or duplicating rows.
 
-### Topic exercises
+### Topic summaries and relevant exercises
 
-Each syllabus topic can have its own set of practice questions with worked solutions, visible to
-students from the dashboard's syllabus panel. These are hand-curated by admins, not LLM-generated —
-the point is that they match what's actually in the textbook, the same reasoning behind the
-syllabus itself being transcribed from the official source rather than synthesized.
+Selecting a subject opens a syllabus panel (desktop only) listing every chapter and topic for that
+board/grade/subject/medium — direct client-side Supabase queries against `syllabus_topics` (same
+pattern the chat panel uses for message history), since that table is already readable by any
+authenticated user under RLS. Staff accounts skip this panel entirely — they aren't scoped to one
+board/grade, which is what the panel is keyed on.
 
-From `/admin/catalog`, each topic row has an **Exercises** link to `/admin/catalog/topics/[id]`,
-which has the same single-add-or-bulk-paste shape as the syllabus importer. The bulk format is
-block-based rather than indentation-based, since a worked solution is rarely one line: a line
-starting with `Q:` opens the question, a line starting with `A:` opens the solution (either may
-span multiple lines), and a line of three or more dashes (`---`) separates one exercise from the
-next. Pasted exercises are appended after whatever's already stored for that topic.
+Clicking a topic opens a modal with two things, both LLM-backed and unlike the syllabus topics
+themselves, generated rather than hand-entered:
 
-On the student side, selecting a subject opens a syllabus panel (desktop only) listing every
-chapter and topic for that board/grade/subject/medium. Clicking a topic opens its exercises in a
-modal, question followed immediately by its solution — no separate reveal step, since these are
-meant to be used as a worked answer key, not a quiz. Both the topic list and the exercise fetch
-run as direct client-side Supabase queries (same pattern the chat panel already uses for message
-history), not a dedicated API route: `syllabus_topics` and `topic_exercises` are already readable
-by any authenticated user under RLS (the same policy the admin catalog itself relies on), so a
-proxy route would add a network hop without adding any actual access control. Staff accounts skip
-this panel entirely — they aren't scoped to one board/grade, which is what the panel is keyed on.
+- **Summary.** `GET /api/topics/[id]/summary` resolves the topic's board/grade/subject names
+  server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks
+  `topic_summaries` for an existing row before calling the LLM. A summary is generated once per
+  topic and reused by every student who clicks it after that — the modal never regenerates one
+  that already exists.
+- **Relevant Exercises**, a separate button shown once the summary loads. `GET
+  /api/topics/[id]/exercises` proxies to `/v1/topic-exercises`, which searches the existing answer
+  bank (`search_topic_exercises` — see the migration list above) using the chapter+topic name as
+  the query. A hit returns whatever's already there; a miss generates
+  `EXERCISE_GENERATION_COUNT` (5) fresh question+solution pairs, runs each solution through the
+  same `validateAnswerForStorage` heuristic the chat pipeline already uses (filtering out anything
+  that reads as hedging or a question asked back rather than an answer), and stores the ones that
+  pass into `answered_questions` — so a later "relevant exercises" click on this topic, or even an
+  organic chat question that happens to match one of these, can hit them too.
+
+Both endpoints are entirely orchestrator-owned (its existing service-role Supabase connection), the
+same division of responsibility as the rest of the pipeline: the web app's role is resolving
+context and proxying, never talking to an LLM or writing to these tables directly. Both report to
+observability the same way `/v1/chat` does (`source: "database"` on a hit, `"llm"` on a
+generate-and-store), tagged with a descriptive `question` string (`topic-summary: ...` /
+`topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
+observability dashboard.
 
 ### Authentication
 

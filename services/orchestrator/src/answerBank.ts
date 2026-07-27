@@ -43,6 +43,38 @@ export async function findAnswerInBank(
   return { id: data.id, answer: data.answer };
 }
 
+// "Relevant exercises" search, used by the topic-exercises endpoint --
+// distinct from findAnswerInBank above: that wants the single best match
+// for one specific question (the chat pipeline), this wants several ranked
+// matches for a topic (chapter+topic name as the query) and needs the
+// question text back too, since the student is shown a list of exercises.
+const EXERCISE_SEARCH_LIMIT = 5;
+
+export async function findRelevantExercises(
+  scope: Omit<AnswerScope, "question">,
+  query: string
+): Promise<{ id: string; question: string; answer: string }[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("search_topic_exercises", {
+    p_board_id: scope.boardId,
+    p_grade_id: scope.gradeId,
+    p_subject_id: scope.subjectId,
+    p_medium: scope.medium,
+    p_query: query,
+    p_min_rank: MIN_RANK,
+    p_limit: EXERCISE_SEARCH_LIMIT,
+  });
+
+  if (error) {
+    console.error("Postgres exercise search failed:", error);
+    return [];
+  }
+
+  return (data ?? []) as { id: string; question: string; answer: string }[];
+}
+
 export async function recordAnswer(
   scope: AnswerScope,
   answer: string,

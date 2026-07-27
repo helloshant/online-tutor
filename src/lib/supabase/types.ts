@@ -66,19 +66,6 @@ export type SyllabusTopic = {
   created_at: string;
 };
 
-// One hand-curated practice question + worked solution, attached to a single
-// syllabus_topics row. Not LLM-generated -- these are meant to match the
-// actual textbook, same rationale as the syllabus itself being hand-entered
-// rather than synthesized.
-export type Exercise = {
-  id: string;
-  topic_id: string;
-  question: string;
-  solution: string;
-  sort_order: number;
-  created_at: string;
-};
-
 export type Subscription = {
   id: string;
   user_id: string;
@@ -275,14 +262,6 @@ export interface Database {
         Insert: Partial<AdminPagePermission>;
         Update: Partial<AdminPagePermission>;
         Relationships: [];
-      };
-      topic_exercises: {
-        Row: Exercise;
-        Insert: Partial<Exercise>;
-        Update: Partial<Exercise>;
-        Relationships: [
-          { foreignKeyName: "topic_exercises_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
-        ];
       };
     };
     Views: Record<string, never>;

@@ -71,6 +71,82 @@ export async function getOrchestratedReply(
   return { reply: body.reply, source: body.source };
 }
 
+export type TopicSummaryRequest = {
+  userId: string;
+  topicId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+};
+
+export async function getTopicSummary(request: TopicSummaryRequest): Promise<{ summary: string }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-summary`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || typeof body.summary !== "string") {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { summary: body.summary };
+}
+
+export type TopicExercisesRequest = {
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+};
+
+export type ExerciseItem = { question: string; answer: string };
+
+export async function getTopicExercises(
+  request: TopicExercisesRequest
+): Promise<{ exercises: ExerciseItem[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.exercises)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { exercises: body.exercises as ExerciseItem[] };
+}
+
 export type CacheInvalidationScope = {
   boardId: string;
   gradeId: string;

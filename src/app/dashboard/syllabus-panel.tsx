@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Exercise, Medium, SyllabusTopic } from "@/lib/supabase/types";
+import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 export function SyllabusPanel({
   boardId,
@@ -85,30 +85,40 @@ export function SyllabusPanel({
       )}
 
       {selectedTopic && (
-        <ExerciseModal topic={selectedTopic} onClose={() => setSelectedTopic(null)} />
+        <TopicModal topic={selectedTopic} onClose={() => setSelectedTopic(null)} />
       )}
     </aside>
   );
 }
 
-function ExerciseModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () => void }) {
-  const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [loading, setLoading] = useState(true);
+type ExerciseItem = { question: string; answer: string };
+
+function TopicModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () => void }) {
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+
+  const [exercises, setExercises] = useState<ExerciseItem[] | null>(null);
+  const [exercisesError, setExercisesError] = useState<string | null>(null);
+  const [loadingExercises, setLoadingExercises] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("topic_exercises")
-        .select("*")
-        .eq("topic_id", topic.id)
-        .order("sort_order");
-
-      if (!cancelled) {
-        setExercises(data ?? []);
-        setLoading(false);
+      try {
+        const res = await fetch(`/api/topics/${topic.id}/summary`);
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok || !body?.summary) {
+          setSummaryError(body?.error ?? "Could not load the summary.");
+          return;
+        }
+        setSummary(body.summary);
+      } catch {
+        if (!cancelled) setSummaryError("Could not load the summary.");
+      } finally {
+        if (!cancelled) setLoadingSummary(false);
       }
     })();
 
@@ -116,6 +126,24 @@ function ExerciseModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () =
       cancelled = true;
     };
   }, [topic.id]);
+
+  async function handleLoadExercises() {
+    setLoadingExercises(true);
+    setExercisesError(null);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/exercises`);
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(body?.exercises)) {
+        setExercisesError(body?.error ?? "Could not load exercises.");
+        return;
+      }
+      setExercises(body.exercises);
+    } catch {
+      setExercisesError("Could not load exercises.");
+    } finally {
+      setLoadingExercises(false);
+    }
+  }
 
   return (
     <div
@@ -125,7 +153,7 @@ function ExerciseModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () =
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="exercise-modal-title"
+        aria-labelledby="topic-modal-title"
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl bg-surface shadow-xl"
       >
@@ -134,7 +162,7 @@ function ExerciseModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () =
             <p className="text-xs font-medium uppercase tracking-wide text-foreground/40">
               {topic.chapter}
             </p>
-            <h3 id="exercise-modal-title" className="mt-0.5 text-sm font-semibold">
+            <h3 id="topic-modal-title" className="mt-0.5 text-sm font-semibold">
               {topic.topic}
             </h3>
           </div>
@@ -148,24 +176,50 @@ function ExerciseModal({ topic, onClose }: { topic: SyllabusTopic; onClose: () =
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <p className="text-sm text-foreground/50">Loading…</p>
-          ) : exercises.length === 0 ? (
-            <p className="text-sm text-foreground/50">No exercises entered yet for this topic.</p>
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {loadingSummary ? (
+            <p className="text-sm text-foreground/50">Generating summary…</p>
+          ) : summaryError ? (
+            <p className="text-sm text-red-600">{summaryError}</p>
           ) : (
-            <ol className="space-y-5">
-              {exercises.map((ex, i) => (
-                <li key={ex.id}>
-                  <p className="text-sm font-medium">
-                    {i + 1}. {ex.question}
-                  </p>
-                  <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-sm text-foreground/80">
-                    {ex.solution}
-                  </p>
-                </li>
-              ))}
-            </ol>
+            <p className="whitespace-pre-wrap text-sm text-foreground/80">{summary}</p>
+          )}
+
+          {!loadingSummary && !summaryError && (
+            <div className="border-t border-border pt-4">
+              {exercisesError && <p className="mb-2 text-sm text-red-600">{exercisesError}</p>}
+
+              {exercises === null ? (
+                <button
+                  type="button"
+                  onClick={handleLoadExercises}
+                  disabled={loadingExercises}
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5 disabled:opacity-60"
+                >
+                  {loadingExercises ? "Finding exercises…" : "Relevant Exercises"}
+                </button>
+              ) : exercises.length === 0 ? (
+                <p className="text-sm text-foreground/50">No exercises available for this topic yet.</p>
+              ) : (
+                <>
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                    Relevant exercises
+                  </h4>
+                  <ol className="space-y-5">
+                    {exercises.map((ex, i) => (
+                      <li key={i}>
+                        <p className="text-sm font-medium">
+                          {i + 1}. {ex.question}
+                        </p>
+                        <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-sm text-foreground/80">
+                          {ex.answer}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>

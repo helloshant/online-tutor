@@ -48,6 +48,42 @@ export type AnswerScope = {
   question: string;
 };
 
+export type TopicSummaryRequest = {
+  userId: string;
+  topicId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+};
+
+export type TopicSummaryResponse = {
+  summary: string;
+  source: "database" | "llm";
+};
+
+export type TopicExercisesRequest = {
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+};
+
+export type ExerciseItem = { question: string; answer: string };
+
+export type TopicExercisesResponse = {
+  exercises: ExerciseItem[];
+  source: "database" | "llm";
+};
+
 export type TokenUsage = { promptTokens: number; completionTokens: number };
 
 // What an LLM provider returns -- the model field echoes back the exact

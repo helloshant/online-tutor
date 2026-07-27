@@ -37,6 +37,49 @@ Hard rules, in order of priority:
 Keep responses focused and appropriately concise for a chat interface.`;
 }
 
+export function buildTopicSummaryPrompt(params: {
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+}): string {
+  const { subjectName, boardName, gradeName, medium, chapter, topic } = params;
+  return `You are writing a quick-reference study summary for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
+
+Chapter: "${chapter}"
+Topic: "${topic}"
+
+Write ONLY in ${medium}, regardless of what language this prompt is in. Explain the core concept(s) clearly, state any key formulas/definitions/rules the student must remember, and keep it to a few short paragraphs -- this is a revision summary, not a full lesson, and it must not include practice questions or exercises.`;
+}
+
+const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
+Q: <question>
+A: <complete worked solution, showing steps>
+
+Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
+
+export function buildExerciseGenerationPrompt(params: {
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  chapter: string;
+  topic: string;
+  count: number;
+}): string {
+  const { subjectName, boardName, gradeName, medium, chapter, topic, count } = params;
+  return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
+
+Chapter: "${chapter}"
+Topic: "${topic}"
+
+Write ONLY in ${medium}, regardless of what language this prompt is in. Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.
+
+${EXERCISE_FORMAT_INSTRUCTIONS}`;
+}
+
 // Staff (admin/superadmin) aren't a specific grade's student and never
 // subscribe, so their chat isn't locked to one board/grade/syllabus/medium --
 // this is deliberately the "all privileges" unrestricted mode, mainly for
