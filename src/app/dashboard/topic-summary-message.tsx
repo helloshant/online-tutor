@@ -89,7 +89,7 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
                 type="button"
                 onClick={handleLoadExercises}
                 disabled={loadingExercises}
-                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5 disabled:opacity-60"
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
               >
                 {loadingExercises ? "Finding exercises…" : "Relevant Exercises"}
               </button>
