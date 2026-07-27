@@ -20,6 +20,15 @@ export default async function AdminUsersPage() {
       .order("created_at", { ascending: false }),
   ]);
 
+  // admin.auth.admin.listUsers() doesn't reliably populate each user's
+  // `identities` array, so it can't answer "does this account actually have
+  // a password" -- query the real table via RPC instead (see
+  // 0014_email_identity_check.sql).
+  const { data: identityRows } = await admin.rpc("get_users_with_email_identity", {
+    p_user_ids: (authUsers?.users ?? []).map((u) => u.id),
+  });
+  const hasEmailIdentityById = new Map((identityRows ?? []).map((r) => [r.user_id, r.has_email_identity]));
+
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
   const latestSubscriptionByUser = new Map<string, NonNullable<typeof subscriptions>[number]>();
   for (const sub of subscriptions ?? []) {
@@ -46,11 +55,7 @@ export default async function AdminUsersPage() {
       medium: sub?.medium,
       status: sub?.status,
       subjects,
-      // password_changed_at alone can't tell "no password" apart from "has
-      // one but predates the tracking migration" -- both are null. Whether
-      // an "email" identity is actually linked is the real signal (see the
-      // same reasoning on the user detail page).
-      passwordStatus: !u.identities?.some((i) => i.provider === "email")
+      passwordStatus: !hasEmailIdentityById.get(u.id)
         ? ("google" as const)
         : isPasswordExpired(profile ?? null)
           ? ("expired" as const)

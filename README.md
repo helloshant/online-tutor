@@ -296,8 +296,12 @@ Three additions on top of Supabase Auth's default email/password:
   only`) and `/admin/users/[id]` (a Password panel with the last-changed date and status) surface
   this rather than it being purely self-service. `password_changed_at` alone can't distinguish "no
   password at all" from "has one but predates the 0011 tracking migration" — both are null — so
-  the real signal used for "does this account have a password" is whether Supabase's own
-  `identities` array for that user includes an `"email"` entry, not `password_changed_at`.
+  "does this account have a password" is answered by whether it has an `"email"` row in
+  `auth.identities`. That can't be read through `admin.auth.admin.listUsers()` /
+  `getUserById()` directly — neither reliably populates the `identities` field on the objects they
+  return, silently making every account look Google-only regardless of the real data — so
+  `get_users_with_email_identity()` (`0014_email_identity_check.sql`, `security definer`,
+  `service_role`-only) queries `auth.identities` directly instead.
 
   From the detail page an admin can:
   - **Send a password reset email** on the user's behalf (`sendPasswordResetEmail` — same

@@ -265,6 +265,14 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      // admin.auth.admin.listUsers()/getUserById() don't reliably populate
+      // each user's `identities` array -- this queries auth.identities
+      // directly. See 0014_email_identity_check.sql.
+      get_users_with_email_identity: {
+        Args: { p_user_ids: string[] };
+        Returns: { user_id: string; has_email_identity: boolean }[];
+      };
+    };
   };
 }

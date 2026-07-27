@@ -29,15 +29,20 @@ export default async function AdminUserDetailPage({
   const { id } = await params;
   const admin = createAdminClient();
 
-  const [{ data: authUser }, { data: profile }, { data: subscriptions }] = await Promise.all([
-    admin.auth.admin.getUserById(id),
-    admin.from("profiles").select("*").eq("id", id).single(),
-    admin
-      .from("subscriptions")
-      .select("*, boards(name), grades(name), subscription_subjects(subjects(name))")
-      .eq("user_id", id)
-      .order("created_at", { ascending: false }),
-  ]);
+  const [{ data: authUser }, { data: profile }, { data: subscriptions }, { data: identityRows }] =
+    await Promise.all([
+      admin.auth.admin.getUserById(id),
+      admin.from("profiles").select("*").eq("id", id).single(),
+      admin
+        .from("subscriptions")
+        .select("*, boards(name), grades(name), subscription_subjects(subjects(name))")
+        .eq("user_id", id)
+        .order("created_at", { ascending: false }),
+      // admin.auth.admin.getUserById() doesn't reliably populate the
+      // returned user's `identities` array -- query the real table via RPC
+      // instead (see 0014_email_identity_check.sql).
+      admin.rpc("get_users_with_email_identity", { p_user_ids: [id] }),
+    ]);
 
   if (!authUser?.user) notFound();
 
@@ -47,10 +52,7 @@ export default async function AdminUserDetailPage({
   // superadmin) so the button doesn't invite an action that's a no-op.
   const canDeleteTarget = id !== actingUser.id && (targetRole === "user" || isSuperAdminViewer);
   const passwordExpired = isPasswordExpired(profile);
-  // password_changed_at alone can't tell "no password" apart from "has a
-  // password but predates the tracking migration (0011)" -- both are null.
-  // Whether an "email" identity is actually linked is the real signal.
-  const hasPasswordIdentity = authUser.user.identities?.some((i) => i.provider === "email") ?? false;
+  const hasPasswordIdentity = identityRows?.[0]?.has_email_identity ?? false;
 
   return (
     <div>
