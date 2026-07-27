@@ -151,6 +151,11 @@ export async function sendPasswordResetEmail(userId: string) {
   });
 }
 
+export interface SetUserPasswordState {
+  error?: string;
+  success?: boolean;
+}
+
 // Lets an admin directly set (or replace) a user's password, rather than
 // only being able to email them a reset link -- e.g. the account has no
 // working inbox, or the admin needs the change to take effect immediately.
@@ -159,15 +164,29 @@ export async function sendPasswordResetEmail(userId: string) {
 // authenticated, which is exactly the escape hatch this form exists for.
 // password_changed_at is stamped automatically by the auth.users update
 // trigger (0011_password_lifecycle.sql) -- no app-side write needed here.
-export async function setUserPassword(userId: string, formData: FormData) {
+// Takes userId first so the page can bind it and hand the rest to
+// useActionState (prevState, formData), which is what lets the form flash a
+// success/error message instead of this being fire-and-forget like the
+// other actions on this page.
+export async function setUserPassword(
+  userId: string,
+  _prevState: SetUserPasswordState,
+  formData: FormData
+): Promise<SetUserPasswordState> {
   await requireAdminPage("users");
   const password = String(formData.get("password") ?? "");
-  if (password.length < 8) return;
+  if (password.length < 8) {
+    return { error: "Password must be at least 8 characters." };
+  }
 
   const admin = createAdminClient();
-  await admin.auth.admin.updateUserById(userId, { password });
+  const { error } = await admin.auth.admin.updateUserById(userId, { password });
+  if (error) {
+    return { error: error.message };
+  }
 
   revalidatePath(`/admin/users/${userId}`);
+  return { success: true };
 }
 
 // Toggles whether a native account's password is currently treated as

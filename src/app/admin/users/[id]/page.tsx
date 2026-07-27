@@ -7,11 +7,11 @@ import {
   deleteUser,
   sendPasswordResetEmail,
   setAccountExpired,
-  setUserPassword,
   setUserRole,
   updateUserProfile,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SetPasswordForm } from "./set-password-form";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const ROLE_LABEL: Record<ProfileRole, string> = {
@@ -171,19 +171,15 @@ export default async function AdminUserDetailPage({
           )}
         </div>
 
-        <form action={setUserPassword.bind(null, id)} className="mt-3 flex flex-wrap items-end gap-2">
-          <input
-            name="password"
-            type="password"
-            required
-            minLength={8}
-            placeholder={hasPasswordIdentity ? "New password (min. 8 characters)" : "Set a password (min. 8 characters)"}
-            className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+        <div className="mt-3">
+          <SetPasswordForm
+            userId={id}
+            placeholder={
+              hasPasswordIdentity ? "New password (min. 8 characters)" : "Set a password (min. 8 characters)"
+            }
+            submitLabel={hasPasswordIdentity ? "Set new password" : "Set password"}
           />
-          <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
-            {hasPasswordIdentity ? "Set new password" : "Set password"}
-          </button>
-        </form>
+        </div>
       </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">
