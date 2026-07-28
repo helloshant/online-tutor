@@ -6,6 +6,7 @@ import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
 import { PracticePanel } from "./practice-panel";
+import { TopicList } from "./topic-list";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -47,11 +48,13 @@ export function DashboardShell({
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below.
   const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
-  // Which of the two main-area surfaces is visible -- both stay mounted
-  // (see the main content below) so switching tabs never loses either
-  // panel's local state (the chat timeline's ephemeral topic bubbles, or
-  // an in-progress Practice search).
-  const [mainTab, setMainTab] = useState<"chat" | "practice">("chat");
+  // Which of the main-area surfaces is visible -- all stay mounted (see the
+  // main content below) so switching tabs never loses any panel's local
+  // state (the chat timeline's ephemeral topic bubbles, or an in-progress
+  // Practice search). "topics" is a mobile-only tab (hidden lg:), since
+  // desktop already has SyllabusPanel as a persistent sidebar -- the same
+  // TopicList is reused in both places, see topic-list.tsx.
+  const [mainTab, setMainTab] = useState<"chat" | "practice" | "topics">("chat");
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
 
@@ -59,6 +62,17 @@ export function DashboardShell({
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
     setSubjectsCollapsed(true);
+    setMainTab("chat");
+  }
+
+  // Shared by SyllabusPanel's sidebar (desktop) and the Topics tab (mobile)
+  // -- always jump to the Chat tab on select, since that's where the
+  // resulting summary bubble actually appears. Without this, clicking a
+  // topic while on the Practice (or, on mobile, Topics) tab would drop the
+  // bubble into a panel the student isn't currently looking at, with no
+  // visible feedback that anything happened.
+  function handleSelectTopic(topic: SyllabusTopic) {
+    setTopicClick({ clickId: crypto.randomUUID(), topic });
     setMainTab("chat");
   }
 
@@ -138,7 +152,7 @@ export function DashboardShell({
             subjectId={selectedSubject.id}
             medium={medium}
             selectedTopicId={topicClick?.topic.id ?? null}
-            onSelectTopic={(topic) => setTopicClick({ clickId: crypto.randomUUID(), topic })}
+            onSelectTopic={handleSelectTopic}
           />
         )}
 
@@ -147,6 +161,17 @@ export function DashboardShell({
             <>
               {!isStaffUser && boardId && gradeId && medium && (
                 <div className="flex shrink-0 gap-1 border-b border-border bg-surface px-4 pt-2 sm:px-6">
+                  <button
+                    type="button"
+                    onClick={() => setMainTab("topics")}
+                    className={`rounded-t-lg px-3 py-1.5 text-sm font-medium transition lg:hidden ${
+                      mainTab === "topics"
+                        ? "border border-b-0 border-border bg-background text-brand"
+                        : "text-foreground/50 hover:text-foreground"
+                    }`}
+                  >
+                    Topics
+                  </button>
                   {(["chat", "practice"] as const).map((tab) => (
                     <button
                       key={tab}
@@ -164,8 +189,24 @@ export function DashboardShell({
                 </div>
               )}
 
-              {/* Both panels stay mounted and toggle via display, not conditional
-                  rendering, so switching tabs never discards either one's state. */}
+              {/* All three panels stay mounted and toggle via display, not
+                  conditional rendering, so switching tabs never discards any
+                  panel's state. */}
+              {!isStaffUser && boardId && gradeId && medium && (
+                <div className={mainTab === "topics" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
+                  <p className="mb-3 text-xs text-foreground/40">
+                    Tap a topic to drop its summary into the chat.
+                  </p>
+                  <TopicList
+                    boardId={boardId}
+                    gradeId={gradeId}
+                    subjectId={selectedSubject.id}
+                    medium={medium}
+                    selectedTopicId={topicClick?.topic.id ?? null}
+                    onSelectTopic={handleSelectTopic}
+                  />
+                </div>
+              )}
               <div className={mainTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                 <ChatPanel
                   key={selectedSubject.id}

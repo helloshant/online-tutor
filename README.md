@@ -231,13 +231,19 @@ Clicking a topic drops a message bubble (`TopicSummaryMessage`) straight into th
 not a separate panel or modal — a student can ask the tutor a follow-up about it without leaving
 the conversation. `ChatPanel` maintains a unified `TimelineEntry[]` of real `chat_messages` rows
 interleaved with these topic entries (never persisted — purely local, so reloading the page drops
-them but keeps the real conversation), rather than two disconnected message lists. `SyllabusPanel`
-itself is now just the clickable chapter/topic list; the click is lifted up to `DashboardShell`
+them but keeps the real conversation), rather than two disconnected message lists. The clickable
+chapter/topic list itself lives in `topic-list.tsx` (`TopicList`), shared by two different frames:
+`SyllabusPanel` (a persistent desktop sidebar, `hidden lg:block`) and a mobile-only `Topics` tab in
+`DashboardShell` (the tab button is `lg:hidden`, since desktop already has the sidebar) — without
+this, topic browsing, summaries, and "Relevant Exercises" would all have been entirely unreachable
+below the `lg` breakpoint, i.e. on every phone. Either path lifts the click up to `DashboardShell`
 (`topicClick: { clickId, topic }`, a fresh `clickId` even for the same topic clicked twice, so it
-always drops a new bubble the same way sending a duplicate message would) and passed down into
-`ChatPanel` as a prop, since the two are siblings with no direct connection otherwise. It shows two
-things, both LLM-backed and unlike the syllabus topics themselves, generated rather than
-hand-entered:
+always drops a new bubble the same way sending a duplicate message would) via a single
+`handleSelectTopic` that also switches the active main tab to `Chat` — necessary because a topic
+click on `Topics` (mobile) or while the desktop `Practice` tab is active would otherwise drop the
+resulting bubble into a panel the student isn't currently looking at, with no visible feedback that
+anything happened. It shows two things, both LLM-backed and unlike the syllabus topics themselves,
+generated rather than hand-entered:
 
 - **Summary.** `GET /api/topics/[id]/summary` resolves the topic's board/grade/subject names
   server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks
@@ -318,17 +324,16 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   narrow the list further via the combined `topicId` + `tag` search above, without leaving the
   conversation. This is a lightweight refinement on top of the existing per-topic flow, not a
   replacement for the Practice panel below.
-- **Practice panel** (`PracticePanel`, a `Chat` / `Practice` tab next to the chat timeline — both
-  panels stay mounted and toggle via CSS display rather than conditional rendering, so switching
-  tabs never discards either one's state, e.g. an in-progress chat or a half-built search). The
-  dedicated browse/search surface for the answer bank: a topic dropdown, tag chips (scoped to the
-  selected topic when there is one, via the same `tags` endpoint), and results that update
-  automatically as either filter changes — no separate submit step, since these are facet filters,
-  not a form. Unlike `SyllabusPanel` (`hidden lg:block`, desktop only), this tab renders identically
-  on mobile and desktop, since it lives in the main content area rather than a sidebar — it's the
-  only way a mobile student can browse or search the answer bank at all. `SyllabusPanel`'s
-  now-redundant standalone tag search box (an earlier, disconnected version of this) was removed in
-  favor of this single, more capable, mobile-friendly surface.
+- **Practice panel** (`PracticePanel`, a `Chat` / `Practice` tab next to the chat timeline, plus the
+  mobile-only `Topics` tab described above — all three stay mounted and toggle via CSS display
+  rather than conditional rendering, so switching tabs never discards any panel's state, e.g. an
+  in-progress chat or a half-built search). The dedicated browse/search surface for the answer bank:
+  a topic dropdown, tag chips (scoped to the selected topic when there is one, via the same `tags`
+  endpoint), and results that update automatically as either filter changes — no separate submit
+  step, since these are facet filters, not a form. Unlike `SyllabusPanel`, this tab renders
+  identically on mobile and desktop, since it lives in the main content area rather than a sidebar.
+  `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected version of this)
+  was removed in favor of this single, more capable surface.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying
