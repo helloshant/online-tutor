@@ -288,6 +288,27 @@ generate-and-store), tagged with a descriptive `question` string (`topic-summary
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
 
+### Mobile navigation
+
+Most students use this on a phone, so `DashboardShell`'s navigation is two genuinely different
+layouts below and above the `lg` breakpoint, not one desktop layout that happens to still render on
+mobile:
+
+- **Subject switcher.** Desktop keeps a persistent, collapsible sidebar (`aside`, `hidden lg:block`)
+  — collapsed to a 56px icon strip by default once a subject is active, expandable via the `»`/`«`
+  toggle. Below `lg`, that sidebar is replaced entirely by a horizontally scrollable row of subject
+  chips between the header and the main content — a persistent sidebar, even collapsed, permanently
+  eats width on a phone-sized viewport, and switching subjects is frequent enough to deserve one-tap
+  visibility rather than being tucked behind a drawer/hamburger menu (the usual pattern for
+  secondary/infrequent navigation, which subject-switching isn't here).
+- **Topic browsing.** Covered above: `SyllabusPanel` (desktop sidebar) and the mobile-only `Topics`
+  tab both render the same `TopicList`, so topic summaries and "Relevant Exercises" — not just
+  answer-bank search — are fully usable on a phone, not only through the Practice tab.
+
+Both responsive swaps use the same breakpoint (`lg`, Tailwind's default `1024px`) and the same
+`hidden .../lg:hidden` pairing convention, so there's exactly one place a screen is considered
+"desktop" throughout this component.
+
 ### Answer bank tags — search by source ("Ganit Prakash", "WBJEE 2023")
 
 `topic_id` scopes an entry to one syllabus topic, but a lot of real content doesn't map cleanly to

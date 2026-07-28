@@ -96,9 +96,35 @@ export function DashboardShell({
         </div>
       </header>
 
+      {/* Mobile subject switcher: a horizontally scrollable chip row,
+          replacing the sidebar below lg. A persistent sidebar -- even
+          collapsed to a 56px icon strip -- permanently eats screen width on
+          a phone-sized viewport, and switching subjects is frequent enough
+          to deserve one-tap visibility rather than being tucked behind a
+          drawer/hamburger. */}
+      <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-surface px-3 py-2 lg:hidden">
+        {subjects.map((subject) => (
+          <button
+            key={subject.id}
+            type="button"
+            onClick={() => handleSelectSubject(subject.id)}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+              subject.id === selectedSubjectId
+                ? "bg-brand text-white"
+                : "bg-background text-foreground/70 hover:bg-brand/5"
+            }`}
+          >
+            {subject.name}
+          </button>
+        ))}
+        {subjects.length === 0 && (
+          <p className="px-2 py-1 text-sm text-foreground/50">No subjects subscribed.</p>
+        )}
+      </div>
+
       <div className="flex min-h-0 flex-1">
         <aside
-          className={`shrink-0 overflow-y-auto border-r border-border bg-surface transition-[width] ${
+          className={`hidden shrink-0 overflow-y-auto border-r border-border bg-surface transition-[width] lg:block ${
             subjectsCollapsed ? "w-14 p-2" : "w-56 p-3 sm:w-64"
           }`}
         >
