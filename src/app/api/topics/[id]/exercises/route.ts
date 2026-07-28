@@ -43,6 +43,7 @@ async function handleGetExercises({ id: topicId }: { id: string }) {
   try {
     const { exercises } = await getTopicExercises({
       userId: user.id,
+      topicId,
       boardId: topicRow.board_id,
       gradeId: topicRow.grade_id,
       subjectId: topicRow.subject_id,

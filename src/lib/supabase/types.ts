@@ -101,15 +101,20 @@ export type ChatMessage = {
 export type AnswerValidationStatus = "auto_approved" | "pending_review" | "admin_approved" | "rejected";
 
 // Written only by the orchestrator service (service-role key) -- see
-// supabase/migrations/0005_answer_bank.sql and 0006_answer_bank_validation.sql.
-// The admin panel reads/updates/deletes this table through the ordinary
-// session (RLS + is_admin()), same pattern as the syllabus catalog tables;
-// it never inserts into it.
+// supabase/migrations/0005_answer_bank.sql, 0006_answer_bank_validation.sql,
+// and 0015_answer_bank_topic_id.sql. RLS is enabled with zero client-facing
+// policies (a deliberate backend-only table, see 0005), so the admin panel
+// reads/updates/deletes it with the service-role client too -- there is no
+// ordinary-session path to this table at all.
 export type AnsweredQuestion = {
   id: string;
   board_id: string;
   grade_id: string;
   subject_id: string;
+  // Set only for entries created by the topic-exercises generation flow --
+  // an ordinary chat-answered question has no syllabus topic concept, only
+  // a board/grade/subject/medium scope.
+  topic_id: string | null;
   medium: Medium;
   question: string;
   answer: string;
@@ -244,6 +249,7 @@ export interface Database {
           { foreignKeyName: "answered_questions_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
           { foreignKeyName: "answered_questions_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
           { foreignKeyName: "answered_questions_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          { foreignKeyName: "answered_questions_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
         ];
       };
       chat_events: {

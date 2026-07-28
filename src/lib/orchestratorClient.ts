@@ -117,6 +117,7 @@ export async function getTopicSummary(request: TopicSummaryRequest): Promise<{ s
 
 export type TopicExercisesRequest = {
   userId: string;
+  topicId: string;
   boardId: string;
   gradeId: string;
   subjectId: string;

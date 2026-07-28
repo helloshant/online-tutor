@@ -246,22 +246,33 @@ hand-entered:
   that already exists.
 - **Relevant Exercises**, a separate button shown once the summary loads. `GET
   /api/topics/[id]/exercises` proxies to `/v1/topic-exercises`, which searches the existing answer
-  bank (`search_topic_exercises` — see the migration list above) using the chapter+topic name as
-  the query. A hit returns whatever's already there; a miss generates
-  `EXERCISE_GENERATION_COUNT` (5) fresh question+solution pairs, runs each solution through the
-  same `validateAnswerForStorage` heuristic the chat pipeline already uses (filtering out anything
-  that reads as hedging or a question asked back rather than an answer), and attempts to store the
-  ones that pass into `answered_questions` — so a later "relevant exercises" click on this topic, or
-  even an organic chat question that happens to match one of these, can hit them too. The student
-  always sees every exercise that passed validation regardless of whether the store actually
-  succeeds (a write failure never costs them the exercises they just asked for), but before each
-  individual write, `findAnswerInBank` (the same single-best-match lookup `/v1/chat` uses) checks
-  whether that specific question already exists anywhere in the bank — since the topic-level search
-  above only misses when *nothing* for the topic exists yet, not when one particular generated
-  question happens to duplicate something already banked under a different topic query — so a
-  near-duplicate is skipped rather than written twice. Any write failure (e.g. the orchestrator's
-  Supabase connection isn't configured) is logged rather than silently dropped, the same fix applied
-  to the chat pipeline's own answer-bank write.
+  bank (`search_topic_exercises` — see the migration list above) for an exact `topic_id` match. A
+  hit returns whatever's already there; a miss generates `EXERCISE_GENERATION_COUNT` (5) fresh
+  question+solution pairs, runs each solution through the same `validateAnswerForStorage` heuristic
+  the chat pipeline already uses (filtering out anything that reads as hedging or a question asked
+  back rather than an answer), and attempts to store the ones that pass into `answered_questions`,
+  tagged with the topic's ID — so a later "relevant exercises" click on this same topic, by anyone,
+  can hit them too. `topic_id` on `answered_questions` (`0015_answer_bank_topic_id.sql`) is
+  nullable and set only by this flow — an ordinary chat-answered question has no syllabus topic
+  concept, only the board/grade/subject/medium scope `search_answer_bank` already uses — and is
+  what makes this an *exact* lookup rather than the full-text ranking every other answer-bank
+  lookup in this pipeline uses. That distinction matters here specifically because nothing else on
+  the row identifies which topic an exercise came from: without `topic_id`, "relevant exercises for
+  topic A" and "relevant exercises for topic B" would only be told apart by how closely each row's
+  `question` text happens to rank against topic A's or B's chapter+topic name — the same ranking
+  approach `search_answer_bank` uses for chat questions, which is appropriate there (a genuinely
+  fuzzy "does this row answer roughly the same question" lookup) but wrong here, where the two
+  topics are unambiguous and conflating them means one topic's "Relevant Exercises" can surface
+  another topic's questions, or fail to resurface its own. The student always sees every exercise
+  that passed validation regardless of whether the store actually succeeds (a write failure never
+  costs them the exercises they just asked for), but before each individual write,
+  `findAnswerInBank` (the same single-best-match full-text lookup `/v1/chat` uses, unrelated to the
+  topic_id matching above) checks whether that specific question already exists anywhere in the
+  bank — since the topic-level search only misses when *nothing* is banked for this exact topic
+  yet, not when one particular generated question happens to duplicate something banked under a
+  *different* topic — so a near-duplicate is skipped rather than written twice. Any write failure
+  (e.g. the orchestrator's Supabase connection isn't configured) is logged rather than silently
+  dropped, the same fix applied to the chat pipeline's own answer-bank write.
 
 Both endpoints are entirely orchestrator-owned (its existing service-role Supabase connection), the
 same division of responsibility as the rest of the pipeline: the web app's role is resolving

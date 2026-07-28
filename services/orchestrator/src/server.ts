@@ -456,9 +456,10 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
 });
 
 // Reached when a student clicks "Relevant Exercises" under a topic summary.
-// Searches the answer bank for exercises already generated for this topic
-// (by anyone) before generating fresh ones -- same fall-through-to-LLM
-// philosophy as the chat pipeline's cache/database/LLM stages.
+// Searches the answer bank for exercises already generated for this exact
+// topic (by anyone -- exact topic_id match, see 0015_answer_bank_topic_id.sql)
+// before generating fresh ones -- same fall-through-to-LLM philosophy as the
+// chat pipeline's cache/database/LLM stages.
 app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: Response) => {
   const startedAt = Date.now();
   const body = req.body as Partial<TopicExercisesRequest> | undefined;
@@ -467,6 +468,8 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     !body ||
     typeof body.userId !== "string" ||
     !body.userId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
     typeof body.boardId !== "string" ||
     !body.boardId ||
     typeof body.gradeId !== "string" ||
@@ -482,7 +485,7 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
   ) {
     res.status(400).json({
       error:
-        "userId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
+        "userId, topicId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
     });
     return;
   }
@@ -493,9 +496,8 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     subjectId: body.subjectId,
     medium: body.medium as Medium,
   };
-  const query = `${body.chapter} ${body.topic}`;
 
-  const found = await findRelevantExercises(scope, query);
+  const found = await findRelevantExercises(scope, body.topicId);
   if (found.length > 0) {
     void recordChatEvent({
       userId: body.userId,
@@ -543,16 +545,17 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       if (!validation.store) continue;
       stored.push(exercise);
 
-      // The topic-level search above (findRelevantExercises) can still miss
-      // a near-duplicate of one specific generated exercise -- e.g. the same
-      // question worded slightly differently, or filed under a different
-      // topic query -- so check per-exercise before writing, rather than
-      // trusting the batch-level miss to mean every exercise is new.
+      // The topic-level search above (findRelevantExercises) only tells us
+      // this exact topic has nothing banked yet -- a specific generated
+      // question can still coincide with one already banked under a
+      // *different* topic (e.g. the same exercise regenerated after a
+      // syllabus edit moved it), so check per-exercise before writing rather
+      // than trusting the topic-level miss to mean every exercise is new.
       const existing = await findAnswerInBank({ ...scope, question: exercise.question });
       if (existing) continue;
 
       const saved = await recordAnswer(
-        { ...scope, question: exercise.question },
+        { ...scope, question: exercise.question, topicId: body.topicId },
         exercise.answer,
         validation.status
       );

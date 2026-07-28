@@ -51,12 +51,19 @@ export type ChatOrchestrationResponse = {
 // Identifies a single question within the L1 (Redis) / L2 (Postgres answer
 // bank) lookup scope. Two students asking the same words under different
 // boards/grades/mediums must never share an answer.
+//
+// topicId is optional and only ever set by the topic-exercises generation
+// flow -- an ordinary chat question has no syllabus topic concept, only a
+// board/grade/subject/medium scope. When set, it's what search_topic_exercises
+// matches on exactly, rather than the fuzzy chapter+topic text ranking this
+// replaced (see 0015_answer_bank_topic_id.sql).
 export type AnswerScope = {
   boardId: string;
   gradeId: string;
   subjectId: string;
   medium: Medium;
   question: string;
+  topicId?: string;
 };
 
 export type TopicSummaryRequest = {
@@ -78,6 +85,7 @@ export type TopicSummaryResponse = {
 
 export type TopicExercisesRequest = {
   userId: string;
+  topicId: string;
   boardId: string;
   gradeId: string;
   subjectId: string;

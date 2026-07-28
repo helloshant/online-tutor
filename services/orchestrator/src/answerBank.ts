@@ -44,15 +44,18 @@ export async function findAnswerInBank(
 }
 
 // "Relevant exercises" search, used by the topic-exercises endpoint --
-// distinct from findAnswerInBank above: that wants the single best match
-// for one specific question (the chat pipeline), this wants several ranked
-// matches for a topic (chapter+topic name as the query) and needs the
-// question text back too, since the student is shown a list of exercises.
+// distinct from findAnswerInBank above: that wants the single best
+// full-text match for one specific question (the chat pipeline), this
+// wants every exercise already banked for one exact syllabus topic (an
+// exact topic_id match, not a text-similarity guess -- see
+// 0015_answer_bank_topic_id.sql for why this isn't FTS-ranked like the
+// other lookups here) and needs the question text back too, since the
+// student is shown a list of exercises rather than a single reply.
 const EXERCISE_SEARCH_LIMIT = 5;
 
 export async function findRelevantExercises(
-  scope: Omit<AnswerScope, "question">,
-  query: string
+  scope: Omit<AnswerScope, "question" | "topicId">,
+  topicId: string
 ): Promise<{ id: string; question: string; answer: string }[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -62,8 +65,7 @@ export async function findRelevantExercises(
     p_grade_id: scope.gradeId,
     p_subject_id: scope.subjectId,
     p_medium: scope.medium,
-    p_query: query,
-    p_min_rank: MIN_RANK,
+    p_topic_id: topicId,
     p_limit: EXERCISE_SEARCH_LIMIT,
   });
 
@@ -96,6 +98,7 @@ export async function recordAnswer(
     question: scope.question,
     answer,
     validation_status: validationStatus,
+    topic_id: scope.topicId ?? null,
   });
 
   if (error) {
