@@ -304,10 +304,18 @@ mobile:
 - **Topic browsing.** Covered above: `SyllabusPanel` (desktop sidebar) and the mobile-only `Topics`
   tab both render the same `TopicList`, so topic summaries and "Relevant Exercises" — not just
   answer-bank search — are fully usable on a phone, not only through the Practice tab.
+- **Chat input row** (`ChatPanel`). The message `<input>` is `text-base` (16px), not `text-sm` —
+  iOS Safari auto-zooms the entire page on focusing any input/textarea under 16px, and a chat box
+  gets refocused constantly, so this isn't a font-size preference, it's a real recurring bug on
+  every iPhone otherwise. The Send button is icon-only below `sm` (`➤`, with an `aria-label` since
+  the visual "Send" text is hidden there) rather than a full text label — on a narrow screen it was
+  a third element competing for width alongside the attach button and the input itself; the label
+  reappears at `sm:` and up where there's room for it.
 
-Both responsive swaps use the same breakpoint (`lg`, Tailwind's default `1024px`) and the same
-`hidden .../lg:hidden` pairing convention, so there's exactly one place a screen is considered
-"desktop" throughout this component.
+Both responsive swaps (subject switcher, topic browsing) use the same breakpoint (`lg`, Tailwind's
+default `1024px`) and the same `hidden .../lg:hidden` pairing convention, so there's exactly one
+place a screen is considered "desktop" throughout this component; the chat input fix above applies
+at `sm` (`640px`) instead, matching the breakpoint the header already uses to hide secondary info.
 
 ### Answer bank tags — search by source ("Ganit Prakash", "WBJEE 2023")
 

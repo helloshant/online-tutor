@@ -251,7 +251,7 @@ export function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={sendMessage} className="shrink-0 border-t border-border bg-surface p-4">
+      <form onSubmit={sendMessage} className="shrink-0 border-t border-border bg-surface p-3 sm:p-4">
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
         {selectedImage && (
           <div className="mb-2 flex w-fit items-center gap-2 rounded-lg border border-border bg-background p-1.5 pr-2">
@@ -280,29 +280,40 @@ export function ChatPanel({
             onClick={() => fileInputRef.current?.click()}
             disabled={sending}
             title="Attach a screenshot or photo"
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
+            aria-label="Attach a screenshot or photo"
+            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
           >
             📎
           </button>
+          {/* text-base (16px), not text-sm -- iOS Safari auto-zooms the whole
+              page on focusing any input/textarea under 16px, which on a
+              chat box a student re-focuses constantly is a real, jarring
+              bug, not just a font-size preference. */}
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={`Ask a ${subject.name} question…`}
             disabled={sending}
-            className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-base outline-none focus:ring-2 focus:ring-brand disabled:opacity-60 sm:text-sm"
           />
           <button
             type="submit"
             disabled={sending || (!input.trim() && !selectedImage)}
+            aria-label="Send message"
+            title="Send"
             // Browser extensions (password managers, Grammarly, etc.) commonly
             // patch the `disabled` attribute on form buttons before React
             // hydrates, which triggers a false-positive hydration mismatch
             // warning here even though server and client compute the same
             // value from identical initial state.
             suppressHydrationWarning
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50 sm:px-4"
           >
-            Send
+            {/* Icon-only below sm: a full "Send" label was one of three
+                elements competing for width in a single row on a phone,
+                alongside the attach button and the input itself. */}
+            <span aria-hidden="true">➤</span>
+            <span className="hidden sm:inline">Send</span>
           </button>
         </div>
       </form>
