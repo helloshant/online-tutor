@@ -11,7 +11,6 @@ export function SyllabusPanel({
   medium,
   selectedTopicId,
   onSelectTopic,
-  onSearchTag,
 }: {
   boardId: string;
   gradeId: string;
@@ -19,12 +18,9 @@ export function SyllabusPanel({
   medium: Medium;
   selectedTopicId: string | null;
   onSelectTopic: (topic: SyllabusTopic) => void;
-  onSearchTag: (tag: string) => void;
 }) {
   const [topics, setTopics] = useState<SyllabusTopic[]>([]);
   const [loading, setLoading] = useState(true);
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -51,34 +47,6 @@ export function SyllabusPanel({
     };
   }, [boardId, gradeId, subjectId, medium]);
 
-  // Suggests real tag values (e.g. "Ganit Prakash", "WBJEE 2023") instead of
-  // asking the student to guess exact tag text blind -- only entries an
-  // admin has tagged show up here at all, so an empty list is expected
-  // until some exist for this subject.
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      const res = await fetch(`/api/answer-bank/tags?subjectId=${encodeURIComponent(subjectId)}`);
-      const body = await res.json().catch(() => null);
-      if (!cancelled && res.ok && Array.isArray(body?.tags)) {
-        setAvailableTags(body.tags);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [subjectId]);
-
-  function handleTagSearch(e: React.FormEvent) {
-    e.preventDefault();
-    const tag = tagInput.trim();
-    if (!tag) return;
-    onSearchTag(tag);
-    setTagInput("");
-  }
-
   const chapters: { chapter: string; topics: SyllabusTopic[] }[] = [];
   for (const topic of topics) {
     const group = chapters.find((c) => c.chapter === topic.chapter);
@@ -90,35 +58,9 @@ export function SyllabusPanel({
     <aside className="hidden w-80 shrink-0 overflow-y-auto border-r border-border bg-surface p-3 lg:block">
       <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">Syllabus</h2>
       <p className="mt-1 px-2 text-xs text-foreground/40">
-        Click a topic to drop its summary into the chat.
+        Click a topic to drop its summary into the chat. Looking for questions from a specific book
+        or exam paper? Try the Practice tab.
       </p>
-
-      <form onSubmit={handleTagSearch} className="mt-3 px-2">
-        <label className="text-xs font-semibold uppercase tracking-wide text-foreground/40">
-          Search by tag
-        </label>
-        <div className="mt-1 flex gap-1.5">
-          <input
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            list="answer-bank-tags"
-            placeholder="e.g. Ganit Prakash, WBJEE 2023"
-            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-brand"
-          />
-          <datalist id="answer-bank-tags">
-            {availableTags.map((t) => (
-              <option key={t} value={t} />
-            ))}
-          </datalist>
-          <button
-            type="submit"
-            disabled={!tagInput.trim()}
-            className="shrink-0 rounded-lg border border-border px-2 py-1.5 text-xs font-medium hover:bg-brand/5 disabled:opacity-50"
-          >
-            Search
-          </button>
-        </div>
-      </form>
 
       {loading ? (
         <p className="mt-3 px-2 text-sm text-foreground/50">Loading…</p>

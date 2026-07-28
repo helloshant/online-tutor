@@ -303,24 +303,37 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer hedging
   or reading like a question asked back — neither applies to hand-sourced content) and are stored
   `admin_approved` immediately, with no `topic_id` (deliberately — see above).
-- **Student: tag search** (`SyllabusPanel`, desktop only, same panel the topic list lives in). A
-  search box suggests real tag values (via `GET /api/answer-bank/tags?subjectId=...`, which lists
-  distinct tags already banked for the student's board/grade/medium and the given subject) rather
-  than asking the student to guess exact tag text blind. Submitting drops a new bubble into the chat
-  timeline (`TagSearchMessage`, mirroring `TopicSummaryMessage`'s pattern — a fresh id per submit so
-  the same tag searched twice still drops a new bubble), which fetches
-  `GET /api/answer-bank/search?subjectId=...&tag=...` and lists whatever matched. Both endpoints
-  resolve the student's board/grade/medium from their active subscription and verify the requested
-  subject is actually part of it (`src/lib/studentScope.ts`, the same entitlement check `/api/chat`
-  applies) before querying — `answered_questions` has zero client-facing RLS policies, so without
-  this a student could otherwise read any board/grade/subject's tagged content, not just their own.
-  Only `auto_approved`/`admin_approved` entries are ever returned, same as every other student-facing
-  read of this table.
+- **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
+  alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
+  exercises for this specific topic") — `search` requires at least one of the two, since neither
+  would mean "everything ever banked for this subject," an unbounded dump with no real use case here.
+  Both resolve the student's board/grade/medium from their active subscription and verify the
+  requested subject is actually part of it (`src/lib/studentScope.ts`, the same entitlement check
+  `/api/chat` applies) before querying — `answered_questions` has zero client-facing RLS policies, so
+  without this a student could otherwise read any board/grade/subject's tagged content, not just
+  their own. Only `auto_approved`/`admin_approved` entries are ever returned.
+- **Refine Relevant Exercises by tag, inline in chat** (`TopicSummaryMessage`). Once a topic's
+  exercises load, if any of them have been tagged (an admin has to have added a tag to a specific
+  topic-scoped entry for this to show anything — see admin tagging above), tag chips appear to
+  narrow the list further via the combined `topicId` + `tag` search above, without leaving the
+  conversation. This is a lightweight refinement on top of the existing per-topic flow, not a
+  replacement for the Practice panel below.
+- **Practice panel** (`PracticePanel`, a `Chat` / `Practice` tab next to the chat timeline — both
+  panels stay mounted and toggle via CSS display rather than conditional rendering, so switching
+  tabs never discards either one's state, e.g. an in-progress chat or a half-built search). The
+  dedicated browse/search surface for the answer bank: a topic dropdown, tag chips (scoped to the
+  selected topic when there is one, via the same `tags` endpoint), and results that update
+  automatically as either filter changes — no separate submit step, since these are facet filters,
+  not a form. Unlike `SyllabusPanel` (`hidden lg:block`, desktop only), this tab renders identically
+  on mobile and desktop, since it lives in the main content area rather than a sidebar — it's the
+  only way a mobile student can browse or search the answer bank at all. `SyllabusPanel`'s
+  now-redundant standalone tag search box (an earlier, disconnected version of this) was removed in
+  favor of this single, more capable, mobile-friendly surface.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
-  instead of the tutor). The dedicated search box above is the deliberate first phase; chat-based
-  querying would need new intent-detection logic in `/v1/chat` to distinguish a tag lookup from a
-  real syllabus question, which is a separate, larger piece of work.
+  instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying
+  would need new intent-detection logic in `/v1/chat` to distinguish a tag lookup from a real
+  syllabus question, which is a separate, larger piece of work.
 
 ### Math rendering
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
+import { PracticePanel } from "./practice-panel";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -42,21 +43,23 @@ export function DashboardShell({
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
-  // Same fresh-id-per-submit reasoning as topicClick, for a tag search
-  // submitted from the syllabus panel.
-  const [tagSearch, setTagSearch] = useState<{ searchId: string; tag: string } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below.
   const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
+  // Which of the two main-area surfaces is visible -- both stay mounted
+  // (see the main content below) so switching tabs never loses either
+  // panel's local state (the chat timeline's ephemeral topic bubbles, or
+  // an in-progress Practice search).
+  const [mainTab, setMainTab] = useState<"chat" | "practice">("chat");
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
 
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
-    setTagSearch(null);
     setSubjectsCollapsed(true);
+    setMainTab("chat");
   }
 
   return (
@@ -136,21 +139,55 @@ export function DashboardShell({
             medium={medium}
             selectedTopicId={topicClick?.topic.id ?? null}
             onSelectTopic={(topic) => setTopicClick({ clickId: crypto.randomUUID(), topic })}
-            onSearchTag={(tag) => setTagSearch({ searchId: crypto.randomUUID(), tag })}
           />
         )}
 
         <main className="flex min-h-0 flex-1 flex-col">
           {selectedSubject ? (
-            <ChatPanel
-              key={selectedSubject.id}
-              subscriptionId={subscriptionId}
-              subject={selectedSubject}
-              medium={medium}
-              isStaffUser={isStaffUser}
-              topicClick={topicClick}
-              tagSearch={tagSearch}
-            />
+            <>
+              {!isStaffUser && boardId && gradeId && medium && (
+                <div className="flex shrink-0 gap-1 border-b border-border bg-surface px-4 pt-2 sm:px-6">
+                  {(["chat", "practice"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setMainTab(tab)}
+                      className={`rounded-t-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
+                        mainTab === tab
+                          ? "border border-b-0 border-border bg-background text-brand"
+                          : "text-foreground/50 hover:text-foreground"
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Both panels stay mounted and toggle via display, not conditional
+                  rendering, so switching tabs never discards either one's state. */}
+              <div className={mainTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                <ChatPanel
+                  key={selectedSubject.id}
+                  subscriptionId={subscriptionId}
+                  subject={selectedSubject}
+                  medium={medium}
+                  isStaffUser={isStaffUser}
+                  topicClick={topicClick}
+                />
+              </div>
+              {!isStaffUser && boardId && gradeId && medium && (
+                <div className={mainTab === "practice" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                  <PracticePanel
+                    key={selectedSubject.id}
+                    boardId={boardId}
+                    gradeId={gradeId}
+                    subjectId={selectedSubject.id}
+                    medium={medium}
+                  />
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-foreground/50">
               Select a subject to start chatting.

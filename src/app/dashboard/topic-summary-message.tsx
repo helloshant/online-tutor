@@ -19,6 +19,17 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
 
+  // Tags actually present among this topic's own banked entries (an admin
+  // has to have tagged a topic-scoped entry for any of this to show up --
+  // see addTag in admin/answer-bank/actions.ts) -- offered as a way to
+  // narrow the topic's exercises down further, e.g. "just the ones from
+  // Ganit Prakash," without leaving the chat timeline for the full Practice
+  // panel search.
+  const [topicTags, setTopicTags] = useState<string[]>([]);
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [filteredExercises, setFilteredExercises] = useState<ExerciseItem[] | null>(null);
+  const [loadingFilter, setLoadingFilter] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -55,12 +66,45 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
         return;
       }
       setExercises(body.exercises);
+
+      // Best-effort -- if this fails, the tag-refine chips just don't show,
+      // no error surfaced (the exercises themselves loaded fine).
+      const tagsRes = await fetch(
+        `/api/answer-bank/tags?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}`
+      );
+      const tagsBody = await tagsRes.json().catch(() => null);
+      if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
+        setTopicTags(tagsBody.tags);
+      }
     } catch {
       setExercisesError("Could not load exercises.");
     } finally {
       setLoadingExercises(false);
     }
   }
+
+  async function handleFilterByTag(tag: string) {
+    setLoadingFilter(true);
+    setActiveTagFilter(tag);
+    try {
+      const res = await fetch(
+        `/api/answer-bank/search?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}&tag=${encodeURIComponent(tag)}`
+      );
+      const body = await res.json().catch(() => null);
+      setFilteredExercises(res.ok && Array.isArray(body?.results) ? body.results : []);
+    } catch {
+      setFilteredExercises([]);
+    } finally {
+      setLoadingFilter(false);
+    }
+  }
+
+  function clearTagFilter() {
+    setActiveTagFilter(null);
+    setFilteredExercises(null);
+  }
+
+  const displayedExercises = activeTagFilter ? filteredExercises : exercises;
 
   return (
     <div className="flex justify-start">
@@ -93,25 +137,64 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
               >
                 {loadingExercises ? "Finding exercises…" : "Relevant Exercises"}
               </button>
-            ) : exercises.length === 0 ? (
-              <p className="text-foreground/50">No exercises available for this topic yet.</p>
             ) : (
               <>
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                  Relevant exercises
-                </p>
-                <ol className="space-y-4">
-                  {exercises.map((ex, i) => (
-                    <li key={i}>
-                      <p className="font-medium">
-                        {i + 1}. <MathText text={ex.question} />
-                      </p>
-                      <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                        <MathText text={ex.answer} />
-                      </p>
-                    </li>
-                  ))}
-                </ol>
+                {topicTags.length > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-foreground/40">Refine by tag:</span>
+                    {topicTags.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => (activeTagFilter === t ? clearTagFilter() : handleFilterByTag(t))}
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                          activeTagFilter === t
+                            ? "bg-brand text-white"
+                            : "bg-brand/10 text-brand hover:bg-brand/20"
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                    {activeTagFilter && (
+                      <button
+                        type="button"
+                        onClick={clearTagFilter}
+                        className="text-xs text-foreground/40 hover:underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {loadingFilter ? (
+                  <p className="text-foreground/50">Filtering…</p>
+                ) : displayedExercises === null || displayedExercises.length === 0 ? (
+                  <p className="text-foreground/50">
+                    {activeTagFilter
+                      ? `No exercises tagged "${activeTagFilter}" for this topic.`
+                      : "No exercises available for this topic yet."}
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                      {activeTagFilter ? `Relevant exercises — "${activeTagFilter}"` : "Relevant exercises"}
+                    </p>
+                    <ol className="space-y-4">
+                      {displayedExercises.map((ex, i) => (
+                        <li key={i}>
+                          <p className="font-medium">
+                            {i + 1}. <MathText text={ex.question} />
+                          </p>
+                          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                            <MathText text={ex.answer} />
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
               </>
             )}
           </div>

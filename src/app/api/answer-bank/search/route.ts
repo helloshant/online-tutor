@@ -17,13 +17,15 @@ export async function GET(request: Request) {
   }
 }
 
-// Tag-based lookup into the answer bank -- e.g. "show me exercises from
-// Ganit Prakash" or "questions from WBJEE 2023" -- distinct from the
-// topic-scoped "Relevant Exercises" flow (/api/topics/[id]/exercises),
-// which matches on an exact syllabus topic_id rather than a tag. Only
-// entries an admin has tagged (manually, or via bulk import) are reachable
-// this way; LLM-generated chat/exercise entries have no tags unless an
-// admin adds them.
+// Lookup into the answer bank by tag, topic, or both together -- e.g. "show
+// me exercises from Ganit Prakash," "relevant exercises for this topic," or
+// "Ganit Prakash exercises for this topic" (the combined case: distinct
+// from /api/topics/[id]/exercises, which is topic-only and generates fresh
+// exercises via the LLM on a miss -- this endpoint is read-only over
+// whatever's already tagged/topic-scoped in the bank, and never generates).
+// At least one of tag/topicId is required -- neither would mean "everything
+// ever banked for this subject," an unbounded dump with no real use case
+// here.
 async function handleSearch(request: Request) {
   const supabase = await createClient();
   const {
@@ -36,9 +38,10 @@ async function handleSearch(request: Request) {
 
   const url = new URL(request.url);
   const subjectId = url.searchParams.get("subjectId");
-  const tag = url.searchParams.get("tag")?.trim();
-  if (!subjectId || !tag) {
-    return NextResponse.json({ error: "subjectId and tag are required" }, { status: 400 });
+  const tag = url.searchParams.get("tag")?.trim() || null;
+  const topicId = url.searchParams.get("topicId")?.trim() || null;
+  if (!subjectId || (!tag && !topicId)) {
+    return NextResponse.json({ error: "subjectId and at least one of tag/topicId are required" }, { status: 400 });
   }
 
   const scope = await resolveStudentSubjectScope(supabase, user.id, subjectId);
@@ -47,17 +50,20 @@ async function handleSearch(request: Request) {
   }
 
   const admin = createAdminClient();
-  const { data } = await admin
+  let query = admin
     .from("answered_questions")
     .select("question, answer")
     .eq("board_id", scope.boardId)
     .eq("grade_id", scope.gradeId)
     .eq("subject_id", subjectId)
     .eq("medium", scope.medium)
-    .contains("tags", [tag])
     .in("validation_status", ["auto_approved", "admin_approved"])
     .order("created_at", { ascending: true })
     .limit(SEARCH_LIMIT);
 
+  if (topicId) query = query.eq("topic_id", topicId);
+  if (tag) query = query.contains("tags", [tag]);
+
+  const { data } = await query;
   return NextResponse.json({ results: data ?? [] });
 }

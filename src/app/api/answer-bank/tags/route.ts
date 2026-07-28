@@ -16,7 +16,10 @@ export async function GET(request: Request) {
 }
 
 // Distinct tags available within the student's board/grade/medium for a
-// given subject, so the tag search box (dashboard/tag-search-panel.tsx) can
+// given subject -- or, when topicId is also given, only tags actually
+// present among that specific topic's entries (used to offer "refine by
+// tag" chips under a topic's Relevant Exercises, and by the Practice
+// panel's topic-scoped tag suggestions) -- so a tag search/filter box can
 // suggest real values instead of asking the student to guess exact tag
 // text like "Ganit Prakash" or "WBJEE 2023" blind.
 async function handleGetTags(request: Request) {
@@ -29,7 +32,9 @@ async function handleGetTags(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const subjectId = new URL(request.url).searchParams.get("subjectId");
+  const url = new URL(request.url);
+  const subjectId = url.searchParams.get("subjectId");
+  const topicId = url.searchParams.get("topicId")?.trim() || null;
   if (!subjectId) {
     return NextResponse.json({ error: "subjectId is required" }, { status: 400 });
   }
@@ -43,7 +48,7 @@ async function handleGetTags(request: Request) {
   // supabase/migrations/0005_answer_bank.sql) -- reachable only through the
   // service-role client, same as every other read of this table.
   const admin = createAdminClient();
-  const { data } = await admin
+  let query = admin
     .from("answered_questions")
     .select("tags")
     .eq("board_id", scope.boardId)
@@ -52,6 +57,9 @@ async function handleGetTags(request: Request) {
     .eq("medium", scope.medium)
     .in("validation_status", ["auto_approved", "admin_approved"]);
 
+  if (topicId) query = query.eq("topic_id", topicId);
+
+  const { data } = await query;
   const tags = Array.from(new Set((data ?? []).flatMap((row) => row.tags))).sort();
   return NextResponse.json({ tags });
 }
