@@ -1,5 +1,6 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MathText } from "@/components/math-text";
 import type { AnswerValidationStatus } from "@/lib/supabase/types";
 import { approveAnswer, deleteAnswer, rejectAnswer, restoreAnswer } from "./actions";
 
@@ -98,8 +99,12 @@ export default async function AnswerBankPage({
                   {row.hit_count} hit{row.hit_count === 1 ? "" : "s"}
                 </span>
               </div>
-              <p className="mt-2 text-sm font-medium">{row.question}</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">{row.answer}</p>
+              <p className="mt-2 text-sm font-medium">
+                <MathText text={row.question} />
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
+                <MathText text={row.answer} />
+              </p>
               <div className="mt-3 flex gap-4 text-xs">
                 {row.validation_status !== "admin_approved" && (
                   <form action={approveAnswer.bind(null, row.id)}>
