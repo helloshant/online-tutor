@@ -14,7 +14,9 @@ export function getSupabaseClient(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
     console.warn(
-      "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set -- the Postgres answer bank stage of the " +
+      "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set in services/orchestrator/.env.local " +
+        "(NOT the web app's root .env.local, which uses NEXT_PUBLIC_SUPABASE_URL instead -- this " +
+        "service reads its own separate env file) -- the Postgres answer bank stage of the " +
         "pipeline is disabled, questions will fall through to the LLM after a cache miss."
     );
     client = null;

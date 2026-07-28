@@ -12,7 +12,9 @@ export function getSupabaseClient(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
     console.warn(
-      "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set -- events will be acknowledged but not recorded."
+      "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set in services/observability/.env.local " +
+        "(NOT the web app's root .env.local, and NOT services/orchestrator/.env.local -- this " +
+        "service reads its own separate env file) -- events will be acknowledged but not recorded."
     );
     client = null;
     return client;
