@@ -384,7 +384,18 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   step, since these are facet filters, not a form. Unlike `SyllabusPanel`, this tab renders
   identically on mobile and desktop, since it lives in the main content area rather than a sidebar.
   `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected version of this)
-  was removed in favor of this single, more capable surface.
+  was removed in favor of this single, more capable surface. Practice is deliberately read-only —
+  no LLM call happens here — so each result has an **"Ask about this"** button for the case where a
+  student doesn't follow the banked solution: it switches to the Chat tab and seeds a pending
+  context above the message input (`ChatPanel`'s `pendingContext`, carried down from
+  `dashboard-shell.tsx`'s `practiceQuestionClick`, the same fresh-id-per-click shape as `topicClick`).
+  The student then types what they don't understand; on send, the question/answer is folded into the
+  outgoing message text itself (`Regarding this practice question:\nQ: ...\nA: ...\n\n<their text>`)
+  rather than passed as a side channel, so the LLM actually sees what's being asked about with no
+  `/api/chat` or orchestrator changes needed — the endpoint already just answers whatever message
+  text it's given, and that combined text is what gets persisted to `chat_messages`, so the context
+  is still there for any later follow-up in the same conversation, not just the first reply. The
+  pending context can be dismissed before sending if the student decides not to ask after all.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying

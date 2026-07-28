@@ -20,11 +20,17 @@ export function PracticePanel({
   gradeId,
   subjectId,
   medium,
+  onAskAbout,
 }: {
   boardId: string;
   gradeId: string;
   subjectId: string;
   medium: Medium;
+  // Hands a result's question/answer off to the Chat tab so a student who
+  // doesn't follow a banked solution can dig into it conversationally
+  // instead of hitting a dead end here -- Practice itself is read-only, with
+  // no LLM call of its own.
+  onAskAbout: (question: string, answer: string) => void;
 }) {
   const [topics, setTopics] = useState<SyllabusTopic[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(true);
@@ -215,6 +221,13 @@ export function PracticePanel({
                       <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
                         <MathText text={r.answer} />
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => onAskAbout(r.question, r.answer)}
+                        className="mt-2 text-xs font-medium text-brand hover:underline"
+                      >
+                        Ask about this →
+                      </button>
                     </li>
                   ))}
                 </ol>

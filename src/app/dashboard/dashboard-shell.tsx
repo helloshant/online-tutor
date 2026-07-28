@@ -51,6 +51,17 @@ export function DashboardShell({
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
+  // Set when "Ask about this" is clicked on a Practice result -- handed to
+  // ChatPanel so it can seed a pending context (shown above the input,
+  // folded into the next message sent) rather than leaving the student to
+  // retype the question from scratch to get help with it. Same fresh-id-
+  // per-click shape as topicClick, for the same reason: clicking the same
+  // result twice should still re-seed it.
+  const [practiceQuestionClick, setPracticeQuestionClick] = useState<{
+    clickId: string;
+    question: string;
+    answer: string;
+  } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below. Desktop-only state:
@@ -68,6 +79,7 @@ export function DashboardShell({
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
+    setPracticeQuestionClick(null);
     setSubjectsCollapsed(true);
     setMainTab("chat");
   }
@@ -81,6 +93,13 @@ export function DashboardShell({
   // that anything happened.
   function handleSelectTopic(topic: SyllabusTopic) {
     setTopicClick({ clickId: crypto.randomUUID(), topic });
+    setMainTab("chat");
+  }
+
+  // Same "jump to Chat" reasoning as handleSelectTopic above: seeding
+  // context into a panel the student isn't looking at would be invisible.
+  function handleAskAboutPractice(question: string, answer: string) {
+    setPracticeQuestionClick({ clickId: crypto.randomUUID(), question, answer });
     setMainTab("chat");
   }
 
@@ -254,6 +273,7 @@ export function DashboardShell({
                   medium={medium}
                   isStaffUser={isStaffUser}
                   topicClick={topicClick}
+                  practiceQuestionClick={practiceQuestionClick}
                 />
               </div>
               {boardId && gradeId && medium && !isStaffUser && (
@@ -264,6 +284,7 @@ export function DashboardShell({
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
                     medium={medium}
+                    onAskAbout={handleAskAboutPractice}
                   />
                 </div>
               )}
