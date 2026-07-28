@@ -385,15 +385,19 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   identically on mobile and desktop, since it lives in the main content area rather than a sidebar.
   `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected version of this)
   was removed in favor of this single, more capable surface. Practice is deliberately read-only —
-  no LLM call happens here — so each result has an **"Ask about this"** button for the case where a
-  student doesn't follow the banked solution: it switches to the Chat tab and seeds the message
-  input directly with the question text (`ChatPanel`'s `practiceQuestionClick` prop, carried down
-  from `dashboard-shell.tsx`, the same fresh-id-per-click shape as `topicClick`), cursor placed at
-  the end so the student can edit it and type their actual follow-up right after it, all in the one
-  field they're about to send — no separate preview/quote element, since an earlier version of this
-  (a non-editable card showing the question above an empty input) read as a second, confusing input
-  and also didn't render the question's LaTeX. Whatever ends up in the field when they hit send is
-  the message, exactly like any other turn — no `/api/chat` or orchestrator changes needed.
+  no LLM call happens here — so each result has an **"Explain further in chat"** button for the case
+  where a student doesn't follow the banked solution: it switches to the Chat tab and immediately
+  sends a composed message asking for a more detailed, step-by-step explanation of that specific
+  question and its banked answer (`ChatPanel`'s `practiceQuestionClick` prop, carried down from
+  `dashboard-shell.tsx`, the same fresh-id-per-click shape as `topicClick` — `performSend`, shared
+  with the ordinary Send button, is a `useCallback` so this effect can list it as a dependency rather
+  than reach for a function declared later in the component). No manual Send step: two earlier
+  versions of this either showed a separate, non-editable preview card above an empty input (read as
+  a confusing second text box, and didn't render the question's LaTeX) or seeded the input for the
+  student to edit and send themselves (which, left untouched, just re-asked the identical
+  already-answered question). Sending straight away with an explicit "explain in detail" framing
+  avoids both — no `/api/chat` or orchestrator changes needed either way, since the endpoint just
+  answers whatever message text it's given.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying

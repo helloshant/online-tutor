@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import { TopicSummaryMessage } from "./topic-summary-message";
@@ -79,11 +79,6 @@ export function ChatPanel({
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
-  // Set by the practiceQuestionClick effect below; consumed by the effect
-  // right after it once `input` has actually re-rendered with the seeded
-  // text, so the cursor lands at the end of that text instead of the start.
-  const focusInputAtEndRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +116,69 @@ export function ChatPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [timeline]);
 
+  // Shared by the form's Send button and the practiceQuestionClick effect
+  // below, which sends a composed message with no user-typed text or image
+  // of its own. useCallback (rather than a plain function) so the effect
+  // below can list it as a dependency instead of reaching for a function
+  // declared later in the component.
+  const performSend = useCallback(
+    async (trimmed: string, image: SelectedImage | null) => {
+      if ((!trimmed && !image) || sending) return;
+
+      setError(null);
+      setInput("");
+      setSelectedImage(null);
+      setSending(true);
+
+      const optimisticMessage: ChatMessage = {
+        id: `optimistic-${Date.now()}`,
+        user_id: "",
+        subscription_id: subscriptionId,
+        subject_id: subject.id,
+        role: "user",
+        content: trimmed || "[Image]",
+        created_at: new Date().toISOString(),
+      };
+      setTimeline((prev) => [
+        ...prev,
+        { kind: "message", message: optimisticMessage, previewImageUrl: image?.dataUrl },
+      ]);
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjectId: subject.id,
+            message: trimmed,
+            image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
+          }),
+        });
+        const body = await res.json();
+
+        if (!res.ok) {
+          throw new Error(body.error ?? "Something went wrong. Please try again.");
+        }
+
+        setTimeline((prev) => [
+          ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
+          { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
+          { kind: "message", message: body.assistantMessage as ChatMessage },
+        ]);
+      } catch (err) {
+        setTimeline((prev) =>
+          prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id)
+        );
+        setInput(trimmed);
+        setSelectedImage(image);
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, subscriptionId, subject.id]
+  );
+
   // A fresh clickId (even for the same topic clicked twice) drops a new
   // summary bubble at the end of the timeline, same as a message arriving.
   useEffect(() => {
@@ -132,31 +190,23 @@ export function ChatPanel({
     ]);
   }, [topicClick]);
 
-  // Same fresh-id-per-click guard as topicClick above, but seeds the message
-  // input directly with the question text (rather than a separate preview
-  // element) so the student edits it and types their follow-up right after
-  // it, all in the one field they're about to send.
+  // Same fresh-id-per-click guard as topicClick above, but sends straight
+  // away rather than seeding the input for the student to edit -- an
+  // earlier version left it in the input for a manual Send, which just
+  // re-asked the identical already-answered question if the student didn't
+  // think to add anything. Explicitly asking for a more detailed
+  // explanation (rather than just resending the bare question) also gets a
+  // more useful reply than the model regenerating a near-duplicate of the
+  // banked answer from scratch.
   useEffect(() => {
     if (!practiceQuestionClick || practiceQuestionClick.clickId === lastPracticeClickIdRef.current) return;
     lastPracticeClickIdRef.current = practiceQuestionClick.clickId;
-    setInput(`${practiceQuestionClick.question} `);
-    focusInputAtEndRef.current = true;
-  }, [practiceQuestionClick]);
-
-  // Runs after every input change, but is a no-op except right after the
-  // seed above -- setting `value` and calling focus() in the same tick
-  // leaves the cursor at position 0 in most browsers, so this waits for the
-  // re-render carrying the new value before focusing and moving the cursor
-  // to the end.
-  useEffect(() => {
-    if (!focusInputAtEndRef.current) return;
-    focusInputAtEndRef.current = false;
-    const el = messageInputRef.current;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
-    }
-  }, [input]);
+    const { question, answer } = practiceQuestionClick;
+    void performSend(
+      `I don't understand this solution -- can you explain it in more detail, step by step?\n\nQ: ${question}\nA: ${answer}`,
+      null
+    );
+  }, [practiceQuestionClick, performSend]);
 
   async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -170,62 +220,9 @@ export function ChatPanel({
     }
   }
 
-  async function sendMessage(e: React.FormEvent) {
+  function sendMessage(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = input.trim();
-    const image = selectedImage;
-    if ((!trimmed && !image) || sending) return;
-
-    setError(null);
-    setInput("");
-    setSelectedImage(null);
-    setSending(true);
-
-    const optimisticMessage: ChatMessage = {
-      id: `optimistic-${Date.now()}`,
-      user_id: "",
-      subscription_id: subscriptionId,
-      subject_id: subject.id,
-      role: "user",
-      content: trimmed || "[Image]",
-      created_at: new Date().toISOString(),
-    };
-    setTimeline((prev) => [
-      ...prev,
-      { kind: "message", message: optimisticMessage, previewImageUrl: image?.dataUrl },
-    ]);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subjectId: subject.id,
-          message: trimmed,
-          image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
-        }),
-      });
-      const body = await res.json();
-
-      if (!res.ok) {
-        throw new Error(body.error ?? "Something went wrong. Please try again.");
-      }
-
-      setTimeline((prev) => [
-        ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
-        { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
-        { kind: "message", message: body.assistantMessage as ChatMessage },
-      ]);
-    } catch (err) {
-      setTimeline((prev) =>
-        prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id)
-      );
-      setInput(trimmed);
-      setSelectedImage(image);
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setSending(false);
-    }
+    void performSend(input.trim(), selectedImage);
   }
 
   return (
@@ -324,7 +321,6 @@ export function ChatPanel({
               chat box a student re-focuses constantly is a real, jarring
               bug, not just a font-size preference. */}
           <input
-            ref={messageInputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={`Ask a ${subject.name} question…`}
