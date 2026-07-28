@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
@@ -32,8 +32,13 @@ export function PracticePanel({
   const [tags, setTags] = useState<string[]>([]);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards against a slow earlier request (e.g. after quickly switching
+  // topics) resolving after a newer one and clobbering fresher results.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +86,44 @@ export function PracticePanel({
     };
   }, [subjectId, selectedTopicId]);
 
+  const runSearch = useCallback(
+    async (offset: number, append: boolean) => {
+      const requestId = ++requestIdRef.current;
+      if (append) setLoadingMore(true);
+      else setLoadingResults(true);
+      setError(null);
+
+      const params = new URLSearchParams({ subjectId });
+      if (selectedTopicId) params.set("topicId", selectedTopicId);
+      if (selectedTag) params.set("tag", selectedTag);
+      if (offset > 0) params.set("offset", String(offset));
+
+      try {
+        const res = await fetch(`/api/answer-bank/search?${params.toString()}`);
+        const body = await res.json().catch(() => null);
+        if (requestIdRef.current !== requestId) return; // superseded by a newer search
+        if (!res.ok || !Array.isArray(body?.results)) {
+          setError(body?.error ?? "Could not search the answer bank.");
+          if (!append) {
+            setResults(null);
+            setHasMore(false);
+          }
+          return;
+        }
+        setResults((prev) => (append ? [...(prev ?? []), ...body.results] : body.results));
+        setHasMore(Boolean(body.hasMore));
+      } catch {
+        if (requestIdRef.current === requestId) setError("Could not search the answer bank.");
+      } finally {
+        if (requestIdRef.current === requestId) {
+          if (append) setLoadingMore(false);
+          else setLoadingResults(false);
+        }
+      }
+    },
+    [subjectId, selectedTopicId, selectedTag]
+  );
+
   // Auto-searches as soon as either filter is set -- these are facet
   // filters, not a form with a separate submit step, so results should
   // track selection immediately. Neither filter set means "nothing to
@@ -88,34 +131,10 @@ export function PracticePanel({
   // at-least-one-filter requirement).
   useEffect(() => {
     if (!selectedTopicId && !selectedTag) return;
-    let cancelled = false;
-
-    (async () => {
-      setLoadingResults(true);
-      setError(null);
-      const params = new URLSearchParams({ subjectId });
-      if (selectedTopicId) params.set("topicId", selectedTopicId);
-      if (selectedTag) params.set("tag", selectedTag);
-      try {
-        const res = await fetch(`/api/answer-bank/search?${params.toString()}`);
-        const body = await res.json().catch(() => null);
-        if (cancelled) return;
-        if (!res.ok || !Array.isArray(body?.results)) {
-          setError(body?.error ?? "Could not search the answer bank.");
-          return;
-        }
-        setResults(body.results);
-      } catch {
-        if (!cancelled) setError("Could not search the answer bank.");
-      } finally {
-        if (!cancelled) setLoadingResults(false);
-      }
+    void (async () => {
+      await runSearch(0, false);
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [subjectId, selectedTopicId, selectedTag]);
+  }, [selectedTopicId, selectedTag, runSearch]);
 
   const chapters: { chapter: string; topics: SyllabusTopic[] }[] = [];
   for (const topic of topics) {
@@ -186,18 +205,30 @@ export function PracticePanel({
             ) : results && results.length === 0 ? (
               <p className="text-sm text-foreground/50">No matching questions found.</p>
             ) : (
-              <ol className="space-y-4">
-                {(results ?? []).map((r, i) => (
-                  <li key={i} className="rounded-xl border border-border bg-surface p-4 text-sm">
-                    <p className="font-medium">
-                      {i + 1}. <MathText text={r.question} />
-                    </p>
-                    <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                      <MathText text={r.answer} />
-                    </p>
-                  </li>
-                ))}
-              </ol>
+              <>
+                <ol className="space-y-4">
+                  {(results ?? []).map((r, i) => (
+                    <li key={i} className="rounded-xl border border-border bg-surface p-4 text-sm">
+                      <p className="font-medium">
+                        {i + 1}. <MathText text={r.question} />
+                      </p>
+                      <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                        <MathText text={r.answer} />
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => runSearch(results?.length ?? 0, true)}
+                    disabled={loadingMore}
+                    className="mt-4 w-full rounded-lg border border-border py-2 text-sm font-medium hover:bg-brand/5 disabled:opacity-60"
+                  >
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

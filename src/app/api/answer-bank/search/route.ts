@@ -40,6 +40,8 @@ async function handleSearch(request: Request) {
   const subjectId = url.searchParams.get("subjectId");
   const tag = url.searchParams.get("tag")?.trim() || null;
   const topicId = url.searchParams.get("topicId")?.trim() || null;
+  const offsetParam = url.searchParams.get("offset");
+  const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : 0;
   if (!subjectId || (!tag && !topicId)) {
     return NextResponse.json({ error: "subjectId and at least one of tag/topicId are required" }, { status: 400 });
   }
@@ -59,11 +61,17 @@ async function handleSearch(request: Request) {
     .eq("medium", scope.medium)
     .in("validation_status", ["auto_approved", "admin_approved"])
     .order("created_at", { ascending: true })
-    .limit(SEARCH_LIMIT);
+    // Fetch one extra row past the page size, purely to tell the client
+    // whether a "Load more" is worth offering -- cheaper than a separate
+    // COUNT query, and this table only ever grows, so an exact count would
+    // go stale immediately anyway.
+    .range(offset, offset + SEARCH_LIMIT);
 
   if (topicId) query = query.eq("topic_id", topicId);
   if (tag) query = query.contains("tags", [tag]);
 
   const { data } = await query;
-  return NextResponse.json({ results: data ?? [] });
+  const results = (data ?? []).slice(0, SEARCH_LIMIT);
+  const hasMore = (data?.length ?? 0) > SEARCH_LIMIT;
+  return NextResponse.json({ results, hasMore });
 }

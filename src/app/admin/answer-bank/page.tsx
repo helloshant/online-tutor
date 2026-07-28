@@ -15,6 +15,8 @@ const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[]
 
 const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
 
+const PAGE_SIZE = 25;
+
 const STATUS_STYLES: Record<AnswerValidationStatus, string> = {
   auto_approved: "bg-green-100 text-green-700",
   admin_approved: "bg-blue-100 text-blue-700",
@@ -33,10 +35,11 @@ export default async function AnswerBankPage({
     subject?: string;
     medium?: string;
     topic?: string;
+    page?: string;
   }>;
 }) {
   await requireAdminPage("answer_bank");
-  const { status, tag, board, grade, subject, medium, topic } = await searchParams;
+  const { status, tag, board, grade, subject, medium, topic, page } = await searchParams;
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
   const activeTag = tag?.trim() || null;
   const activeBoard = board || null;
@@ -44,6 +47,8 @@ export default async function AnswerBankPage({
   const activeSubject = subject || null;
   const activeMedium = (medium as Medium | undefined) || null;
   const activeTopic = topic || null;
+  const activePage = Math.max(1, parseInt(page ?? "1", 10) || 1);
+  const from = (activePage - 1) * PAGE_SIZE;
   // answered_questions has RLS enabled with zero policies (see
   // supabase/migrations/0005_answer_bank.sql) -- it's a backend
   // implementation detail the orchestrator writes to with its service-role
@@ -51,11 +56,15 @@ export default async function AnswerBankPage({
   // the ordinary session-scoped client would silently see zero rows.
   const supabase = createAdminClient();
 
+  // Fetches one row past the page size, purely to tell whether a Next page
+  // is worth offering -- cheaper than a separate COUNT query, and this table
+  // only ever grows, so an exact count would go stale immediately anyway
+  // (same pattern as /api/answer-bank/search).
   let query = supabase
     .from("answered_questions")
     .select("*, boards(name), grades(name), subjects(name), syllabus_topics(chapter, topic)")
     .order("created_at", { ascending: false })
-    .limit(200);
+    .range(from, from + PAGE_SIZE);
 
   if (activeStatus !== "all") query = query.eq("validation_status", activeStatus);
   if (activeTag) query = query.contains("tags", [activeTag]);
@@ -81,7 +90,7 @@ export default async function AnswerBankPage({
           .order("sort_order")
       : null;
 
-  const [{ data: rows }, { data: boards }, { data: grades }, { data: subjects }, filterTopicsResult] =
+  const [{ data: fetchedRows }, { data: boards }, { data: grades }, { data: subjects }, filterTopicsResult] =
     await Promise.all([
       query,
       supabase.from("boards").select("*").order("name"),
@@ -90,6 +99,8 @@ export default async function AnswerBankPage({
       filterTopicsQuery ?? Promise.resolve({ data: null }),
     ]);
   const filterTopics = filterTopicsResult.data;
+  const hasNextPage = (fetchedRows?.length ?? 0) > PAGE_SIZE;
+  const rows = (fetchedRows ?? []).slice(0, PAGE_SIZE);
 
   // Merges the current filters with the given overrides -- every link/form
   // in this page goes through this so clicking a status pill or a tag chip
@@ -104,6 +115,7 @@ export default async function AnswerBankPage({
       subject: activeSubject,
       medium: activeMedium,
       topic: activeTopic,
+      page: activePage > 1 ? String(activePage) : null,
     };
     const merged = { ...current, ...overrides };
     const params = new URLSearchParams();
@@ -132,7 +144,7 @@ export default async function AnswerBankPage({
         {STATUS_FILTERS.map((f) => (
           <a
             key={f.value}
-            href={buildHref({ status: f.value === "all" ? null : f.value })}
+            href={buildHref({ status: f.value === "all" ? null : f.value, page: null })}
             className={`rounded-full border px-3 py-1 ${
               activeStatus === f.value
                 ? "border-brand bg-brand text-white"
@@ -219,7 +231,15 @@ export default async function AnswerBankPage({
         </button>
         {(activeTag || hasScopeFilter) && (
           <a
-            href={buildHref({ tag: null, board: null, grade: null, subject: null, medium: null, topic: null })}
+            href={buildHref({
+              tag: null,
+              board: null,
+              grade: null,
+              subject: null,
+              medium: null,
+              topic: null,
+              page: null,
+            })}
             className="text-xs text-foreground/50 hover:underline"
           >
             Clear filters
@@ -228,7 +248,7 @@ export default async function AnswerBankPage({
       </form>
 
       <div className="mt-6 space-y-3">
-        {(rows ?? []).map((row) => {
+        {rows.map((row) => {
           const board = (row as unknown as { boards: { name: string } | null }).boards;
           const grade = (row as unknown as { grades: { name: string } | null }).grades;
           const subject = (row as unknown as { subjects: { name: string } | null }).subjects;
@@ -275,7 +295,7 @@ export default async function AnswerBankPage({
                     key={t}
                     className="flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand"
                   >
-                    <a href={buildHref({ tag: t })} className="hover:underline">
+                    <a href={buildHref({ tag: t, page: null })} className="hover:underline">
                       {t}
                     </a>
                     <form action={removeTag.bind(null, row.id, t)}>
@@ -335,10 +355,36 @@ export default async function AnswerBankPage({
             </div>
           );
         })}
-        {(rows ?? []).length === 0 && (
+        {rows.length === 0 && (
           <p className="text-sm text-foreground/50">No entries yet for this filter.</p>
         )}
       </div>
+
+      {(activePage > 1 || hasNextPage) && (
+        <div className="mt-4 flex items-center justify-between text-sm">
+          {activePage > 1 ? (
+            <a
+              href={buildHref({ page: activePage - 1 > 1 ? String(activePage - 1) : null })}
+              className="rounded-lg border border-border px-3 py-1.5 font-medium hover:bg-brand/5"
+            >
+              ← Previous
+            </a>
+          ) : (
+            <span />
+          )}
+          <span className="text-foreground/50">Page {activePage}</span>
+          {hasNextPage ? (
+            <a
+              href={buildHref({ page: String(activePage + 1) })}
+              className="rounded-lg border border-border px-3 py-1.5 font-medium hover:bg-brand/5"
+            >
+              Next →
+            </a>
+          ) : (
+            <span />
+          )}
+        </div>
+      )}
 
       <BulkImportForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
     </div>

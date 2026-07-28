@@ -391,6 +391,25 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   would need new intent-detection logic in `/v1/chat` to distinguish a tag lookup from a real
   syllabus question, which is a separate, larger piece of work.
 
+Both list surfaces over `answered_questions` are paginated rather than capped at a fixed row count,
+using the same range-fetch pattern in each case: fetch `PAGE_SIZE + 1` rows via `.range()`, display
+only the first `PAGE_SIZE`, and treat the presence of that extra row as "there's more" — no separate
+`count: "exact"` query, since the table only ever grows and an exact count would go stale immediately
+anyway.
+
+- **Admin Answer Bank list** (`/admin/answer-bank`, `PAGE_SIZE = 25`). A `?page=` param drives
+  `.range()`; Prev/Next links go through the same `buildHref` every other filter link uses, so
+  paging preserves the active status/tag/board/grade/subject/medium/topic filters, while changing
+  any filter (a status pill, a tag chip, the filter form, or Clear filters) resets back to page 1 by
+  passing `page: null` through `buildHref`'s overrides.
+- **Practice panel search** (`SEARCH_LIMIT = 20` in `/api/answer-bank/search`). An `?offset=` query
+  param drives the same `.range()` pattern server-side; the client (`practice-panel.tsx`) tracks
+  `hasMore` from the response and shows a "Load more" button that appends to the existing results
+  rather than replacing them. A `requestIdRef` counter (incremented per request, compared after the
+  fetch resolves) discards a stale response if the topic/tag filter changes while a request — initial
+  or "Load more" — is still in flight, the same race-guard pattern used elsewhere for rapidly-changing
+  filters.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since
