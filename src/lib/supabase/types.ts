@@ -286,6 +286,23 @@ export interface Database {
         Args: { p_user_ids: string[] };
         Returns: { user_id: string; has_email_identity: boolean }[];
       };
+      // Same full-text answer-bank lookup the orchestrator uses (see
+      // services/orchestrator/src/answerBank.ts and
+      // supabase/migrations/0005_answer_bank.sql) -- callable here too since
+      // the admin client authenticates as service_role, the same role this
+      // function is granted to, and bulk import uses it as a dedup check
+      // before writing (src/app/admin/answer-bank/actions.ts).
+      search_answer_bank: {
+        Args: {
+          p_board_id: string;
+          p_grade_id: string;
+          p_subject_id: string;
+          p_medium: string;
+          p_query: string;
+          p_min_rank?: number;
+        };
+        Returns: { id: string; answer: string; rank: number }[];
+      };
     };
   };
 }

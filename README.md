@@ -336,17 +336,30 @@ vocabulary needing rename-once-updates-everywhere semantics) are a second, indep
 provenance labels a student can search by directly, e.g. "show me exercises from Ganit Prakash" or
 "questions from WBJEE 2023."
 
-- **Admin: tagging and bulk import** (`/admin/answer-bank`). Every entry — however it originated —
-  can have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a plain read-modify-write
-  against the `tags` array; fine for an admin-only tool with no meaningful concurrent-edit risk). A
-  `?tag=` filter alongside the existing `?status=` one lets you browse by tag, and clicking a tag chip
-  applies that filter directly. A **bulk import** section (collapsed `<details>`, same pattern as the
-  catalog page's bulk syllabus paste) accepts the same `Q: ... / A: ... / ---` block format the
-  orchestrator's exercise generation uses, plus a board/grade/subject/medium selection and a
-  comma-separated tag list applied to every question in that paste. Bulk-imported rows skip
-  `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer hedging
-  or reading like a question asked back — neither applies to hand-sourced content) and are stored
-  `admin_approved` immediately, with no `topic_id` (deliberately — see above).
+- **Admin: tagging, topic linkage, and bulk import** (`/admin/answer-bank`). Every entry — however
+  it originated — can have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a
+  plain read-modify-write against the `tags` array; fine for an admin-only tool with no meaningful
+  concurrent-edit risk). The row list also shows each entry's syllabus topic when it has one (joined
+  from `syllabus_topics` via `topic_id`), and the filter row now has `?board=`/`?grade=`/`?subject=`/
+  `?medium=`/`?topic=` alongside the existing `?status=`/`?tag=` — the topic dropdown only appears
+  once all four scope fields are chosen, since a topic name isn't unique across the whole catalog.
+  All filters compose (`buildHref` in `page.tsx` merges the current set with whatever a status pill,
+  tag chip, or filter-form submit overrides). A **bulk import** section (collapsed `<details>`,
+  `BulkImportForm`, a client component using `useActionState` for flash feedback — same pattern as
+  `SetPasswordForm`) accepts the same `Q: ... / A: ... / ---` block format the orchestrator's
+  exercise generation uses, a board/grade/subject/medium selection, an *optional* topic (its own
+  dropdown, populated client-side once all four scope fields are picked — left unset by default,
+  since a book chapter or exam paper usually spans several topics, but assignable when a specific
+  question genuinely belongs to one), and a comma-separated tag list applied to every question in
+  that paste. Each parsed question is checked against `search_answer_bank` (the same RPC the chat
+  pipeline and exercise generation use for their own dedup, callable here too since the admin client
+  authenticates as `service_role`) before being written, so re-importing the same source a second
+  time skips whatever's already banked instead of duplicating it — and the form reports back exactly
+  how many of the parsed questions were imported vs. skipped as duplicates, or a specific error if
+  none could be parsed at all (no more silent no-ops on a malformed paste). Bulk-imported rows still
+  skip `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer
+  hedging or reading like a question asked back — neither applies to hand-sourced content) and are
+  stored `admin_approved` immediately.
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither

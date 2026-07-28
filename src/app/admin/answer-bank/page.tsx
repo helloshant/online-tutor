@@ -2,15 +2,8 @@ import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
 import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
-import {
-  addTag,
-  approveAnswer,
-  bulkImportAnswers,
-  deleteAnswer,
-  rejectAnswer,
-  removeTag,
-  restoreAnswer,
-} from "./actions";
+import { addTag, approveAnswer, deleteAnswer, rejectAnswer, removeTag, restoreAnswer } from "./actions";
+import { BulkImportForm } from "./bulk-import-form";
 
 const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -32,12 +25,25 @@ const STATUS_STYLES: Record<AnswerValidationStatus, string> = {
 export default async function AnswerBankPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; tag?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    tag?: string;
+    board?: string;
+    grade?: string;
+    subject?: string;
+    medium?: string;
+    topic?: string;
+  }>;
 }) {
   await requireAdminPage("answer_bank");
-  const { status, tag } = await searchParams;
+  const { status, tag, board, grade, subject, medium, topic } = await searchParams;
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
   const activeTag = tag?.trim() || null;
+  const activeBoard = board || null;
+  const activeGrade = grade || null;
+  const activeSubject = subject || null;
+  const activeMedium = (medium as Medium | undefined) || null;
+  const activeTopic = topic || null;
   // answered_questions has RLS enabled with zero policies (see
   // supabase/migrations/0005_answer_bank.sql) -- it's a backend
   // implementation detail the orchestrator writes to with its service-role
@@ -47,38 +53,68 @@ export default async function AnswerBankPage({
 
   let query = supabase
     .from("answered_questions")
-    .select("*, boards(name), grades(name), subjects(name)")
+    .select("*, boards(name), grades(name), subjects(name), syllabus_topics(chapter, topic)")
     .order("created_at", { ascending: false })
     .limit(200);
 
-  if (activeStatus !== "all") {
-    query = query.eq("validation_status", activeStatus);
-  }
-  if (activeTag) {
-    query = query.contains("tags", [activeTag]);
-  }
+  if (activeStatus !== "all") query = query.eq("validation_status", activeStatus);
+  if (activeTag) query = query.contains("tags", [activeTag]);
+  if (activeBoard) query = query.eq("board_id", activeBoard);
+  if (activeGrade) query = query.eq("grade_id", activeGrade);
+  if (activeSubject) query = query.eq("subject_id", activeSubject);
+  if (activeMedium) query = query.eq("medium", activeMedium);
+  if (activeTopic) query = query.eq("topic_id", activeTopic);
 
-  const [{ data: rows }, { data: boards }, { data: grades }, { data: subjects }] = await Promise.all([
-    query,
-    supabase.from("boards").select("*").order("name"),
-    supabase.from("grades").select("*").order("level"),
-    supabase.from("subjects").select("*").order("name"),
-  ]);
+  // The topic filter's own option list is only meaningful once a specific
+  // board/grade/subject/medium is selected -- a topic name isn't unique
+  // across the whole catalog, so there's no useful "topic" filter without
+  // first narrowing to the syllabus it belongs to.
+  const filterTopicsQuery =
+    activeBoard && activeGrade && activeSubject && activeMedium
+      ? supabase
+          .from("syllabus_topics")
+          .select("id, chapter, topic")
+          .eq("board_id", activeBoard)
+          .eq("grade_id", activeGrade)
+          .eq("subject_id", activeSubject)
+          .eq("medium", activeMedium)
+          .order("sort_order")
+      : null;
 
-  function statusHref(value: AnswerValidationStatus | "all") {
+  const [{ data: rows }, { data: boards }, { data: grades }, { data: subjects }, filterTopicsResult] =
+    await Promise.all([
+      query,
+      supabase.from("boards").select("*").order("name"),
+      supabase.from("grades").select("*").order("level"),
+      supabase.from("subjects").select("*").order("name"),
+      filterTopicsQuery ?? Promise.resolve({ data: null }),
+    ]);
+  const filterTopics = filterTopicsResult.data;
+
+  // Merges the current filters with the given overrides -- every link/form
+  // in this page goes through this so clicking a status pill or a tag chip
+  // never drops the board/grade/subject/medium/topic scope already applied,
+  // and vice versa.
+  function buildHref(overrides: Record<string, string | null>) {
+    const current: Record<string, string | null> = {
+      status: activeStatus !== "all" ? activeStatus : null,
+      tag: activeTag,
+      board: activeBoard,
+      grade: activeGrade,
+      subject: activeSubject,
+      medium: activeMedium,
+      topic: activeTopic,
+    };
+    const merged = { ...current, ...overrides };
     const params = new URLSearchParams();
-    if (value !== "all") params.set("status", value);
-    if (activeTag) params.set("tag", activeTag);
+    for (const [key, value] of Object.entries(merged)) {
+      if (value) params.set(key, value);
+    }
     const qs = params.toString();
     return qs ? `/admin/answer-bank?${qs}` : "/admin/answer-bank";
   }
 
-  function tagHref(value: string) {
-    const params = new URLSearchParams();
-    if (activeStatus !== "all") params.set("status", activeStatus);
-    params.set("tag", value);
-    return `/admin/answer-bank?${params.toString()}`;
-  }
+  const hasScopeFilter = Boolean(activeBoard || activeGrade || activeSubject || activeMedium || activeTopic);
 
   return (
     <div>
@@ -96,7 +132,7 @@ export default async function AnswerBankPage({
         {STATUS_FILTERS.map((f) => (
           <a
             key={f.value}
-            href={statusHref(f.value)}
+            href={buildHref({ status: f.value === "all" ? null : f.value })}
             className={`rounded-full border px-3 py-1 ${
               activeStatus === f.value
                 ? "border-brand bg-brand text-white"
@@ -116,12 +152,77 @@ export default async function AnswerBankPage({
           placeholder="Filter by tag (e.g. Ganit Prakash, WBJEE 2023)"
           className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
         />
+        <select
+          name="board"
+          defaultValue={activeBoard ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any board</option>
+          {(boards ?? []).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="grade"
+          defaultValue={activeGrade ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any grade</option>
+          {(grades ?? []).map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="subject"
+          defaultValue={activeSubject ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any subject</option>
+          {(subjects ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="medium"
+          defaultValue={activeMedium ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any medium</option>
+          {MEDIUMS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        {activeBoard && activeGrade && activeSubject && activeMedium && (
+          <select
+            name="topic"
+            defaultValue={activeTopic ?? ""}
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">Any topic</option>
+            {(filterTopics ?? []).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.chapter} — {t.topic}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
           Filter
         </button>
-        {activeTag && (
-          <a href={statusHref(activeStatus)} className="text-xs text-foreground/50 hover:underline">
-            Clear tag filter
+        {(activeTag || hasScopeFilter) && (
+          <a
+            href={buildHref({ tag: null, board: null, grade: null, subject: null, medium: null, topic: null })}
+            className="text-xs text-foreground/50 hover:underline"
+          >
+            Clear filters
           </a>
         )}
       </form>
@@ -131,6 +232,8 @@ export default async function AnswerBankPage({
           const board = (row as unknown as { boards: { name: string } | null }).boards;
           const grade = (row as unknown as { grades: { name: string } | null }).grades;
           const subject = (row as unknown as { subjects: { name: string } | null }).subjects;
+          const topic = (row as unknown as { syllabus_topics: { chapter: string; topic: string } | null })
+            .syllabus_topics;
           return (
             <div key={row.id} className="rounded-xl border border-border bg-surface p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/50">
@@ -150,6 +253,14 @@ export default async function AnswerBankPage({
                 <span>
                   {row.hit_count} hit{row.hit_count === 1 ? "" : "s"}
                 </span>
+                {topic && (
+                  <>
+                    <span>&middot;</span>
+                    <span title="Syllabus topic this entry is scoped to">
+                      {topic.chapter} — {topic.topic}
+                    </span>
+                  </>
+                )}
               </div>
               <p className="mt-2 text-sm font-medium">
                 <MathText text={row.question} />
@@ -164,7 +275,7 @@ export default async function AnswerBankPage({
                     key={t}
                     className="flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand"
                   >
-                    <a href={tagHref(t)} className="hover:underline">
+                    <a href={buildHref({ tag: t })} className="hover:underline">
                       {t}
                     </a>
                     <form action={removeTag.bind(null, row.id, t)}>
@@ -229,87 +340,7 @@ export default async function AnswerBankPage({
         )}
       </div>
 
-      <details className="mt-8 rounded-lg border border-border">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-brand/5">
-          Bulk import (e.g. a textbook or past exam paper)
-        </summary>
-        <form action={bulkImportAnswers} className="space-y-3 px-3 pb-4">
-          <p className="text-xs text-foreground/60">
-            For real, sourced questions (a textbook&apos;s exercise set, a past exam paper) rather
-            than LLM-generated practice — these are stored <b>admin-approved</b> immediately, no
-            quality check applied, and tagged so students can find them by source (e.g. &ldquo;Ganit
-            Prakash&rdquo; or &ldquo;WBJEE 2023&rdquo;). Not scoped to a single syllabus topic, since
-            a book chapter or exam paper usually spans several.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <select
-              name="boardId"
-              required
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">Board</option>
-              {(boards ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-            <select
-              name="gradeId"
-              required
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">Grade</option>
-              {(grades ?? []).map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <select
-              name="subjectId"
-              required
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">Subject</option>
-              {(subjects ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <select
-              name="medium"
-              required
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">Medium</option>
-              {MEDIUMS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <input
-              name="tags"
-              placeholder="Tags, comma-separated (e.g. Ganit Prakash, Chapter 3)"
-              className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            />
-          </div>
-          <textarea
-            name="bulkText"
-            rows={8}
-            required
-            placeholder={
-              "Q: <question>\nA: <complete solution>\n---\nQ: <next question>\nA: <its solution>"
-            }
-            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-          />
-          <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
-            Import
-          </button>
-        </form>
-      </details>
+      <BulkImportForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
     </div>
   );
 }
