@@ -15,6 +15,13 @@ interface SubjectSummary {
   code: string;
 }
 
+// "subjects" only exists as a destination below lg -- desktop switches
+// subjects via the always-visible sidebar instead, independent of this tab
+// state entirely. Same for "topics": desktop already has SyllabusPanel as a
+// persistent sidebar, so a "Topics" destination only has meaning on mobile,
+// where it's the only way to reach topic browsing at all (see topic-list.tsx).
+type MainTab = "subjects" | "topics" | "chat" | "practice";
+
 export function DashboardShell({
   userName,
   subscriptionId,
@@ -46,17 +53,17 @@ export function DashboardShell({
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
-  // expanded back only via the explicit toggle below.
+  // expanded back only via the explicit toggle below. Desktop-only state:
+  // the sidebar this controls doesn't render below lg at all.
   const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
-  // Which of the main-area surfaces is visible -- all stay mounted (see the
-  // main content below) so switching tabs never loses any panel's local
-  // state (the chat timeline's ephemeral topic bubbles, or an in-progress
-  // Practice search). "topics" is a mobile-only tab (hidden lg:), since
-  // desktop already has SyllabusPanel as a persistent sidebar -- the same
-  // TopicList is reused in both places, see topic-list.tsx.
-  const [mainTab, setMainTab] = useState<"chat" | "practice" | "topics">("chat");
+  // Which main-area surface is visible -- all stay mounted (see the main
+  // content below) so switching tabs never loses any panel's local state
+  // (the chat timeline's ephemeral topic bubbles, or an in-progress
+  // Practice search).
+  const [mainTab, setMainTab] = useState<MainTab>("chat");
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
+  const hasSyllabusScope = !isStaffUser && Boolean(boardId && gradeId && medium);
 
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
@@ -65,16 +72,24 @@ export function DashboardShell({
     setMainTab("chat");
   }
 
-  // Shared by SyllabusPanel's sidebar (desktop) and the Topics tab (mobile)
+  // Shared by SyllabusPanel's sidebar (desktop), the Topics tab (mobile),
+  // and the mobile Subjects screen indirectly via handleSelectSubject above
   // -- always jump to the Chat tab on select, since that's where the
   // resulting summary bubble actually appears. Without this, clicking a
-  // topic while on the Practice (or, on mobile, Topics) tab would drop the
-  // bubble into a panel the student isn't currently looking at, with no
-  // visible feedback that anything happened.
+  // topic while on Practice (or Topics itself) would drop the bubble into a
+  // panel the student isn't currently looking at, with no visible feedback
+  // that anything happened.
   function handleSelectTopic(topic: SyllabusTopic) {
     setTopicClick({ clickId: crypto.randomUUID(), topic });
     setMainTab("chat");
   }
+
+  const mobileNavItems: { tab: MainTab; icon: string; label: string }[] = [
+    { tab: "subjects", icon: "📚", label: "Subjects" },
+    ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
+    { tab: "chat", icon: "💬", label: "Chat" },
+    ...(hasSyllabusScope ? [{ tab: "practice" as const, icon: "✏️", label: "Practice" }] : []),
+  ];
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -96,33 +111,11 @@ export function DashboardShell({
         </div>
       </header>
 
-      {/* Mobile subject switcher: a horizontally scrollable chip row,
-          replacing the sidebar below lg. A persistent sidebar -- even
-          collapsed to a 56px icon strip -- permanently eats screen width on
-          a phone-sized viewport, and switching subjects is frequent enough
-          to deserve one-tap visibility rather than being tucked behind a
-          drawer/hamburger. */}
-      <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-surface px-3 py-2 lg:hidden">
-        {subjects.map((subject) => (
-          <button
-            key={subject.id}
-            type="button"
-            onClick={() => handleSelectSubject(subject.id)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-              subject.id === selectedSubjectId
-                ? "bg-brand text-white"
-                : "bg-background text-foreground/70 hover:bg-brand/5"
-            }`}
-          >
-            {subject.name}
-          </button>
-        ))}
-        {subjects.length === 0 && (
-          <p className="px-2 py-1 text-sm text-foreground/50">No subjects subscribed.</p>
-        )}
-      </div>
-
       <div className="flex min-h-0 flex-1">
+        {/* Desktop-only: below lg, subject switching happens through the
+            "Subjects" bottom-nav destination instead (see below) -- a
+            persistent sidebar, even collapsed to a 56px icon strip,
+            permanently eats width on a phone-sized viewport. */}
         <aside
           className={`hidden shrink-0 overflow-y-auto border-r border-border bg-surface transition-[width] lg:block ${
             subjectsCollapsed ? "w-14 p-2" : "w-56 p-3 sm:w-64"
@@ -183,21 +176,41 @@ export function DashboardShell({
         )}
 
         <main className="flex min-h-0 flex-1 flex-col">
-          {selectedSubject ? (
+          {mainTab === "subjects" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                {isStaffUser ? "All subjects" : "Your subjects"}
+              </h1>
+              {subjects.length === 0 ? (
+                <p className="text-sm text-foreground/50">No subjects subscribed.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {subjects.map((subject) => (
+                    <li key={subject.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSubject(subject.id)}
+                        className={`block w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition ${
+                          subject.id === selectedSubjectId
+                            ? "bg-brand text-white"
+                            : "bg-surface text-foreground/80 hover:bg-brand/5"
+                        }`}
+                      >
+                        {subject.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : selectedSubject ? (
             <>
-              {!isStaffUser && boardId && gradeId && medium && (
-                <div className="flex shrink-0 gap-1 border-b border-border bg-surface px-4 pt-2 sm:px-6">
-                  <button
-                    type="button"
-                    onClick={() => setMainTab("topics")}
-                    className={`rounded-t-lg px-3 py-1.5 text-sm font-medium transition lg:hidden ${
-                      mainTab === "topics"
-                        ? "border border-b-0 border-border bg-background text-brand"
-                        : "text-foreground/50 hover:text-foreground"
-                    }`}
-                  >
-                    Topics
-                  </button>
+              {/* Desktop-only: below lg, Topics/Chat/Practice are reached
+                  through the bottom nav instead, which also covers Subjects
+                  (desktop switches subjects via the sidebar, so doesn't need
+                  a Subjects tab here). */}
+              {hasSyllabusScope && (
+                <div className="hidden shrink-0 gap-1 border-b border-border bg-surface px-6 pt-2 lg:flex">
                   {(["chat", "practice"] as const).map((tab) => (
                     <button
                       key={tab}
@@ -215,10 +228,10 @@ export function DashboardShell({
                 </div>
               )}
 
-              {/* All three panels stay mounted and toggle via display, not
+              {/* All panels stay mounted and toggle via display, not
                   conditional rendering, so switching tabs never discards any
                   panel's state. */}
-              {!isStaffUser && boardId && gradeId && medium && (
+              {boardId && gradeId && medium && !isStaffUser && (
                 <div className={mainTab === "topics" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
                   <p className="mb-3 text-xs text-foreground/40">
                     Tap a topic to drop its summary into the chat.
@@ -243,7 +256,7 @@ export function DashboardShell({
                   topicClick={topicClick}
                 />
               </div>
-              {!isStaffUser && boardId && gradeId && medium && (
+              {boardId && gradeId && medium && !isStaffUser && (
                 <div className={mainTab === "practice" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                   <PracticePanel
                     key={selectedSubject.id}
@@ -262,6 +275,32 @@ export function DashboardShell({
           )}
         </main>
       </div>
+
+      {/* Mobile-only primary navigation -- replaces both the old chip row
+          and the old mobile "Topics" top-tab with a single bottom nav, so
+          there's exactly one navigation surface on a phone instead of two
+          competing ones. pb-[env(...)] keeps the bar clear of the iOS home
+          indicator gesture area. */}
+      <nav
+        aria-label="Main"
+        className="flex shrink-0 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
+      >
+        {mobileNavItems.map((item) => (
+          <button
+            key={item.tab}
+            type="button"
+            onClick={() => setMainTab(item.tab)}
+            className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs font-medium transition ${
+              mainTab === item.tab ? "text-brand" : "text-foreground/50 hover:text-foreground"
+            }`}
+          >
+            <span className="text-lg" aria-hidden="true">
+              {item.icon}
+            </span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

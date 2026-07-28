@@ -290,32 +290,41 @@ observability dashboard.
 
 ### Mobile navigation
 
-Most students use this on a phone, so `DashboardShell`'s navigation is two genuinely different
-layouts below and above the `lg` breakpoint, not one desktop layout that happens to still render on
-mobile:
+Most students use this on a phone, so `DashboardShell` is two genuinely different navigation
+structures below and above the `lg` breakpoint (Tailwind's default `1024px`), not one desktop
+layout patched to still render on mobile:
 
-- **Subject switcher.** Desktop keeps a persistent, collapsible sidebar (`aside`, `hidden lg:block`)
-  — collapsed to a 56px icon strip by default once a subject is active, expandable via the `»`/`«`
-  toggle. Below `lg`, that sidebar is replaced entirely by a horizontally scrollable row of subject
-  chips between the header and the main content — a persistent sidebar, even collapsed, permanently
-  eats width on a phone-sized viewport, and switching subjects is frequent enough to deserve one-tap
-  visibility rather than being tucked behind a drawer/hamburger menu (the usual pattern for
-  secondary/infrequent navigation, which subject-switching isn't here).
-- **Topic browsing.** Covered above: `SyllabusPanel` (desktop sidebar) and the mobile-only `Topics`
-  tab both render the same `TopicList`, so topic summaries and "Relevant Exercises" — not just
-  answer-bank search — are fully usable on a phone, not only through the Practice tab.
-- **Chat input row** (`ChatPanel`). The message `<input>` is `text-base` (16px), not `text-sm` —
-  iOS Safari auto-zooms the entire page on focusing any input/textarea under 16px, and a chat box
-  gets refocused constantly, so this isn't a font-size preference, it's a real recurring bug on
-  every iPhone otherwise. The Send button is icon-only below `sm` (`➤`, with an `aria-label` since
-  the visual "Send" text is hidden there) rather than a full text label — on a narrow screen it was
-  a third element competing for width alongside the attach button and the input itself; the label
-  reappears at `sm:` and up where there's room for it.
+- **Desktop (`lg:` and up)**: unchanged from the original design — a persistent, collapsible
+  subjects sidebar (`aside`, `hidden lg:block`, collapsed to a 56px icon strip by default once a
+  subject is active), `SyllabusPanel` as a second persistent sidebar for topic browsing, and a
+  `Chat`/`Practice` tab strip (`hidden ... lg:flex`) above the main content.
+- **Mobile (below `lg`)**: a single fixed **bottom navigation bar** (`<nav>`, `flex lg:hidden`,
+  `pb-[env(safe-area-inset-bottom)]` to clear the iOS home-indicator gesture area) with up to four
+  destinations — `Subjects`, `Topics`, `Chat`, `Practice` (`Topics`/`Practice` only shown for
+  students, not staff, same `boardId && gradeId && medium` gate used throughout) — each a
+  full-screen view in the main content area. This replaces two earlier, narrower mobile patches
+  (a horizontally scrollable subject-chip row, and a `Topics` tab folded into the same top strip
+  desktop uses) with one native-feeling mobile nav surface instead of two competing ones squeezed
+  into a desktop-shaped layout.
 
-Both responsive swaps (subject switcher, topic browsing) use the same breakpoint (`lg`, Tailwind's
-default `1024px`) and the same `hidden .../lg:hidden` pairing convention, so there's exactly one
-place a screen is considered "desktop" throughout this component; the chat input fix above applies
-at `sm` (`640px`) instead, matching the breakpoint the header already uses to hide secondary info.
+Both structures are driven by the same `mainTab` state (`"subjects" | "topics" | "chat" |
+"practice"`) and the same three content panels (`TopicList`, `ChatPanel`, `PracticePanel`), which
+all stay mounted and toggle via CSS `display` rather than conditional rendering — switching tabs,
+on either layout, never discards a panel's local state (the chat timeline's ephemeral topic
+bubbles, or an in-progress Practice search). `subjects` and `topics` are values `mainTab` only ever
+takes on mobile — desktop has no UI that sets them, since it reaches the same content through its
+own sidebars instead. Selecting a subject or a topic always jumps to the `Chat` tab afterward
+(`handleSelectSubject`/`handleSelectTopic`), since that's where the result actually appears; without
+it, e.g. picking a topic while on `Practice` would drop the resulting summary bubble into a panel
+the student isn't looking at, with no visible feedback that anything happened.
+
+The chat input row (`ChatPanel`) has two more mobile-specific fixes: the message `<input>` is
+`text-base` (16px) below `sm`, not `text-sm` — iOS Safari auto-zooms the entire page on focusing any
+input/textarea under 16px, and a chat box gets refocused constantly, so this was a real recurring
+bug, not a font-size preference. The Send button is icon-only below `sm` (`➤`, with an `aria-label`
+since the visual "Send" text is hidden there) rather than a full text label, which was a third
+element competing for width alongside the attach button and the input itself on a narrow screen;
+the label reappears at `sm:` and up.
 
 ### Answer bank tags — search by source ("Ganit Prakash", "WBJEE 2023")
 
