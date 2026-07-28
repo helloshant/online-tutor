@@ -386,16 +386,14 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected version of this)
   was removed in favor of this single, more capable surface. Practice is deliberately read-only —
   no LLM call happens here — so each result has an **"Ask about this"** button for the case where a
-  student doesn't follow the banked solution: it switches to the Chat tab and seeds a pending
-  context above the message input (`ChatPanel`'s `pendingContext`, carried down from
-  `dashboard-shell.tsx`'s `practiceQuestionClick`, the same fresh-id-per-click shape as `topicClick`).
-  The student then types what they don't understand; on send, the question/answer is folded into the
-  outgoing message text itself (`Regarding this practice question:\nQ: ...\nA: ...\n\n<their text>`)
-  rather than passed as a side channel, so the LLM actually sees what's being asked about with no
-  `/api/chat` or orchestrator changes needed — the endpoint already just answers whatever message
-  text it's given, and that combined text is what gets persisted to `chat_messages`, so the context
-  is still there for any later follow-up in the same conversation, not just the first reply. The
-  pending context can be dismissed before sending if the student decides not to ask after all.
+  student doesn't follow the banked solution: it switches to the Chat tab and seeds the message
+  input directly with the question text (`ChatPanel`'s `practiceQuestionClick` prop, carried down
+  from `dashboard-shell.tsx`, the same fresh-id-per-click shape as `topicClick`), cursor placed at
+  the end so the student can edit it and type their actual follow-up right after it, all in the one
+  field they're about to send — no separate preview/quote element, since an earlier version of this
+  (a non-editable card showing the question above an empty input) read as a second, confusing input
+  and also didn't render the question's LaTeX. Whatever ends up in the field when they hit send is
+  the message, exactly like any other turn — no `/api/chat` or orchestrator changes needed.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying

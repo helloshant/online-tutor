@@ -54,11 +54,6 @@ function readImageFile(file: File): Promise<SelectedImage> {
   });
 }
 
-// A Practice result the student wants to dig deeper into -- folded into the
-// next outgoing message (see sendMessage) so the LLM actually sees the
-// question/answer being asked about, not just whatever the student types.
-type PendingContext = { question: string; answer: string };
-
 export function ChatPanel({
   subscriptionId,
   subject,
@@ -80,12 +75,15 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
-  const [pendingContext, setPendingContext] = useState<PendingContext | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+  // Set by the practiceQuestionClick effect below; consumed by the effect
+  // right after it once `input` has actually re-rendered with the seeded
+  // text, so the cursor lands at the end of that text instead of the start.
+  const focusInputAtEndRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,16 +132,31 @@ export function ChatPanel({
     ]);
   }, [topicClick]);
 
-  // Same fresh-id-per-click guard as topicClick above, but seeds
-  // pendingContext (shown above the input, see the form below) instead of a
-  // timeline entry -- there's nothing to show in the timeline until the
-  // student actually asks something.
+  // Same fresh-id-per-click guard as topicClick above, but seeds the message
+  // input directly with the question text (rather than a separate preview
+  // element) so the student edits it and types their follow-up right after
+  // it, all in the one field they're about to send.
   useEffect(() => {
     if (!practiceQuestionClick || practiceQuestionClick.clickId === lastPracticeClickIdRef.current) return;
     lastPracticeClickIdRef.current = practiceQuestionClick.clickId;
-    setPendingContext({ question: practiceQuestionClick.question, answer: practiceQuestionClick.answer });
-    messageInputRef.current?.focus();
+    setInput(`${practiceQuestionClick.question} `);
+    focusInputAtEndRef.current = true;
   }, [practiceQuestionClick]);
+
+  // Runs after every input change, but is a no-op except right after the
+  // seed above -- setting `value` and calling focus() in the same tick
+  // leaves the cursor at position 0 in most browsers, so this waits for the
+  // re-render carrying the new value before focusing and moving the cursor
+  // to the end.
+  useEffect(() => {
+    if (!focusInputAtEndRef.current) return;
+    focusInputAtEndRef.current = false;
+    const el = messageInputRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, [input]);
 
   async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -161,23 +174,12 @@ export function ChatPanel({
     e.preventDefault();
     const trimmed = input.trim();
     const image = selectedImage;
-    const context = pendingContext;
     if ((!trimmed && !image) || sending) return;
 
     setError(null);
     setInput("");
     setSelectedImage(null);
-    setPendingContext(null);
     setSending(true);
-
-    // Folds the quoted question/answer into the message text itself, rather
-    // than passing it as a separate field -- /api/chat's history is read
-    // straight back out of chat_messages.content, so this is what makes a
-    // later follow-up (in this turn or a future one) still have the context,
-    // with no orchestrator/API changes needed.
-    const outgoingMessage = context
-      ? `Regarding this practice question:\nQ: ${context.question}\nA: ${context.answer}\n\n${trimmed}`
-      : trimmed;
 
     const optimisticMessage: ChatMessage = {
       id: `optimistic-${Date.now()}`,
@@ -185,7 +187,7 @@ export function ChatPanel({
       subscription_id: subscriptionId,
       subject_id: subject.id,
       role: "user",
-      content: outgoingMessage || "[Image]",
+      content: trimmed || "[Image]",
       created_at: new Date().toISOString(),
     };
     setTimeline((prev) => [
@@ -199,7 +201,7 @@ export function ChatPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subjectId: subject.id,
-          message: outgoingMessage,
+          message: trimmed,
           image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
         }),
       });
@@ -220,7 +222,6 @@ export function ChatPanel({
       );
       setInput(trimmed);
       setSelectedImage(image);
-      setPendingContext(context);
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setSending(false);
@@ -286,21 +287,6 @@ export function ChatPanel({
 
       <form onSubmit={sendMessage} className="shrink-0 border-t border-border bg-surface p-3 sm:p-4">
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
-        {pendingContext && (
-          <div className="mb-2 flex items-start gap-2 rounded-lg border border-border bg-background p-2 text-xs">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground/50">Asking about:</p>
-              <p className="truncate text-foreground/80">{pendingContext.question}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPendingContext(null)}
-              className="shrink-0 text-foreground/50 hover:text-foreground"
-            >
-              Remove
-            </button>
-          </div>
-        )}
         {selectedImage && (
           <div className="mb-2 flex w-fit items-center gap-2 rounded-lg border border-border bg-background p-1.5 pr-2">
             {/* eslint-disable-next-line @next/next/no-img-element -- transient local preview, never persisted */}
@@ -341,7 +327,7 @@ export function ChatPanel({
             ref={messageInputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={pendingContext ? "What don't you understand about it?" : `Ask a ${subject.name} question…`}
+            placeholder={`Ask a ${subject.name} question…`}
             disabled={sending}
             className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-base outline-none focus:ring-2 focus:ring-brand disabled:opacity-60 sm:text-sm"
           />
