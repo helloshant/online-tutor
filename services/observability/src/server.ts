@@ -18,8 +18,19 @@ if (!SHARED_SECRET) {
 const app = express();
 app.use(express.json({ limit: "256kb" }));
 
+// Mirrors the orchestrator's own /health diagnostics (non-secret config
+// presence only) -- this service has its own separate SUPABASE_URL /
+// SUPABASE_SERVICE_ROLE_KEY env vars, distinct from the orchestrator's, so
+// "the orchestrator is configured" says nothing about whether this service
+// is too. Checkable independently instead of only via container logs.
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+    storage: {
+      supabaseUrl: process.env.SUPABASE_URL || null,
+      configured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    },
+  });
 });
 
 function requireSharedSecret(req: Request, res: Response, next: NextFunction) {
