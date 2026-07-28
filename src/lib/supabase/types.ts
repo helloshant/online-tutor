@@ -102,10 +102,13 @@ export type AnswerValidationStatus = "auto_approved" | "pending_review" | "admin
 
 // Written only by the orchestrator service (service-role key) -- see
 // supabase/migrations/0005_answer_bank.sql, 0006_answer_bank_validation.sql,
-// and 0015_answer_bank_topic_id.sql. RLS is enabled with zero client-facing
-// policies (a deliberate backend-only table, see 0005), so the admin panel
-// reads/updates/deletes it with the service-role client too -- there is no
-// ordinary-session path to this table at all.
+// 0015_answer_bank_topic_id.sql, and 0016_answer_bank_tags.sql. RLS is
+// enabled with zero client-facing policies (a deliberate backend-only
+// table, see 0005), so the admin panel reads/updates/deletes it with the
+// service-role client too -- there is no ordinary-session path to this
+// table at all. Admins can also write to it directly now, via tagging and
+// bulk import (src/app/admin/answer-bank), both using the same
+// service-role client.
 export type AnsweredQuestion = {
   id: string;
   board_id: string;
@@ -120,6 +123,10 @@ export type AnsweredQuestion = {
   answer: string;
   validation_status: AnswerValidationStatus;
   hit_count: number;
+  // Free-form provenance labels an admin assigns (e.g. a textbook or exam
+  // paper name) -- never set by the LLM-generation paths, only by admin
+  // tagging/bulk-import. Always an array, never null (column default '{}').
+  tags: string[];
   created_at: string;
   last_used_at: string;
 };

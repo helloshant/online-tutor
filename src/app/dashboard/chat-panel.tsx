@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import { TopicSummaryMessage } from "./topic-summary-message";
+import { TagSearchMessage } from "./tag-search-message";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -24,7 +25,8 @@ interface SubjectSummary {
 // same as the image on the server side.
 type TimelineEntry =
   | { kind: "message"; message: ChatMessage; previewImageUrl?: string }
-  | { kind: "topic"; entryId: string; topic: SyllabusTopic };
+  | { kind: "topic"; entryId: string; topic: SyllabusTopic }
+  | { kind: "tagSearch"; entryId: string; tag: string; subjectId: string };
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 // Mirrors the server-side cap (~4.3MB decoded) so an oversized file is
@@ -60,12 +62,14 @@ export function ChatPanel({
   medium,
   isStaffUser,
   topicClick,
+  tagSearch,
 }: {
   subscriptionId: string | null;
   subject: SubjectSummary;
   medium: Medium | null;
   isStaffUser: boolean;
   topicClick: { clickId: string; topic: SyllabusTopic } | null;
+  tagSearch: { searchId: string; tag: string } | null;
 }) {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -75,6 +79,7 @@ export function ChatPanel({
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
+  const lastSearchIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -123,6 +128,17 @@ export function ChatPanel({
       { kind: "topic", entryId: topicClick.clickId, topic: topicClick.topic },
     ]);
   }, [topicClick]);
+
+  // Same fresh-id pattern as topicClick above, for a tag search submitted
+  // from the syllabus panel (see dashboard-shell.tsx's tagSearch prop).
+  useEffect(() => {
+    if (!tagSearch || tagSearch.searchId === lastSearchIdRef.current) return;
+    lastSearchIdRef.current = tagSearch.searchId;
+    setTimeline((prev) => [
+      ...prev,
+      { kind: "tagSearch", entryId: tagSearch.searchId, tag: tagSearch.tag, subjectId: subject.id },
+    ]);
+  }, [tagSearch, subject.id]);
 
   async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -215,6 +231,8 @@ export function ChatPanel({
         {timeline.map((entry) =>
           entry.kind === "topic" ? (
             <TopicSummaryMessage key={entry.entryId} topic={entry.topic} />
+          ) : entry.kind === "tagSearch" ? (
+            <TagSearchMessage key={entry.entryId} tag={entry.tag} subjectId={entry.subjectId} />
           ) : (
             <div
               key={entry.message.id}

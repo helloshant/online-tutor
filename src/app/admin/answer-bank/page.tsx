@@ -1,8 +1,16 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
-import type { AnswerValidationStatus } from "@/lib/supabase/types";
-import { approveAnswer, deleteAnswer, rejectAnswer, restoreAnswer } from "./actions";
+import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
+import {
+  addTag,
+  approveAnswer,
+  bulkImportAnswers,
+  deleteAnswer,
+  rejectAnswer,
+  removeTag,
+  restoreAnswer,
+} from "./actions";
 
 const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -11,6 +19,8 @@ const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[]
   { value: "admin_approved", label: "Admin-approved" },
   { value: "rejected", label: "Rejected" },
 ];
+
+const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
 
 const STATUS_STYLES: Record<AnswerValidationStatus, string> = {
   auto_approved: "bg-green-100 text-green-700",
@@ -22,11 +32,12 @@ const STATUS_STYLES: Record<AnswerValidationStatus, string> = {
 export default async function AnswerBankPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; tag?: string }>;
 }) {
   await requireAdminPage("answer_bank");
-  const { status } = await searchParams;
+  const { status, tag } = await searchParams;
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
+  const activeTag = tag?.trim() || null;
   // answered_questions has RLS enabled with zero policies (see
   // supabase/migrations/0005_answer_bank.sql) -- it's a backend
   // implementation detail the orchestrator writes to with its service-role
@@ -43,8 +54,31 @@ export default async function AnswerBankPage({
   if (activeStatus !== "all") {
     query = query.eq("validation_status", activeStatus);
   }
+  if (activeTag) {
+    query = query.contains("tags", [activeTag]);
+  }
 
-  const { data: rows } = await query;
+  const [{ data: rows }, { data: boards }, { data: grades }, { data: subjects }] = await Promise.all([
+    query,
+    supabase.from("boards").select("*").order("name"),
+    supabase.from("grades").select("*").order("level"),
+    supabase.from("subjects").select("*").order("name"),
+  ]);
+
+  function statusHref(value: AnswerValidationStatus | "all") {
+    const params = new URLSearchParams();
+    if (value !== "all") params.set("status", value);
+    if (activeTag) params.set("tag", activeTag);
+    const qs = params.toString();
+    return qs ? `/admin/answer-bank?${qs}` : "/admin/answer-bank";
+  }
+
+  function tagHref(value: string) {
+    const params = new URLSearchParams();
+    if (activeStatus !== "all") params.set("status", activeStatus);
+    params.set("tag", value);
+    return `/admin/answer-bank?${params.toString()}`;
+  }
 
   return (
     <div>
@@ -62,7 +96,7 @@ export default async function AnswerBankPage({
         {STATUS_FILTERS.map((f) => (
           <a
             key={f.value}
-            href={f.value === "all" ? "/admin/answer-bank" : `/admin/answer-bank?status=${f.value}`}
+            href={statusHref(f.value)}
             className={`rounded-full border px-3 py-1 ${
               activeStatus === f.value
                 ? "border-brand bg-brand text-white"
@@ -73,6 +107,24 @@ export default async function AnswerBankPage({
           </a>
         ))}
       </div>
+
+      <form method="get" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        {activeStatus !== "all" && <input type="hidden" name="status" value={activeStatus} />}
+        <input
+          name="tag"
+          defaultValue={activeTag ?? ""}
+          placeholder="Filter by tag (e.g. Ganit Prakash, WBJEE 2023)"
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        />
+        <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+          Filter
+        </button>
+        {activeTag && (
+          <a href={statusHref(activeStatus)} className="text-xs text-foreground/50 hover:underline">
+            Clear tag filter
+          </a>
+        )}
+      </form>
 
       <div className="mt-6 space-y-3">
         {(rows ?? []).map((row) => {
@@ -105,6 +157,32 @@ export default async function AnswerBankPage({
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
                 <MathText text={row.answer} />
               </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {row.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand"
+                  >
+                    <a href={tagHref(t)} className="hover:underline">
+                      {t}
+                    </a>
+                    <form action={removeTag.bind(null, row.id, t)}>
+                      <button type="submit" title={`Remove tag "${t}"`} className="text-brand/60 hover:text-brand">
+                        ×
+                      </button>
+                    </form>
+                  </span>
+                ))}
+                <form action={addTag.bind(null, row.id)} className="flex items-center gap-1">
+                  <input
+                    name="tag"
+                    placeholder="+ tag"
+                    className="w-24 rounded-full border border-dashed border-border bg-background px-2 py-0.5 text-xs outline-none focus:border-brand"
+                  />
+                </form>
+              </div>
+
               <div className="mt-3 flex gap-4 text-xs">
                 {row.validation_status !== "admin_approved" && (
                   <form action={approveAnswer.bind(null, row.id)}>
@@ -150,6 +228,88 @@ export default async function AnswerBankPage({
           <p className="text-sm text-foreground/50">No entries yet for this filter.</p>
         )}
       </div>
+
+      <details className="mt-8 rounded-lg border border-border">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-brand/5">
+          Bulk import (e.g. a textbook or past exam paper)
+        </summary>
+        <form action={bulkImportAnswers} className="space-y-3 px-3 pb-4">
+          <p className="text-xs text-foreground/60">
+            For real, sourced questions (a textbook&apos;s exercise set, a past exam paper) rather
+            than LLM-generated practice — these are stored <b>admin-approved</b> immediately, no
+            quality check applied, and tagged so students can find them by source (e.g. &ldquo;Ganit
+            Prakash&rdquo; or &ldquo;WBJEE 2023&rdquo;). Not scoped to a single syllabus topic, since
+            a book chapter or exam paper usually spans several.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <select
+              name="boardId"
+              required
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">Board</option>
+              {(boards ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <select
+              name="gradeId"
+              required
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">Grade</option>
+              {(grades ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <select
+              name="subjectId"
+              required
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">Subject</option>
+              {(subjects ?? []).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <select
+              name="medium"
+              required
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">Medium</option>
+              {MEDIUMS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <input
+              name="tags"
+              placeholder="Tags, comma-separated (e.g. Ganit Prakash, Chapter 3)"
+              className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+          <textarea
+            name="bulkText"
+            rows={8}
+            required
+            placeholder={
+              "Q: <question>\nA: <complete solution>\n---\nQ: <next question>\nA: <its solution>"
+            }
+            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+          />
+          <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
+            Import
+          </button>
+        </form>
+      </details>
     </div>
   );
 }

@@ -282,6 +282,46 @@ generate-and-store), tagged with a descriptive `question` string (`topic-summary
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
 
+### Answer bank tags — search by source ("Ganit Prakash", "WBJEE 2023")
+
+`topic_id` scopes an entry to one syllabus topic, but a lot of real content doesn't map cleanly to
+a single topic at all — a textbook's exercise set or a past exam paper usually spans several. Tags
+(`answered_questions.tags`, `0016_answer_bank_tags.sql` — a plain `text[]` with a GIN index, not a
+normalized tags table, since these are open-ended admin-assigned labels rather than a controlled
+vocabulary needing rename-once-updates-everywhere semantics) are a second, independent axis: free-form
+provenance labels a student can search by directly, e.g. "show me exercises from Ganit Prakash" or
+"questions from WBJEE 2023."
+
+- **Admin: tagging and bulk import** (`/admin/answer-bank`). Every entry — however it originated —
+  can have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a plain read-modify-write
+  against the `tags` array; fine for an admin-only tool with no meaningful concurrent-edit risk). A
+  `?tag=` filter alongside the existing `?status=` one lets you browse by tag, and clicking a tag chip
+  applies that filter directly. A **bulk import** section (collapsed `<details>`, same pattern as the
+  catalog page's bulk syllabus paste) accepts the same `Q: ... / A: ... / ---` block format the
+  orchestrator's exercise generation uses, plus a board/grade/subject/medium selection and a
+  comma-separated tag list applied to every question in that paste. Bulk-imported rows skip
+  `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer hedging
+  or reading like a question asked back — neither applies to hand-sourced content) and are stored
+  `admin_approved` immediately, with no `topic_id` (deliberately — see above).
+- **Student: tag search** (`SyllabusPanel`, desktop only, same panel the topic list lives in). A
+  search box suggests real tag values (via `GET /api/answer-bank/tags?subjectId=...`, which lists
+  distinct tags already banked for the student's board/grade/medium and the given subject) rather
+  than asking the student to guess exact tag text blind. Submitting drops a new bubble into the chat
+  timeline (`TagSearchMessage`, mirroring `TopicSummaryMessage`'s pattern — a fresh id per submit so
+  the same tag searched twice still drops a new bubble), which fetches
+  `GET /api/answer-bank/search?subjectId=...&tag=...` and lists whatever matched. Both endpoints
+  resolve the student's board/grade/medium from their active subscription and verify the requested
+  subject is actually part of it (`src/lib/studentScope.ts`, the same entitlement check `/api/chat`
+  applies) before querying — `answered_questions` has zero client-facing RLS policies, so without
+  this a student could otherwise read any board/grade/subject's tagged content, not just their own.
+  Only `auto_approved`/`admin_approved` entries are ever returned, same as every other student-facing
+  read of this table.
+- **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
+  WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
+  instead of the tutor). The dedicated search box above is the deliberate first phase; chat-based
+  querying would need new intent-detection logic in `/v1/chat` to distinguish a tag lookup from a
+  real syllabus question, which is a separate, larger piece of work.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since

@@ -42,6 +42,9 @@ export function DashboardShell({
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
+  // Same fresh-id-per-submit reasoning as topicClick, for a tag search
+  // submitted from the syllabus panel.
+  const [tagSearch, setTagSearch] = useState<{ searchId: string; tag: string } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below.
@@ -52,6 +55,7 @@ export function DashboardShell({
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
+    setTagSearch(null);
     setSubjectsCollapsed(true);
   }
 
@@ -132,6 +136,7 @@ export function DashboardShell({
             medium={medium}
             selectedTopicId={topicClick?.topic.id ?? null}
             onSelectTopic={(topic) => setTopicClick({ clickId: crypto.randomUUID(), topic })}
+            onSearchTag={(tag) => setTagSearch({ searchId: crypto.randomUUID(), tag })}
           />
         )}
 
@@ -144,6 +149,7 @@ export function DashboardShell({
               medium={medium}
               isStaffUser={isStaffUser}
               topicClick={topicClick}
+              tagSearch={tagSearch}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-foreground/50">
