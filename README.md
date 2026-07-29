@@ -359,7 +359,13 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   none could be parsed at all (no more silent no-ops on a malformed paste). Bulk-imported rows still
   skip `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer
   hedging or reading like a question asked back — neither applies to hand-sourced content) and are
-  stored `admin_approved` immediately.
+  stored `admin_approved` immediately. `parseImportBlocks` normalizes `\r\n`/`\r` to `\n` before
+  splitting on the `---` separator — pasting from a Windows-originated source (or through some
+  clipboard managers/editors) can leave CRLF line endings, and a stray `\r` sitting right before the
+  separator's newline used to stop the split from matching there at all, silently swallowing every
+  subsequent block into the answer of whatever came before it (the same fix was applied to the
+  orchestrator's identical, deliberately-duplicated `parseGeneratedExercises` in `exerciseParser.ts`,
+  which it's kept in sync with).
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither

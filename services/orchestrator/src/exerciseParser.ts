@@ -7,7 +7,11 @@
 const EXERCISE_BLOCK_PATTERN = /^Q:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*)$/im;
 
 export function parseGeneratedExercises(text: string): { question: string; answer: string }[] {
-  const blocks = text.split(/\n-{3,}\n/);
+  // Normalize CRLF/CR up front -- see the identical fix and reasoning in
+  // src/app/admin/answer-bank/actions.ts's parseImportBlocks, which this
+  // function is deliberately kept in sync with.
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalized.split(/\n-{3,}\n/);
   const rows: { question: string; answer: string }[] = [];
 
   for (const rawBlock of blocks) {

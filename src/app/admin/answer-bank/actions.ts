@@ -86,7 +86,13 @@ export async function removeTag(id: string, tag: string) {
 const IMPORT_BLOCK_PATTERN = /^Q:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*)$/im;
 
 function parseImportBlocks(text: string): { question: string; answer: string }[] {
-  const blocks = text.split(/\n-{3,}\n/);
+  // Normalize CRLF/CR up front -- pasting from a Windows-originated source
+  // (or through some clipboard managers/editors) can leave "\r\n" line
+  // endings, and a stray "\r" sitting right before the separator's "\n"
+  // stops the split below from matching there at all, silently swallowing
+  // every subsequent block into the answer of whatever came before it.
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalized.split(/\n-{3,}\n/);
   const rows: { question: string; answer: string }[] = [];
 
   for (const rawBlock of blocks) {
