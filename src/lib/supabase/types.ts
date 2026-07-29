@@ -127,6 +127,11 @@ export type AnsweredQuestion = {
   // paper name) -- never set by the LLM-generation paths, only by admin
   // tagging/bulk-import. Always an array, never null (column default '{}').
   tags: string[];
+  // A supporting figure/diagram for this question, admin-attached after the
+  // fact (src/app/admin/answer-bank/actions.ts's setImage/removeImage) --
+  // never set by any LLM-generation path. Public Supabase Storage URL, see
+  // 0017_answer_bank_image.sql.
+  image_url: string | null;
   created_at: string;
   last_used_at: string;
 };

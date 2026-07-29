@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
-type SearchResult = { question: string; answer: string };
+type SearchResult = { question: string; answer: string; image_url: string | null };
 
 // A dedicated browse/search surface for the answer bank -- distinct from
 // the chat timeline's per-topic "Relevant Exercises" bubble (which is
@@ -218,6 +218,14 @@ export function PracticePanel({
                       <p className="font-medium">
                         {i + 1}. <MathText text={r.question} />
                       </p>
+                      {r.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset
+                        <img
+                          src={r.image_url}
+                          alt="Figure for this question"
+                          className="mt-1.5 max-h-64 rounded-lg border border-border object-contain"
+                        />
+                      )}
                       <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
                         <MathText text={r.answer} />
                       </p>

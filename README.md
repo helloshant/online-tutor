@@ -429,6 +429,36 @@ anyway.
   or "Load more" — is still in flight, the same race-guard pattern used elsewhere for rapidly-changing
   filters.
 
+### Answer bank images — a diagram/figure that goes with a question
+
+Some banked questions (typically bulk-imported textbook exercises) inherently include a figure —
+a geometry diagram, a graph, a table laid out as an image — that can't be captured as plain text. A
+plain `<textarea>` (the Bulk Import box) can't hold an image at all, so this is a separate,
+per-row action rather than something the bulk-paste format tries to carry: `answered_questions`
+gained a nullable `image_url` column (`0017_answer_bank_image.sql`), backed by a public Supabase
+Storage bucket (`answer-bank-images`) rather than inline/base64 storage — unlike chat's transient
+per-message images (never persisted), a banked entry's image needs to persist and be served
+repeatedly to every student who hits this question, not just shown once in a single exchange. The
+bucket is public (no `storage.objects` policy needed) since only the service-role admin client ever
+writes to it and any student who can already see this admin-approved question should be able to see
+its figure.
+
+- **Admin** (`/admin/answer-bank`): each row shows its attached image (if any) with a "Remove image"
+  button, or a file input + "Add image" button if it doesn't have one yet (`setImage`/`removeImage`
+  in `actions.ts`). Upload always writes to a fixed storage path — the row's own id — with
+  `upsert: true`, so re-uploading replaces the existing image instead of accumulating orphaned files;
+  `removeImage` deletes the storage object and clears the column together. Same minimal-feedback
+  philosophy as `addTag`: an invalid file (wrong type, over 4MB) silently no-ops rather than wiring up
+  a dedicated error-message flow for one row-level control.
+- **Practice panel**: `/api/answer-bank/search` now selects `image_url` alongside `question`/`answer`,
+  and each result renders the image (if present) between the question and answer text.
+- **Not wired into "Relevant Exercises" in chat.** That flow goes through the orchestrator's
+  `/v1/topic-exercises` endpoint, which can return either banked entries *or* freshly LLM-generated
+  ones in the same response — the LLM-generated half can never have an image, and plumbing
+  `image_url` through the orchestrator's types, `TopicExercisesResponse`, the web app's proxy route,
+  and `topic-summary-message.tsx` for the banked-only half wasn't judged worth it yet. The Practice
+  panel is the one place a banked image reliably shows up today.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since

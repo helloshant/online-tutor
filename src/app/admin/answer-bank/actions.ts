@@ -78,6 +78,54 @@ export async function removeTag(id: string, tag: string) {
   revalidatePath("/admin/answer-bank");
 }
 
+// Public bucket created in 0017_answer_bank_image.sql -- see that migration
+// for why no storage.objects policy is needed (only this service-role
+// client ever writes).
+const IMAGE_BUCKET = "answer-bank-images";
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+// Well under Supabase Storage's own limits -- a textbook page photo doesn't
+// need to be huge to be legible, and this keeps upload latency reasonable
+// on the admin's connection.
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+// Silently no-ops on an invalid/missing file, same philosophy as addTag
+// above (a simple per-row action with no dedicated feedback UI) -- there's
+// no useActionState wired up for this row-level form, so there's nowhere to
+// surface an error message anyway.
+export async function setImage(id: string, formData: FormData) {
+  await requireAdminPage("answer_bank");
+  const file = formData.get("image") as File | null;
+  if (!file || file.size === 0 || file.size > MAX_IMAGE_BYTES || !ALLOWED_IMAGE_TYPES.has(file.type)) {
+    return;
+  }
+
+  const supabase = createAdminClient();
+  // One fixed path per row (upsert: true) rather than a filename derived
+  // from the upload -- a re-upload always replaces the same object instead
+  // of accumulating orphaned files under this id.
+  const { error: uploadError } = await supabase.storage
+    .from(IMAGE_BUCKET)
+    .upload(id, file, { contentType: file.type, upsert: true });
+  if (uploadError) {
+    console.error("Answer bank image upload failed:", uploadError);
+    return;
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(id);
+  await supabase.from("answered_questions").update({ image_url: publicUrl }).eq("id", id);
+  revalidatePath("/admin/answer-bank");
+}
+
+export async function removeImage(id: string) {
+  await requireAdminPage("answer_bank");
+  const supabase = createAdminClient();
+  await supabase.storage.from(IMAGE_BUCKET).remove([id]);
+  await supabase.from("answered_questions").update({ image_url: null }).eq("id", id);
+  revalidatePath("/admin/answer-bank");
+}
+
 // Same Q:/A:/--- block format the orchestrator's exercise generation uses
 // (services/orchestrator/src/exerciseParser.ts) -- deliberately duplicated
 // rather than shared, same as every other type/parser this web app

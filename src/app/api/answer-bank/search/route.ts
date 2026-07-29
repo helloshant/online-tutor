@@ -54,7 +54,7 @@ async function handleSearch(request: Request) {
   const admin = createAdminClient();
   let query = admin
     .from("answered_questions")
-    .select("question, answer")
+    .select("question, answer, image_url")
     .eq("board_id", scope.boardId)
     .eq("grade_id", scope.gradeId)
     .eq("subject_id", subjectId)

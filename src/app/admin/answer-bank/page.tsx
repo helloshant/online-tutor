@@ -2,7 +2,16 @@ import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
 import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
-import { addTag, approveAnswer, deleteAnswer, rejectAnswer, removeTag, restoreAnswer } from "./actions";
+import {
+  addTag,
+  approveAnswer,
+  deleteAnswer,
+  rejectAnswer,
+  removeImage,
+  removeTag,
+  restoreAnswer,
+  setImage,
+} from "./actions";
 import { BulkImportForm } from "./bulk-import-form";
 
 const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[] = [
@@ -288,6 +297,43 @@ export default async function AnswerBankPage({
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
                 <MathText text={row.answer} />
               </p>
+
+              <div className="mt-3">
+                {row.image_url ? (
+                  <div className="flex items-start gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset */}
+                    <img
+                      src={row.image_url}
+                      alt="Attached figure for this question"
+                      className="h-24 w-24 rounded-lg border border-border object-cover"
+                    />
+                    <form action={removeImage.bind(null, row.id)}>
+                      <button type="submit" className="text-xs text-foreground/50 hover:underline">
+                        Remove image
+                      </button>
+                    </form>
+                  </div>
+                ) : (
+                  <form
+                    action={setImage.bind(null, row.id)}
+                    encType="multipart/form-data"
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      type="file"
+                      name="image"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      className="text-xs text-foreground/60"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-brand/5"
+                    >
+                      Add image
+                    </button>
+                  </form>
+                )}
+              </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 {row.tags.map((t) => (
