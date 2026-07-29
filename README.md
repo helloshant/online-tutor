@@ -733,6 +733,13 @@ auth/authorization and call through `paymentClient.ts`, the same split as the CC
 - `coupon_codes` has no student-facing RLS policy at all (admin-only, `is_admin()`-gated) — there's
   no client-side path to redeem a code even in principle; `services/payment` is the only thing that
   ever writes `used_by`/`used_at`/`subscription_id` on that table.
+- Codes have an **optional expiry** (`expires_at`, nullable — `supabase/migrations/0020_coupon_expiry.sql`).
+  Leaving the "Expires" date blank when generating a batch keeps today's "valid forever until redeemed
+  or revoked" behavior; setting one applies to every code in that batch. Redemption checks it twice: an
+  upfront read (`"That coupon code has expired."`) and again inside the atomic claim itself
+  (`... .or('expires_at.is.null,expires_at.gt.<now>')`), so a request that straddles the exact expiry
+  moment can't sneak through between the two checks. The admin list shows a third status, **Expired**,
+  for codes that are unused but past their `expires_at` (distinct from Used/Unused).
 
 ## Local setup
 

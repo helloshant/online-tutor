@@ -49,8 +49,12 @@ export async function handlePaymentCallback(encResp: string): Promise<{ redirect
   return callPaymentService<{ redirectTo: string }>("/v1/payment/callback", { encResp });
 }
 
-export async function generateCoupons(count: number, createdBy: string): Promise<{ codes: string[] }> {
-  return callPaymentService<{ codes: string[] }>("/v1/coupons/generate", { count, createdBy });
+export async function generateCoupons(
+  count: number,
+  createdBy: string,
+  expiresAt?: string | null
+): Promise<{ codes: string[] }> {
+  return callPaymentService<{ codes: string[] }>("/v1/coupons/generate", { count, createdBy, expiresAt });
 }
 
 export async function revokeCoupon(id: string): Promise<void> {

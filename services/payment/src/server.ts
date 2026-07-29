@@ -122,7 +122,7 @@ app.post(
   "/v1/coupons/generate",
   requireSharedSecret,
   asyncRoute(async (req, res) => {
-    const body = req.body as Partial<{ count: number; createdBy: string }>;
+    const body = req.body as Partial<{ count: number; createdBy: string; expiresAt: string | null }>;
     const count = Number.isFinite(body.count) ? Math.min(100, Math.max(1, Math.trunc(body.count!))) : 1;
 
     if (typeof body.createdBy !== "string" || !body.createdBy) {
@@ -130,7 +130,8 @@ app.post(
       return;
     }
 
-    const codes = await generateCoupons(count, body.createdBy);
+    const expiresAt = typeof body.expiresAt === "string" && body.expiresAt ? body.expiresAt : null;
+    const codes = await generateCoupons(count, body.createdBy, expiresAt);
     res.json({ codes });
   })
 );

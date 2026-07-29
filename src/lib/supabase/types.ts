@@ -105,6 +105,7 @@ export type CouponCode = {
   used_at: string | null;
   subscription_id: string | null;
   created_at: string;
+  expires_at: string | null;
 };
 
 export type ChatMessage = {

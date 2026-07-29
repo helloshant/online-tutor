@@ -49,6 +49,17 @@ export default async function CouponsPage() {
             className="mt-1 w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           />
         </div>
+        <div>
+          <label htmlFor="expiresAt" className="block text-xs font-medium text-foreground/60">
+            Expires (optional)
+          </label>
+          <input
+            id="expiresAt"
+            name="expiresAt"
+            type="date"
+            className="mt-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          />
+        </div>
         <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
           Generate
         </button>
@@ -61,41 +72,50 @@ export default async function CouponsPage() {
               <th className="px-4 py-2 font-medium">Code</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2 font-medium">Used by</th>
+              <th className="px-4 py-2 font-medium">Expires</th>
               <th className="px-4 py-2 font-medium">Created</th>
               <th className="px-4 py-2 font-medium"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((coupon) => (
-              <tr key={coupon.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-2 font-mono">{coupon.code}</td>
-                <td className="px-4 py-2">
-                  {coupon.used_by ? (
-                    <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/60">
-                      Used
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">Unused</span>
-                  )}
-                </td>
-                <td className="px-4 py-2 text-foreground/70">
-                  {coupon.used_by
-                    ? `${nameById.get(coupon.used_by) ?? "—"} · ${new Date(coupon.used_at!).toLocaleDateString()}`
-                    : "—"}
-                </td>
-                <td className="px-4 py-2 text-foreground/50">{new Date(coupon.created_at).toLocaleDateString()}</td>
-                <td className="px-4 py-2 text-right">
-                  {!coupon.used_by && (
-                    <form action={revokeCouponCode.bind(null, coupon.id)}>
-                      <button className="text-xs text-foreground/40 hover:underline">Revoke</button>
-                    </form>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {rows.map((coupon) => {
+              const isExpired = !coupon.used_by && Boolean(coupon.expires_at) && new Date(coupon.expires_at!) <= new Date();
+              return (
+                <tr key={coupon.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2 font-mono">{coupon.code}</td>
+                  <td className="px-4 py-2">
+                    {coupon.used_by ? (
+                      <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/60">
+                        Used
+                      </span>
+                    ) : isExpired ? (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">Expired</span>
+                    ) : (
+                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">Unused</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-foreground/70">
+                    {coupon.used_by
+                      ? `${nameById.get(coupon.used_by) ?? "—"} · ${new Date(coupon.used_at!).toLocaleDateString()}`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-foreground/50">
+                    {coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : "Never"}
+                  </td>
+                  <td className="px-4 py-2 text-foreground/50">{new Date(coupon.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-right">
+                    {!coupon.used_by && (
+                      <form action={revokeCouponCode.bind(null, coupon.id)}>
+                        <button className="text-xs text-foreground/40 hover:underline">Revoke</button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-sm text-foreground/50">
+                <td colSpan={6} className="px-4 py-6 text-center text-sm text-foreground/50">
                   No coupon codes yet.
                 </td>
               </tr>

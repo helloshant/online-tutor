@@ -24,10 +24,15 @@ function generateCode(): string {
   return groups.join("-");
 }
 
-export async function generateCoupons(count: number, createdBy: string): Promise<string[]> {
+// expiresAt is a caller-supplied ISO timestamp, shared across the whole
+// batch -- null/undefined means "valid forever until redeemed or revoked",
+// today's default behavior.
+export async function generateCoupons(count: number, createdBy: string, expiresAt?: string | null): Promise<string[]> {
   const supabase = getSupabaseClient();
   const codes = Array.from({ length: count }, generateCode);
-  const { error } = await supabase.from("coupon_codes").insert(codes.map((code) => ({ code, created_by: createdBy })));
+  const { error } = await supabase
+    .from("coupon_codes")
+    .insert(codes.map((code) => ({ code, created_by: createdBy, expires_at: expiresAt ?? null })));
   if (error) throw new Error(`Failed to insert coupon codes: ${error.message}`);
   return codes;
 }
@@ -63,28 +68,39 @@ export async function redeemCoupon(params: {
     return { error: "No pending subscription to apply this code to." };
   }
 
-  const { data: coupon } = await supabase.from("coupon_codes").select("id, used_by").eq("code", code).maybeSingle();
+  const { data: coupon } = await supabase
+    .from("coupon_codes")
+    .select("id, used_by, expires_at")
+    .eq("code", code)
+    .maybeSingle();
   if (!coupon) {
     return { error: "That coupon code isn't valid." };
   }
   if (coupon.used_by) {
     return { error: "That coupon code has already been used." };
   }
+  if (coupon.expires_at && new Date(coupon.expires_at) <= new Date()) {
+    return { error: "That coupon code has expired." };
+  }
 
   // Atomic claim: the `is("used_by", null)` guard means two simultaneous
   // redemption attempts for the same code can't both succeed -- whichever
   // request loses the race gets zero rows back here and reports "already
-  // used".
+  // used". Re-checks expiry too (`expires_at.is.null,expires_at.gt.<now>`)
+  // rather than trusting the read above, in case a slow request straddles
+  // the expiry moment itself.
+  const nowIso = new Date().toISOString();
   const { data: claimed } = await supabase
     .from("coupon_codes")
-    .update({ used_by: params.userId, used_at: new Date().toISOString(), subscription_id: subscription.id })
+    .update({ used_by: params.userId, used_at: nowIso, subscription_id: subscription.id })
     .eq("id", coupon.id)
     .is("used_by", null)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
     .select("id")
     .maybeSingle();
 
   if (!claimed) {
-    return { error: "That coupon code has already been used." };
+    return { error: "That coupon code can no longer be used." };
   }
 
   const { error: activateError } = await supabase

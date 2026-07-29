@@ -16,7 +16,13 @@ export async function generateCouponCodes(formData: FormData) {
   const countRaw = Number(formData.get("count"));
   const count = Number.isFinite(countRaw) ? Math.min(MAX_BATCH, Math.max(1, Math.trunc(countRaw))) : 1;
 
-  await generateCoupons(count, session.user.id);
+  // The date input only gives a calendar date ("YYYY-MM-DD"), not a time --
+  // treated as end-of-day UTC so a code stays valid through the entire day
+  // an admin picked, rather than expiring at midnight at the start of it.
+  const expiresAtRaw = formData.get("expiresAt");
+  const expiresAt = typeof expiresAtRaw === "string" && expiresAtRaw ? `${expiresAtRaw}T23:59:59.999Z` : null;
+
+  await generateCoupons(count, session.user.id, expiresAt);
 
   revalidatePath("/admin/coupons");
 }
