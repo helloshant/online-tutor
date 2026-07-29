@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { encrypt, getAccessCode, getMerchantIdForRequest, getTransactionUrl } from "@/lib/ccavenue";
+import { initiatePayment } from "@/lib/paymentClient";
 
 // Every code path below must return through NextResponse.json -- this
-// top-level catch is the backstop so an unexpected throw (e.g. a missing
-// env var) never reaches the client as an empty/non-JSON body.
+// top-level catch is the backstop so an unexpected throw (e.g. the payment
+// service being unreachable) never reaches the client as an empty/non-JSON
+// body.
 export async function POST(request: Request) {
   try {
     return await handleInitiate(request);
@@ -14,6 +15,10 @@ export async function POST(request: Request) {
   }
 }
 
+// A thin proxy: authenticates the caller and does a cheap ownership check,
+// then hands off to services/payment, which owns the actual CCAvenue
+// integration (request encryption) and independently re-verifies the
+// subscription before charging it -- see src/lib/paymentClient.ts.
 async function handleInitiate(request: Request) {
   const supabase = await createClient();
   const {
@@ -26,7 +31,7 @@ async function handleInitiate(request: Request) {
 
   const { data: subscription } = await supabase
     .from("subscriptions")
-    .select("id, amount_paise, status")
+    .select("id")
     .eq("user_id", user.id)
     .eq("status", "pending_payment")
     .maybeSingle();
@@ -34,34 +39,20 @@ async function handleInitiate(request: Request) {
   if (!subscription) {
     return NextResponse.json({ error: "No pending subscription found" }, { status: 404 });
   }
-  if (!subscription.amount_paise || subscription.amount_paise <= 0) {
-    return NextResponse.json({ error: "Invalid subscription amount" }, { status: 400 });
-  }
 
   const url = new URL(request.url);
   const origin = `${url.protocol}//${url.host}`;
 
-  // We choose the order_id sent to CCAvenue (unlike Razorpay, which minted
-  // its own) -- using the subscription's own id means the callback route
-  // can look the subscription up directly by id, with no extra column
-  // needed to remember which order belongs to which subscription.
-  const orderId = subscription.id;
-  const amountRupees = (subscription.amount_paise / 100).toFixed(2);
-
-  const requestString = new URLSearchParams({
-    merchant_id: getMerchantIdForRequest(),
-    order_id: orderId,
-    currency: "INR",
-    amount: amountRupees,
-    redirect_url: `${origin}/api/ccavenue/callback`,
-    cancel_url: `${origin}/api/ccavenue/callback`,
-    language: "EN",
-    billing_email: user.email ?? "",
-  }).toString();
-
-  return NextResponse.json({
-    encRequest: encrypt(requestString),
-    accessCode: getAccessCode(),
-    actionUrl: getTransactionUrl(),
-  });
+  try {
+    const result = await initiatePayment({
+      subscriptionId: subscription.id,
+      userId: user.id,
+      userEmail: user.email ?? "",
+      origin,
+    });
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("Payment service initiate request failed:", err);
+    return NextResponse.json({ error: "Could not start payment" }, { status: 502 });
+  }
 }

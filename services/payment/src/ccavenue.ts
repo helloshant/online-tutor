@@ -1,5 +1,3 @@
-import "server-only";
-
 import crypto from "node:crypto";
 
 function getMerchantId(): string {
@@ -14,11 +12,12 @@ function getWorkingKey(): string {
   return value;
 }
 
-// access_code is not a secret (it's shipped to the browser as a hidden form
-// field alongside the encrypted request, same role Razorpay's key_id
-// played) -- merchant_id and working_key never leave the server: merchant_id
-// only ever appears inside the encrypted request string, and working_key is
-// only ever used here to derive the AES key.
+// access_code is not a secret (it's handed back to the web app, which ships
+// it to the browser as a hidden form field alongside the encrypted request,
+// same role Razorpay's key_id played) -- merchant_id and working_key never
+// leave this service: merchant_id only ever appears inside the encrypted
+// request string, and working_key is only ever used here to derive the AES
+// key.
 export function getAccessCode(): string {
   const value = process.env.CCAVENUE_ACCESS_CODE;
   if (!value) throw new Error("Missing CCAVENUE_ACCESS_CODE environment variable");
@@ -39,8 +38,8 @@ export function getTransactionUrl(): string {
 // kits, e.g. the Node.js sample code, use this exact key-derivation/IV
 // pair): the working key is MD5-hashed to derive a 16-byte AES-128 key, and
 // the IV is this fixed 16-byte sequence -- not a security best practice by
-// modern standards, but it's CCAvenue's own protocol, not something this app
-// gets to choose.
+// modern standards, but it's CCAvenue's own protocol, not something this
+// service gets to choose.
 const CCAVENUE_IV = Buffer.from([
   0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 ]);

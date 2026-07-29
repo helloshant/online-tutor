@@ -12,27 +12,40 @@ cache/knowledge-base pipeline in front of the LLM.
 
 ## Architecture
 
-Four containers:
+Five containers:
 
 ```
- ┌──────────────┐   HTTP (internal only)   ┌──────────────────┐
- │   web (3000) │ ───────────────────────► │ orchestrator      │
- │   Next.js    │  x-internal-api-key      │ (4000, Express)   │
- │   App Router │ ◄─────────────────────── │                    │
- └──────┬───────┘        { reply }         └───┬────┬─────┬─────┘
-        │                                       │    │     │
-        ▼                                       ▼    ▼     ▼
-   Supabase (hosted)                   Redis   Claude/   observability
-   + CCAvenue                         (cache)  Azure     (4100, Express)
-        ▲                                      OpenAI         │
-        │                                                     ▼
-        └─────────────────────────── writes chat_events ──────┘
-                                      (token usage, cost, hit counts)
+                       HTTP (internal only)     ┌──────────────────┐
+                    ┌────────────────────────►  │ orchestrator      │
+  ┌──────────────┐  │   x-internal-api-key      │ (4000, Express)   │
+  │   web (3000) │──┤◄────────────────────────  └───┬────┬─────┬────┘
+  │   Next.js    │  │         { reply }              │    │     │
+  │   App Router │  │                                ▼    ▼     ▼
+  │              │  │   HTTP (internal only)   Redis  Claude/  observability
+  │              │  └────────────────────────► (cache) Azure   (4100, Express)
+  └───┬──────────┘      x-internal-api-key              OpenAI      │
+      │                 ◄────────────────────                      ▼
+      │             { encRequest / redirectTo }         writes chat_events
+      ▼
+  Supabase (hosted) ◄───────────────┐
+      ▲                             │
+      │                       ┌─────┴────┐
+      └───────────────────────┤ payment  │
+                               │ (4200,   │
+                               │ Express) │
+                               └────┬─────┘
+                                    │
+                                    ▼
+                                CCAvenue (external gateway -- redirects the
+                                customer's browser back to web's public
+                                /api/ccavenue/callback, never talks to
+                                payment directly)
 ```
 
-- **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, CCAvenue
-  payment, coupon-code redemption, subscription/entitlement checks, the admin panel, and persisting
-  chat history. It never talks to an LLM SDK directly.
+- **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding,
+  subscription/entitlement checks, the admin panel, and persisting chat history. It never talks to
+  an LLM SDK directly, and never talks to CCAvenue or writes `coupon_codes` directly either — both
+  the answer pipeline and the payment/coupon flow are delegated to their own services over HTTP.
 - **`services/orchestrator`** owns everything about *how a question becomes an answer*. For every
   student question it runs a 4-stage pipeline before ever spending an LLM call:
   1. **Syllabus scope gate** — a keyword-overlap check against the subscribed board/grade/subject's
@@ -100,10 +113,23 @@ Four containers:
   total database-hit count — plus a per-user drilldown to the individual query that consumed a
   given number of tokens. Like the orchestrator, it's shared-secret gated and not published to the
   host.
+- **`services/payment`** owns everything about *turning a pending subscription into an active
+  one*: the CCAvenue integration (request encryption, callback decryption) and one-time coupon-code
+  generation/redemption. Also shared-secret gated and not published to the host — but with one
+  difference from the other two internal services: it **refuses to start at all** if
+  `PAYMENT_SHARED_SECRET` isn't set (the orchestrator/observability instead warn and accept
+  unauthenticated requests), since this service handles real money and free-access grants rather
+  than chat/analytics traffic. It also independently re-derives everything security-sensitive
+  (the amount to charge, whether a subscription is really `pending_payment` and really belongs to
+  the caller, whether a coupon is really unused) from its own Supabase connection rather than
+  trusting anything `web` relays to it — `web` only does a cheap ownership check before handing off.
+  See "Payments (CCAvenue) and coupon codes" below for the full request/response flow, including why
+  `web` still has to keep one real (public) route in this flow even though the service itself has
+  no public ingress.
 
-This split means the orchestration/prompt/pipeline layer and the usage-accounting layer can each be
-redeployed, scaled, or replaced (e.g. swapping in a real observability backend later) without
-touching the web app or each other.
+This split means the orchestration/prompt/pipeline layer, the usage-accounting layer, and the
+payment layer can each be redeployed, scaled, or replaced (e.g. swapping in a real observability
+backend, or a different payment gateway, later) without touching the web app or each other.
 
 ## How it works
 
@@ -634,60 +660,79 @@ grants.
 
 ### Payments (CCAvenue) and coupon codes
 
-Replaced Razorpay with CCAvenue, since that's the merchant account this deployment actually has.
-The two gateways integrate very differently, which shows up in the shape of the code:
+All payment and coupon business logic lives in `services/payment` — a fourth internal Express
+service, alongside the orchestrator and observability. `web` never talks to CCAvenue, never touches
+the AES encryption, and never writes `coupon_codes` or flips a subscription to `active` directly;
+it only authenticates the caller and does a cheap ownership check (does this session's user really
+have a `pending_payment` subscription, or a page they're allowed to be on) before handing off over
+HTTP (`src/lib/paymentClient.ts`, modeled on `orchestratorClient.ts`).
 
-- **CCAvenue is redirect-based, not an in-page modal.** Razorpay's checkout.js opens a JS modal in
-  the current page and calls back with a signature to verify client-side-initiated. CCAvenue's
-  classic integration instead redirects the whole browser to a hosted checkout page and POSTs back
-  with the result — so `CCAvenueCheckout` (`src/app/subscribe/ccavenue-checkout.tsx`) doesn't open
-  anything; it fetches an encrypted request blob from `/api/ccavenue/initiate`, writes it into a
-  hidden form via refs (not React state, to avoid any render-timing race with the submit), and calls
-  `form.submit()` to navigate away entirely.
-- **The encryption *is* the integrity check.** `src/lib/ccavenue.ts` implements CCAvenue's
-  documented scheme: the working key is MD5-hashed into an AES-128 key, paired with a fixed
-  (CCAvenue-specified, not this app's choice) 16-byte IV. `POST /api/ccavenue/initiate` builds the
-  request string (`merchant_id`, `order_id`, `amount`, `redirect_url`, `cancel_url`, ...) and
-  encrypts it server-side — `merchant_id` and the working key never reach the browser, only the
-  resulting ciphertext and the (non-secret) `access_code`. `POST /api/ccavenue/callback` is where
-  CCAvenue redirects the customer's browser back to (both `redirect_url` and `cancel_url` point at
-  it, distinguished by `order_status` in the decrypted response) — since only someone holding the
-  working key could have produced a payload that decrypts cleanly, there's no separate signature
-  check the way Razorpay's HMAC verification needed; a clean decrypt plus `order_status === "Success"`
-  is the whole check. It then activates the subscription via the service-role client (no
-  user-facing UPDATE policy exists on `subscriptions` — see `0002_rls_policies.sql`) and redirects
-  the browser on to `/dashboard`, or back to `/subscribe?error=...` on failure/cancel.
+- **CCAvenue is redirect-based, not an in-page modal.** Razorpay's checkout.js (the gateway this
+  replaced) opens a JS modal in the current page and calls back with a signature to verify
+  client-side-initiated. CCAvenue's classic integration instead redirects the whole browser to a
+  hosted checkout page and POSTs back with the result — so `CCAvenueCheckout`
+  (`src/app/subscribe/ccavenue-checkout.tsx`) doesn't open anything; it fetches an encrypted
+  request blob from `/api/ccavenue/initiate`, writes it into a hidden form via refs (not React
+  state, to avoid any render-timing race with the submit), and calls `form.submit()` to navigate
+  away entirely.
+- **The encryption *is* the integrity check.** `services/payment/src/ccavenue.ts` implements
+  CCAvenue's documented scheme: the working key is MD5-hashed into an AES-128 key, paired with a
+  fixed (CCAvenue-specified, not this app's choice) 16-byte IV. `POST /v1/payment/initiate` (called
+  by `web`'s `/api/ccavenue/initiate` proxy route) re-fetches the subscription through the
+  service's own Supabase connection — never trusting the amount or status `web` relayed — builds
+  the request string (`merchant_id`, `order_id`, `amount`, `redirect_url`, `cancel_url`, ...), and
+  encrypts it. `merchant_id` and the working key never leave this service, only the resulting
+  ciphertext and the (non-secret) `access_code` go back to the browser.
+- **`web` still owns one real public route in this flow.** `services/payment` has no public
+  ingress of its own (same internal-only pattern as the orchestrator) — but CCAvenue can only
+  redirect a customer's *browser* to a real public URL, so `POST /api/ccavenue/callback` in `web`
+  still exists as a thin proxy: it forwards the raw encrypted response to
+  `POST /v1/payment/callback`, which decrypts it, checks `order_status` (a clean decrypt plus
+  `order_status === "Success"` is the whole check — no separate signature verification needed, the
+  same way Razorpay's HMAC check isn't needed here), activates the subscription, and returns
+  `{ redirectTo }` for `web` to turn into an actual HTTP redirect to `/dashboard` or
+  `/subscribe?error=...`.
 - **No separate order-id column.** Razorpay minted its own order id server-side and the app had to
   remember it (`razorpay_order_id`). CCAvenue instead takes whatever `order_id` *we* send — so
-  `/api/ccavenue/initiate` just uses the subscription's own `id`, and the callback looks the
-  subscription up directly with no extra lookup column needed. Only `ccavenue_tracking_id`
-  (CCAvenue's own transaction reference, for audit/support) is stored, replacing the old
-  `razorpay_payment_id` (`0019_ccavenue_and_coupons.sql`).
+  `initiatePayment` just uses the subscription's own `id`, and the callback looks the subscription
+  up directly with no extra lookup column needed. Only `ccavenue_tracking_id` (CCAvenue's own
+  transaction reference, for audit/support) is stored, replacing the old `razorpay_payment_id`
+  (`0019_ccavenue_and_coupons.sql`).
+- **Fails closed, unlike the orchestrator/observability services.** `services/payment` refuses to
+  start at all if `PAYMENT_SHARED_SECRET` is unset (`process.exit(1)`), rather than warning and
+  accepting unauthenticated requests — money and free-access grants warrant a stricter default than
+  chat/analytics traffic gets.
 - **Not verified against a live CCAvenue sandbox.** This was implemented from CCAvenue's documented
   integration scheme, without the ability to test against their actual test environment from here —
-  test the full flow with CCAvenue's sandbox credentials (`CCAVENUE_ENV=test`) before relying on it.
+  test the full flow with CCAvenue's sandbox credentials (`CCAVENUE_ENV=test` in
+  `services/payment/.env.local`) before relying on it.
 
 **Coupon codes** are a separate, self-service escape hatch that bypasses the payment gateway
 entirely — functionally the same end state as the admin's existing `activateSubscriptionWithoutPayment`
 (see "User management (CRUD)" above), just gated by knowing a valid code instead of admin access.
+Generation, revocation, and redemption are all `services/payment` endpoints
+(`services/payment/src/coupons.ts`); `web`'s `/admin/coupons` and `/subscribe` pages only handle
+auth/authorization and call through `paymentClient.ts`, the same split as the CCAvenue flow above.
 
 - `/admin/coupons` generates codes in a chosen batch size (`generateCouponCodes` in
-  `src/app/admin/coupons/actions.ts`) — 12 characters from a 32-symbol alphabet that excludes
-  visually-ambiguous characters (no `0`/`O`, `1`/`I`/`L`, or `U`), grouped as `XXXX-XXXX-XXXX` for
-  readability, with enough entropy (60 bits) that no collision-retry logic is needed. An unused
-  code can be revoked (deleted); a used one is kept as a permanent record of which student it
-  granted access to, the same way the answer bank never hard-deletes a rejected entry.
-- On `/subscribe`, a "Have a coupon code?" field (`CouponForm` /
-  `redeemCoupon` in `src/app/subscribe/actions.ts`) claims the code and activates the pending
-  subscription in one step. **Single-use overall**, not per-student: once any one student redeems a
-  code, it's permanently spent for everyone. Claiming is atomic (`update ... where used_by is null`,
-  returning the updated row or nothing) — a race between two simultaneous redemption attempts for the
-  same code can't both succeed, the same double-guard pattern the old Razorpay verify route used for
-  its own activation update.
-- `coupon_codes` has no student-facing RLS policy at all (admin-only, `is_admin()`-gated) —
-  redemption authenticates the caller in application code first, then does the actual lookup/claim
-  and subscription activation through the service-role client, the same pattern every
-  subscription-status change in this app already follows.
+  `src/app/admin/coupons/actions.ts` → `POST /v1/coupons/generate`) — 12 characters from a
+  32-symbol alphabet that excludes visually-ambiguous characters (no `0`/`O`, `1`/`I`/`L`, or `U`),
+  grouped as `XXXX-XXXX-XXXX` for readability, with enough entropy (60 bits) that no
+  collision-retry logic is needed. An unused code can be revoked (deleted via
+  `POST /v1/coupons/revoke`); a used one is kept as a permanent record of which student it granted
+  access to, the same way the answer bank never hard-deletes a rejected entry. The admin page
+  itself still reads the `coupon_codes` list directly through the session client for display (RLS +
+  `is_admin()`, same pattern as the catalog/answer-bank pages) — only the writes go through the
+  service.
+- On `/subscribe`, a "Have a coupon code?" field (`CouponForm` / `redeemCoupon` in
+  `src/app/subscribe/actions.ts` → `POST /v1/coupons/redeem`) claims the code and activates the
+  pending subscription in one step. **Single-use overall**, not per-student: once any one student
+  redeems a code, it's permanently spent for everyone. Claiming is atomic
+  (`update ... where used_by is null`, returning the updated row or nothing) — a race between two
+  simultaneous redemption attempts for the same code can't both succeed.
+- `coupon_codes` has no student-facing RLS policy at all (admin-only, `is_admin()`-gated) — there's
+  no client-side path to redeem a code even in principle; `services/payment` is the only thing that
+  ever writes `used_by`/`used_at`/`subscription_id` on that table.
 
 ## Local setup
 
@@ -730,12 +775,13 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
-There are **three** env files — one per service:
+There are **four** env files — one per service:
 
 ```bash
 cp .env.example .env.local
 cp services/orchestrator/.env.example services/orchestrator/.env.local
 cp services/observability/.env.example services/observability/.env.local
+cp services/payment/.env.example services/payment/.env.local
 ```
 
 **Root `.env.local`** (the web app):
@@ -746,10 +792,11 @@ cp services/observability/.env.example services/observability/.env.local
   `http://localhost:4000` if running the orchestrator directly with `npm run dev` instead.
 - `ORCHESTRATOR_SHARED_SECRET` — any random string; must exactly match the same variable in
   `services/orchestrator/.env.local`.
-- `CCAVENUE_MERCHANT_ID` / `CCAVENUE_ACCESS_CODE` / `CCAVENUE_WORKING_KEY` — CCAvenue dashboard →
-  Business Settings → API Keys.
-- `CCAVENUE_ENV` — `test` (default) uses CCAvenue's sandbox at `test.ccavenue.com`; set to
-  `production` only once you're using live merchant credentials.
+- `PAYMENT_URL` — leave as `http://payment:4200` for Docker Compose; use `http://localhost:4200` if
+  running the payment service directly with `npm run dev` instead.
+- `PAYMENT_SHARED_SECRET` — any random string; must exactly match the same variable in
+  `services/payment/.env.local`. Unlike `ORCHESTRATOR_SHARED_SECRET`, this one isn't optional in
+  practice — the payment service refuses to start without its own copy of it set.
 
 **`services/orchestrator/.env.local`** (the orchestration service):
 
@@ -787,9 +834,21 @@ cp services/observability/.env.example services/observability/.env.local
   reflect a promotional/negotiated rate. See `services/observability/src/pricing.ts` for the
   built-in table and the exact JSON shape.
 
+**`services/payment/.env.local`** (the payment/coupon service):
+
+- `PAYMENT_SHARED_SECRET` — same value as above. **Required** — this service calls `process.exit(1)`
+  at startup if it's missing, unlike the orchestrator/observability's warn-and-continue.
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project again. Used to read/write
+  `subscriptions` and `coupon_codes`; the service-role key is required since neither table has a
+  client-facing write policy for these operations.
+- `CCAVENUE_MERCHANT_ID` / `CCAVENUE_ACCESS_CODE` / `CCAVENUE_WORKING_KEY` — CCAvenue dashboard →
+  Business Settings → API Keys.
+- `CCAVENUE_ENV` — `test` (default) uses CCAvenue's sandbox at `test.ccavenue.com`; set to
+  `production` only once you're using live merchant credentials.
+
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs all four containers, including Redis):
+**Option A — Docker Compose** (builds and runs all five containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build
@@ -805,11 +864,11 @@ you'd hit `Uncaught Error: Missing NEXT_PUBLIC_SUPABASE_URL environment variable
 If you forget the flag, the build now fails immediately with a clear message rather than silently
 producing a broken image.
 
-Open [http://localhost:3000](http://localhost:3000). Neither the orchestrator nor the observability
-service is published to your host — they're only reachable from other containers over the Compose
-network — so you won't see them on `localhost:4000`/`localhost:4100`; that's intentional. To check
-one directly: `docker compose exec orchestrator wget -qO- localhost:4000/health` (swap
-`orchestrator`/`4000` for `observability`/`4100` for the other one).
+Open [http://localhost:3000](http://localhost:3000). None of the orchestrator, observability, or
+payment services are published to your host — they're only reachable from other containers over the
+Compose network — so you won't see them on `localhost:4000`/`4100`/`4200`; that's intentional. To
+check one directly: `docker compose exec orchestrator wget -qO- localhost:4000/health` (swap
+`orchestrator`/`4000` for `observability`/`4100` or `payment`/`4200` for the other two).
 
 The orchestrator's `/health` response includes non-secret configuration presence for its three
 optional dependencies (`answerBank`, `cache`, `observability` — each `{ configured: boolean }`,
@@ -827,7 +886,7 @@ If you ever change `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 (`--build`), not just restart — a plain `docker compose up` without `--build` reuses the existing
 image with the old values baked in.
 
-**Option B — three `npm run dev` processes** (no Docker), one per terminal:
+**Option B — four `npm run dev` processes** (no Docker), one per terminal:
 
 ```bash
 # terminal 1
@@ -836,13 +895,18 @@ cd services/orchestrator && npm run dev
 # terminal 2
 cd services/observability && npm run dev
 
-# terminal 3 (repo root)
+# terminal 3
+cd services/payment && npm run dev
+
+# terminal 4 (repo root)
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL` in the root
-`.env.local` is `http://localhost:4000`, and `OBSERVABILITY_URL` in
-`services/orchestrator/.env.local` is `http://localhost:4100`, for this mode.
+Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL` and `PAYMENT_URL`
+in the root `.env.local` are `http://localhost:4000` and `http://localhost:4200`, and
+`OBSERVABILITY_URL` in `services/orchestrator/.env.local` is `http://localhost:4100`, for this mode
+(no Redis running this way either, unless you start one yourself — the pipeline's L1 cache is
+optional and fails open if unreachable).
 
 ## Pricing
 
@@ -864,13 +928,15 @@ server-side when a subscription is created — the client never supplies the amo
   integration had. The admin's "Activate without payment" button
   (`activateSubscriptionWithoutPayment`) is the only manual recovery today.
 - Configure Supabase Auth email templates / SMTP for production-grade signup emails.
-- **Always set `ORCHESTRATOR_SHARED_SECRET` and `OBSERVABILITY_SHARED_SECRET`** in every env file
-  in production. Without them, the orchestrator and observability service accept requests from
-  anyone who can reach them on the network — fine for a moment of local experimentation, not for a
-  real deployment.
+- **Always set `ORCHESTRATOR_SHARED_SECRET`, `OBSERVABILITY_SHARED_SECRET`, and
+  `PAYMENT_SHARED_SECRET`** in every env file in production. Without them, the orchestrator and
+  observability services accept requests from anyone who can reach them on the network — fine for a
+  moment of local experimentation, not for a real deployment. (`services/payment` won't even start
+  without its copy, so this one enforces itself.)
 - If you're on Azure OpenAI, set `LLM_PRICING_JSON` in `services/observability/.env.local` —
   without it, token counts are still recorded but cost stays unpriced (shown as unpriced in
   `/admin/observability`, never silently reported as $0).
 - Whatever you deploy `docker-compose.yml` to (a VM, ECS, Kubernetes, etc.), keep the same
-  topology: only `web` should be internet-facing; `orchestrator` and `observability` should stay on
-  a private/internal network, reachable only from `web` and `orchestrator` respectively.
+  topology: only `web` should be internet-facing; `orchestrator`, `observability`, and `payment`
+  should stay on a private/internal network, reachable only from `web` (and `orchestrator` in
+  observability's case).
