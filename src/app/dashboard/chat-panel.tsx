@@ -79,6 +79,7 @@ export function ChatPanel({
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,6 +316,33 @@ export function ChatPanel({
             className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
           >
             📎
+          </button>
+          {/* A separate input+button from the one above, rather than adding
+              `capture` to it -- on most mobile browsers, `capture` forces the
+              camera to open directly with no gallery fallback, so this needs
+              to stay a distinct entry point from "attach an existing file".
+              `capture="environment"` requests the rear-facing camera, the
+              natural choice for scanning a physical page; browsers that
+              don't support it (most desktop browsers) just fall back to an
+              ordinary file picker. */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            onChange={handleImagePick}
+            disabled={sending}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={sending}
+            title="Scan a question with your camera"
+            aria-label="Scan a question with your camera"
+            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
+          >
+            📷
           </button>
           {/* text-base (16px), not text-sm -- iOS Safari auto-zooms the whole
               page on focusing any input/textarea under 16px, which on a

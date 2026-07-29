@@ -477,7 +477,15 @@ crashing the message it's in.
 
 Students and staff can attach a screenshot or photo to a chat message — e.g. a textbook question or
 their own handwritten working — via the paperclip button next to the chat input
-(`src/app/dashboard/chat-panel.tsx`). There's no separate OCR pass: the image is sent to the LLM
+(`src/app/dashboard/chat-panel.tsx`), or scan one directly with a device camera via the adjacent 📷
+button. Both feed the exact same `handleImagePick` → `selectedImage` state and send path; the only
+difference is which hidden `<input type="file">` triggers it — the camera one adds
+`capture="environment"`, which on most mobile browsers opens the rear camera directly instead of the
+general photo/file picker (desktop browsers without camera-capture support just fall back to an
+ordinary file dialog). Kept as a second, separate input rather than adding `capture` to the existing
+one: on mobile, `capture` typically forces camera-only with no gallery fallback, so "scan a new
+photo" and "attach an existing file" need to stay independent entry points. There's no separate OCR
+pass: the image is sent to the LLM
 directly as an image content block (Anthropic's `image`/`base64` source, or OpenAI/Azure's
 `image_url` data URI in `azureOpenAIProvider.ts`), and the model reads whatever text, diagram, or
 handwriting is in it as part of answering — simpler and higher-quality than OCR-then-prompt, since
