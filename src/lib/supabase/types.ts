@@ -92,11 +92,13 @@ export type SubscriptionSubject = {
   subject_id: string;
 };
 
-// Admin-generated, single-use-overall codes that bypass payment entirely
-// (src/app/subscribe/actions.ts's redeemCoupon) -- see
-// supabase/migrations/0019_ccavenue_and_coupons.sql. used_by/used_at/
+// Admin-generated, single-use-overall discount codes (src/app/subscribe/
+// actions.ts's redeemCoupon) -- see supabase/migrations/0019_ccavenue_and_
+// coupons.sql and 0021_coupon_discount_percent.sql. used_by/used_at/
 // subscription_id are all null until redeemed; once set, the code is
 // permanently spent (not a per-student-once code shared among many people).
+// discount_percent of 100 reproduces the original "bypass payment entirely"
+// behavior; anything less reduces the subscription's amount_paise instead.
 export type CouponCode = {
   id: string;
   code: string;
@@ -106,6 +108,7 @@ export type CouponCode = {
   subscription_id: string | null;
   created_at: string;
   expires_at: string | null;
+  discount_percent: number;
 };
 
 export type ChatMessage = {

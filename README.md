@@ -1,10 +1,11 @@
 # TutorOps — Online Tutor SaaS
 
 A chatops-style tutoring platform. Students subscribe to a board, grade, medium, and a set of
-subjects; pay via CCAvenue (or redeem a one-time coupon code to skip payment entirely); then chat
-with an LLM tutor that stays confined to the subscribed subject and that grade/board's syllabus,
-always answering in the chosen language. Admins get a panel to see every user's selections, manage
-the underlying board/grade/subject/syllabus catalog, and generate coupon codes.
+subjects; pay via CCAvenue (optionally redeeming a one-time discount code first — anywhere from a
+percentage off to 100%, which skips payment entirely); then chat with an LLM tutor that stays
+confined to the subscribed subject and that grade/board's syllabus, always answering in the chosen
+language. Admins get a panel to see every user's selections, manage the underlying
+board/grade/subject/syllabus catalog, and generate discount codes.
 
 Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), CCAvenue, and a
 separate LLM orchestration service (Anthropic Claude by default, or Azure OpenAI) with a
@@ -140,9 +141,9 @@ backend, or a different payment gateway, later) without touching the web app or 
    the subjects offered for that board+grade, and a medium of instruction (English / Hindi /
    Bengali). This creates a `pending_payment` subscription.
 3. **Payment** (`/subscribe`) — CCAvenue's hosted checkout (a full-page redirect, not an in-page
-   modal), or a one-time coupon code entered directly on the same page to skip payment entirely.
-   Either way the subscription is flipped to `active` server-side. See "Payments (CCAvenue) and
-   coupon codes" below.
+   modal). A one-time discount code can be entered on the same page first to reduce the price (or,
+   at 100% off, skip payment entirely) before checking out for whatever remains. Either way the
+   subscription ends up `active` server-side. See "Payments (CCAvenue) and coupon codes" below.
 4. **Dashboard** (`/dashboard`) — left panel lists the subscribed subjects; selecting one scopes
    the right-hand chat panel to that subject, and opens a syllabus panel listing every chapter and
    topic for that subject. Every message is answered by Claude, constrained by a system prompt
@@ -158,7 +159,7 @@ backend, or a different payment gateway, later) without touching the web app or 
    approve, reject, or delete entries other students' questions get matched against.
    `/admin/observability` shows total LLM cost/token usage by user, total database-hit count, and
    a per-user drilldown into individual queries and the tokens/cost each one consumed.
-   `/admin/coupons` generates and revokes one-time free-access coupon codes.
+   `/admin/coupons` generates and revokes one-time discount codes, each with its own percentage off.
    `/admin/authorization` (superadmin only) controls which of these pages each individual admin
    can access — see "Per-page admin authorization" below.
 
@@ -707,34 +708,42 @@ HTTP (`src/lib/paymentClient.ts`, modeled on `orchestratorClient.ts`).
   test the full flow with CCAvenue's sandbox credentials (`CCAVENUE_ENV=test` in
   `services/payment/.env.local`) before relying on it.
 
-**Coupon codes** are a separate, self-service escape hatch that bypasses the payment gateway
-entirely — functionally the same end state as the admin's existing `activateSubscriptionWithoutPayment`
-(see "User management (CRUD)" above), just gated by knowing a valid code instead of admin access.
-Generation, revocation, and redemption are all `services/payment` endpoints
-(`services/payment/src/coupons.ts`); `web`'s `/admin/coupons` and `/subscribe` pages only handle
-auth/authorization and call through `paymentClient.ts`, the same split as the CCAvenue flow above.
+**Coupon codes** are a separate, self-service **percentage discount** on the subscription price —
+a 100%-off code reproduces the same end state as the admin's existing
+`activateSubscriptionWithoutPayment` (see "User management (CRUD)" above), just gated by knowing a
+valid code instead of admin access; anything less than 100% reduces the price and the student still
+pays the remainder through CCAvenue. Generation, revocation, and redemption are all
+`services/payment` endpoints (`services/payment/src/coupons.ts`); `web`'s `/admin/coupons` and
+`/subscribe` pages only handle auth/authorization and call through `paymentClient.ts`, the same
+split as the CCAvenue flow above.
 
-- `/admin/coupons` generates codes in a chosen batch size (`generateCouponCodes` in
-  `src/app/admin/coupons/actions.ts` → `POST /v1/coupons/generate`) — 12 characters from a
-  32-symbol alphabet that excludes visually-ambiguous characters (no `0`/`O`, `1`/`I`/`L`, or `U`),
-  grouped as `XXXX-XXXX-XXXX` for readability, with enough entropy (60 bits) that no
-  collision-retry logic is needed. An unused code can be revoked (deleted via
-  `POST /v1/coupons/revoke`); a used one is kept as a permanent record of which student it granted
-  access to, the same way the answer bank never hard-deletes a rejected entry. The admin page
-  itself still reads the `coupon_codes` list directly through the session client for display (RLS +
-  `is_admin()`, same pattern as the catalog/answer-bank pages) — only the writes go through the
-  service.
-- On `/subscribe`, a "Have a coupon code?" field (`CouponForm` / `redeemCoupon` in
-  `src/app/subscribe/actions.ts` → `POST /v1/coupons/redeem`) claims the code and activates the
-  pending subscription in one step. **Single-use overall**, not per-student: once any one student
+- `/admin/coupons` generates codes in a chosen batch size with a chosen **discount percentage**
+  (`generateCouponCodes` in `src/app/admin/coupons/actions.ts` → `POST /v1/coupons/generate`) —
+  `discount_percent` (1–100, `supabase/migrations/0021_coupon_discount_percent.sql`) is shared
+  across the whole batch. Codes are 12 characters from a 32-symbol alphabet that excludes
+  visually-ambiguous characters (no `0`/`O`, `1`/`I`/`L`, or `U`), grouped as `XXXX-XXXX-XXXX` for
+  readability, with enough entropy (60 bits) that no collision-retry logic is needed. An unused code
+  can be revoked (deleted via `POST /v1/coupons/revoke`); a used one is kept as a permanent record
+  of which student it discounted, the same way the answer bank never hard-deletes a rejected entry.
+  The admin page itself still reads the `coupon_codes` list directly through the session client for
+  display (RLS + `is_admin()`, same pattern as the catalog/answer-bank pages) — only the writes go
+  through the service.
+- On `/subscribe`, a "Have a discount code?" field (`CouponForm` / `redeemCoupon` in
+  `src/app/subscribe/actions.ts` → `POST /v1/coupons/redeem`) claims the code, then either activates
+  the subscription outright (100% off) or reduces `amount_paise` by the coupon's `discount_percent`
+  and leaves it `pending_payment` — `CCAvenueCheckout`'s next `/v1/payment/initiate` call reads
+  `amount_paise` fresh, so it automatically charges the discounted amount with no separate "apply
+  discount at checkout" step needed. A subscription can only have one coupon applied to it ever
+  (`coupon_codes.subscription_id` being already set on any row is the guard against stacking two
+  codes on the same subscription). **Single-use overall**, not per-student: once any one student
   redeems a code, it's permanently spent for everyone. Claiming is atomic
   (`update ... where used_by is null`, returning the updated row or nothing) — a race between two
   simultaneous redemption attempts for the same code can't both succeed.
 - `coupon_codes` has no student-facing RLS policy at all (admin-only, `is_admin()`-gated) — there's
   no client-side path to redeem a code even in principle; `services/payment` is the only thing that
-  ever writes `used_by`/`used_at`/`subscription_id` on that table.
+  ever writes `used_by`/`used_at`/`subscription_id`/`amount_paise` on those tables.
 - Codes have an **optional expiry** (`expires_at`, nullable — `supabase/migrations/0020_coupon_expiry.sql`).
-  Leaving the "Expires" date blank when generating a batch keeps today's "valid forever until redeemed
+  Leaving the "Expires" date blank when generating a batch keeps "valid forever until redeemed
   or revoked" behavior; setting one applies to every code in that batch. Redemption checks it twice: an
   upfront read (`"That coupon code has expired."`) and again inside the atomic claim itself
   (`... .or('expires_at.is.null,expires_at.gt.<now>')`), so a request that straddles the exact expiry

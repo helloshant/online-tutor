@@ -52,9 +52,15 @@ export async function handlePaymentCallback(encResp: string): Promise<{ redirect
 export async function generateCoupons(
   count: number,
   createdBy: string,
-  expiresAt?: string | null
+  expiresAt?: string | null,
+  discountPercent?: number
 ): Promise<{ codes: string[] }> {
-  return callPaymentService<{ codes: string[] }>("/v1/coupons/generate", { count, createdBy, expiresAt });
+  return callPaymentService<{ codes: string[] }>("/v1/coupons/generate", {
+    count,
+    createdBy,
+    expiresAt,
+    discountPercent,
+  });
 }
 
 export async function revokeCoupon(id: string): Promise<void> {
@@ -69,10 +75,12 @@ export async function redeemCoupon(params: {
   code: string;
   userId: string;
   subscriptionId: string;
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; activated?: boolean; newAmountPaise?: number }> {
   try {
-    await callPaymentService("/v1/coupons/redeem", params);
-    return {};
+    return await callPaymentService<{ activated?: boolean; newAmountPaise?: number }>(
+      "/v1/coupons/redeem",
+      params
+    );
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Something went wrong." };
   }

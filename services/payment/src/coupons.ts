@@ -26,13 +26,25 @@ function generateCode(): string {
 
 // expiresAt is a caller-supplied ISO timestamp, shared across the whole
 // batch -- null/undefined means "valid forever until redeemed or revoked",
-// today's default behavior.
-export async function generateCoupons(count: number, createdBy: string, expiresAt?: string | null): Promise<string[]> {
+// today's default behavior. discountPercent (1-100) is shared across the
+// batch too; 100 reproduces the old "fully free" behavior, anything less
+// reduces the subscription's amount_paise instead of activating it outright.
+export async function generateCoupons(
+  count: number,
+  createdBy: string,
+  expiresAt?: string | null,
+  discountPercent = 100
+): Promise<string[]> {
   const supabase = getSupabaseClient();
   const codes = Array.from({ length: count }, generateCode);
-  const { error } = await supabase
-    .from("coupon_codes")
-    .insert(codes.map((code) => ({ code, created_by: createdBy, expires_at: expiresAt ?? null })));
+  const { error } = await supabase.from("coupon_codes").insert(
+    codes.map((code) => ({
+      code,
+      created_by: createdBy,
+      expires_at: expiresAt ?? null,
+      discount_percent: discountPercent,
+    }))
+  );
   if (error) throw new Error(`Failed to insert coupon codes: ${error.message}`);
   return codes;
 }
@@ -49,7 +61,7 @@ export async function redeemCoupon(params: {
   code: string;
   userId: string;
   subscriptionId: string;
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; activated?: boolean; newAmountPaise?: number }> {
   const supabase = getSupabaseClient();
   const code = params.code.trim().toUpperCase();
 
@@ -60,7 +72,7 @@ export async function redeemCoupon(params: {
   // rather than taking the web app's word for it.
   const { data: subscription } = await supabase
     .from("subscriptions")
-    .select("id, user_id, status")
+    .select("id, user_id, status, amount_paise")
     .eq("id", params.subscriptionId)
     .maybeSingle();
 
@@ -68,9 +80,23 @@ export async function redeemCoupon(params: {
     return { error: "No pending subscription to apply this code to." };
   }
 
+  // Coupons are single-use overall, and a subscription can only ever have
+  // one applied to it -- subscription_id only gets set by a successful claim
+  // below, so its presence on any row is proof one was already redeemed
+  // here. Without this, a partial-discount code could be stacked repeatedly
+  // on the same subscription.
+  const { data: existingClaim } = await supabase
+    .from("coupon_codes")
+    .select("id")
+    .eq("subscription_id", subscription.id)
+    .maybeSingle();
+  if (existingClaim) {
+    return { error: "A coupon has already been applied to this subscription." };
+  }
+
   const { data: coupon } = await supabase
     .from("coupon_codes")
-    .select("id, used_by, expires_at")
+    .select("id, used_by, expires_at, discount_percent")
     .eq("code", code)
     .maybeSingle();
   if (!coupon) {
@@ -103,15 +129,36 @@ export async function redeemCoupon(params: {
     return { error: "That coupon code can no longer be used." };
   }
 
-  const { error: activateError } = await supabase
+  // 100% off reproduces the old free-access outcome (activate outright, no
+  // payment); anything less reduces amount_paise and leaves the
+  // subscription pending_payment so the student still pays the remainder
+  // through CCAvenue, which reads amount_paise fresh at initiate time.
+  const discountedAmount = Math.max(
+    0,
+    Math.round((subscription.amount_paise ?? 0) * (100 - coupon.discount_percent) / 100)
+  );
+
+  if (discountedAmount <= 0) {
+    const { error: activateError } = await supabase
+      .from("subscriptions")
+      .update({ status: "active", activated_at: new Date().toISOString() })
+      .eq("id", subscription.id)
+      .eq("status", "pending_payment");
+
+    if (activateError) {
+      return { error: "Could not activate your subscription. Please contact support." };
+    }
+    return { activated: true };
+  }
+
+  const { error: discountError } = await supabase
     .from("subscriptions")
-    .update({ status: "active", activated_at: new Date().toISOString() })
+    .update({ amount_paise: discountedAmount })
     .eq("id", subscription.id)
     .eq("status", "pending_payment");
 
-  if (activateError) {
-    return { error: "Could not activate your subscription. Please contact support." };
+  if (discountError) {
+    return { error: "Could not apply the discount. Please contact support." };
   }
-
-  return {};
+  return { activated: false, newAmountPaise: discountedAmount };
 }

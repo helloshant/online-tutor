@@ -22,7 +22,10 @@ export async function generateCouponCodes(formData: FormData) {
   const expiresAtRaw = formData.get("expiresAt");
   const expiresAt = typeof expiresAtRaw === "string" && expiresAtRaw ? `${expiresAtRaw}T23:59:59.999Z` : null;
 
-  await generateCoupons(count, session.user.id, expiresAt);
+  const discountRaw = Number(formData.get("discountPercent"));
+  const discountPercent = Number.isFinite(discountRaw) ? Math.min(100, Math.max(1, Math.trunc(discountRaw))) : 100;
+
+  await generateCoupons(count, session.user.id, expiresAt, discountPercent);
 
   revalidatePath("/admin/coupons");
 }

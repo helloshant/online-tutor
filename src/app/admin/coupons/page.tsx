@@ -28,10 +28,10 @@ export default async function CouponsPage() {
     <div>
       <h1 className="text-xl font-semibold">Coupons</h1>
       <p className="mt-1 max-w-2xl text-sm text-foreground/60">
-        Single-use codes that bypass payment entirely — a student enters one on the{" "}
-        <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/subscribe</code> page to activate their
-        subscription for free. Each code works exactly once; once redeemed it can never be reused, even by the
-        same student.
+        Single-use discount codes — a student enters one on the{" "}
+        <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/subscribe</code> page to knock a percentage
+        off their subscription price, or activate for free outright with a 100% code. Each code works exactly
+        once; once redeemed it can never be reused, even by the same student.
       </p>
 
       <form action={generateCouponCodes} className="mt-6 flex items-end gap-2">
@@ -44,6 +44,20 @@ export default async function CouponsPage() {
             name="count"
             type="number"
             defaultValue={1}
+            min={1}
+            max={100}
+            className="mt-1 w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label htmlFor="discountPercent" className="block text-xs font-medium text-foreground/60">
+            Discount %
+          </label>
+          <input
+            id="discountPercent"
+            name="discountPercent"
+            type="number"
+            defaultValue={100}
             min={1}
             max={100}
             className="mt-1 w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
@@ -70,6 +84,7 @@ export default async function CouponsPage() {
           <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-foreground/40">
             <tr>
               <th className="px-4 py-2 font-medium">Code</th>
+              <th className="px-4 py-2 font-medium">Discount</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2 font-medium">Used by</th>
               <th className="px-4 py-2 font-medium">Expires</th>
@@ -83,6 +98,9 @@ export default async function CouponsPage() {
               return (
                 <tr key={coupon.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-2 font-mono">{coupon.code}</td>
+                  <td className="px-4 py-2 text-foreground/70">
+                    {coupon.discount_percent === 100 ? "100% (Free)" : `${coupon.discount_percent}% off`}
+                  </td>
                   <td className="px-4 py-2">
                     {coupon.used_by ? (
                       <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/60">
@@ -115,7 +133,7 @@ export default async function CouponsPage() {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-sm text-foreground/50">
+                <td colSpan={7} className="px-4 py-6 text-center text-sm text-foreground/50">
                   No coupon codes yet.
                 </td>
               </tr>
