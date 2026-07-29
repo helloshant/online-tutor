@@ -1,0 +1,38 @@
+# Copy this file to docker-compose.override.yml (that name is picked up
+# automatically by `docker compose` alongside docker-compose.yml -- no -f
+# flag needed) and it will be merged in on every `docker compose up`/`build`.
+# docker-compose.override.yml itself is gitignored, since it's specific to
+# whatever network you're running on, not something every developer needs.
+#
+# Only needed if you're behind a TLS-inspecting proxy or antivirus (common
+# on corporate networks/VPNs) that re-signs outbound HTTPS with its own
+# certificate authority. Every container makes outbound HTTPS calls of its
+# own (web -> Supabase, orchestrator -> Anthropic/Azure OpenAI, payment ->
+# CCAvenue, all four -> Supabase), and none of them trust that private CA by
+# default, so every one of those calls fails TLS certificate verification --
+# see the "Corporate network / TLS interception" note in the README for how
+# to identify and export the offending root CA to certs/corporate-ca.pem.
+services:
+  web:
+    volumes:
+      - ./certs/corporate-ca.pem:/certs/corporate-ca.pem:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/corporate-ca.pem
+
+  orchestrator:
+    volumes:
+      - ./certs/corporate-ca.pem:/certs/corporate-ca.pem:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/corporate-ca.pem
+
+  observability:
+    volumes:
+      - ./certs/corporate-ca.pem:/certs/corporate-ca.pem:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/corporate-ca.pem
+
+  payment:
+    volumes:
+      - ./certs/corporate-ca.pem:/certs/corporate-ca.pem:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/corporate-ca.pem

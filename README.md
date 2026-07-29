@@ -948,6 +948,41 @@ in the root `.env.local` are `http://localhost:4000` and `http://localhost:4200`
 (no Redis running this way either, unless you start one yourself — the pipeline's L1 cache is
 optional and fails open if unreachable).
 
+### Corporate network / TLS interception
+
+**Symptom:** every outbound HTTPS call from inside a container fails — not just Supabase.
+`next/font/google` fails to fetch at build time, login/signup fails with a bare `"fetch failed"`,
+and running `wget`/`curl` for *any* HTTPS URL (not just this app's dependencies —
+`https://example.com` fails identically) from inside a container comes back with something like
+`certificate verify failed` / `Connection reset by peer`.
+
+**Cause:** something upstream of the container — a corporate proxy, antivirus (Kaspersky, ESET,
+Zscaler, Netskope, Fortinet, and similar are common culprits), or a VPN client's "SSL inspection"
+feature — is intercepting all outbound HTTPS and re-signing it with its own private certificate
+authority. The container's default trust store has never heard of that CA, so every TLS handshake
+it makes fails verification. This isn't fixable in application code, and disabling TLS verification
+(`NODE_TLS_REJECT_UNAUTHORIZED=0`) isn't the right fix either — that would remove protection against
+an actual MITM, not just this one. The container needs to be told to trust the intercepting CA.
+
+**Fix:**
+1. Find and export the intercepting root CA. Either:
+   - Open any HTTPS site in a browser on the same machine → padlock → certificate details →
+     Certification Path tab → select the **top-most (root)** entry → View Certificate → Details →
+     "Copy to File" → export as Base-64 encoded X.509 (.CER); or
+   - Windows Certificate Manager (`certmgr.msc`) → Trusted Root Certification Authorities →
+     Certificates → look for anything that isn't a standard public CA (Microsoft, DigiCert,
+     GlobalSign, ...) — usually your company's name or an antivirus vendor's — and export the same
+     way.
+2. Save it as `certs/corporate-ca.pem` in the project root (already gitignored via `*.pem` — never
+   commit this, it's specific to your machine/network).
+3. Copy `docker-compose.override.yml.example` to `docker-compose.override.yml` (also gitignored —
+   `docker compose` picks it up automatically alongside `docker-compose.yml`, no flag needed). It
+   mounts the cert into every service and sets `NODE_EXTRA_CA_CERTS` so each one trusts it.
+4. `docker compose --env-file .env.local up --build` again.
+
+If you're not behind anything like this, you'll never need any of the above — it's not part of the
+default setup.
+
 ## Pricing
 
 Pricing is subject-count based (`PRICE_PER_SUBJECT_INR` in `src/lib/pricing.ts`) and computed

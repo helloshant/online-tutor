@@ -37,6 +37,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local-only compose overrides -- e.g. mounting a corporate/antivirus TLS-
+# inspection root CA so containers can reach the outside world on networks
+# that intercept HTTPS (see README's "Corporate network / TLS interception"
+# note). Machine-specific, never something to commit.
+docker-compose.override.yml
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
