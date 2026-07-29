@@ -15,7 +15,7 @@ const FEATURES = [
   },
   {
     title: "Simple, transparent pricing",
-    body: "Pay per subject with Razorpay. Add or drop subjects whenever your plan changes.",
+    body: "Pay per subject with CCAvenue. Add or drop subjects whenever your plan changes.",
   },
 ];
 

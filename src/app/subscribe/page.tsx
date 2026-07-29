@@ -2,9 +2,24 @@ import { redirect } from "next/navigation";
 import { isStaff, requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PRICE_PER_SUBJECT_INR } from "@/lib/pricing";
-import { RazorpayCheckout } from "./razorpay-checkout";
+import { CCAvenueCheckout } from "./ccavenue-checkout";
+import { CouponForm } from "./coupon-form";
 
-export default async function SubscribePage() {
+// Shown after CCAvenue redirects the browser back through
+// /api/ccavenue/callback with a non-success outcome -- see that route for
+// which value maps to which case.
+const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  payment_failed: "Payment was not completed. You can try again below.",
+  invalid_response: "Something went wrong reading the payment response. Please try again.",
+  activation_failed: "Payment succeeded but we couldn't activate your subscription. Please contact support.",
+};
+
+export default async function SubscribePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const { user, profile } = await requireUser();
   // Staff never pay -- if they somehow land here, send them straight in.
   if (isStaff(profile?.role)) redirect("/dashboard");
@@ -40,6 +55,12 @@ export default async function SubscribePage() {
         <h1 className="text-2xl font-semibold">Complete your subscription</h1>
         <p className="mt-1 text-sm text-foreground/60">One last step before you can start asking questions.</p>
 
+        {error && CALLBACK_ERROR_MESSAGES[error] && (
+          <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {CALLBACK_ERROR_MESSAGES[error]}
+          </p>
+        )}
+
         <dl className="mt-6 space-y-3 text-sm">
           <div className="flex justify-between border-b border-border pb-2">
             <dt className="text-foreground/60">Board</dt>
@@ -69,7 +90,8 @@ export default async function SubscribePage() {
           {subjectNames.length} subject(s) × ₹{PRICE_PER_SUBJECT_INR}/month
         </p>
 
-        <RazorpayCheckout />
+        <CCAvenueCheckout />
+        <CouponForm />
       </div>
     </div>
   );

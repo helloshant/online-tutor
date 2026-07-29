@@ -74,8 +74,14 @@ export type Subscription = {
   medium: Medium;
   status: SubscriptionStatus;
   amount_paise: number | null;
-  razorpay_order_id: string | null;
-  razorpay_payment_id: string | null;
+  // CCAvenue's own transaction reference, recorded after a successful
+  // payment (src/app/api/ccavenue/callback/route.ts) -- null for a
+  // subscription activated via a coupon code or an admin's
+  // activateSubscriptionWithoutPayment, so a paid subscription stays
+  // distinguishable in the data from one that wasn't. No separate
+  // "order id" column: CCAvenue's order_id is just this row's own id (see
+  // src/app/api/ccavenue/initiate/route.ts).
+  ccavenue_tracking_id: string | null;
   created_at: string;
   activated_at: string | null;
 };
@@ -84,6 +90,21 @@ export type SubscriptionSubject = {
   id: string;
   subscription_id: string;
   subject_id: string;
+};
+
+// Admin-generated, single-use-overall codes that bypass payment entirely
+// (src/app/subscribe/actions.ts's redeemCoupon) -- see
+// supabase/migrations/0019_ccavenue_and_coupons.sql. used_by/used_at/
+// subscription_id are all null until redeemed; once set, the code is
+// permanently spent (not a per-student-once code shared among many people).
+export type CouponCode = {
+  id: string;
+  code: string;
+  created_by: string;
+  used_by: string | null;
+  used_at: string | null;
+  subscription_id: string | null;
+  created_at: string;
 };
 
 export type ChatMessage = {
@@ -164,7 +185,7 @@ export type ChatEvent = {
   created_at: string;
 };
 
-export type AdminPageKey = "users" | "catalog" | "answer_bank" | "observability";
+export type AdminPageKey = "users" | "catalog" | "answer_bank" | "observability" | "coupons";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -242,6 +263,14 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "subscription_subjects_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
           { foreignKeyName: "subscription_subjects_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+        ];
+      };
+      coupon_codes: {
+        Row: CouponCode;
+        Insert: Partial<CouponCode>;
+        Update: Partial<CouponCode>;
+        Relationships: [
+          { foreignKeyName: "coupon_codes_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
         ];
       };
       chat_messages: {

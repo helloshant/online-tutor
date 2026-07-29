@@ -9,6 +9,7 @@ const PAGES: { key: AdminPageKey; label: string; description: string }[] = [
   { key: "catalog", label: "Catalog", description: "Manage boards, grades, subjects, syllabus." },
   { key: "answer_bank", label: "Answer bank", description: "Review, approve, reject cached answers." },
   { key: "observability", label: "Observability", description: "View LLM cost/token usage and DB hit stats." },
+  { key: "coupons", label: "Coupons", description: "Generate and revoke free-access coupon codes." },
 ];
 
 export default async function AuthorizationPage() {

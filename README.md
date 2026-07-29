@@ -1,12 +1,12 @@
 # TutorOps — Online Tutor SaaS
 
 A chatops-style tutoring platform. Students subscribe to a board, grade, medium, and a set of
-subjects; pay via Razorpay; then chat with an LLM tutor that stays confined to the subscribed
-subject and that grade/board's syllabus, always answering in the chosen language. Admins get a
-panel to see every user's selections and manage the underlying board/grade/subject/syllabus
-catalog.
+subjects; pay via CCAvenue (or redeem a one-time coupon code to skip payment entirely); then chat
+with an LLM tutor that stays confined to the subscribed subject and that grade/board's syllabus,
+always answering in the chosen language. Admins get a panel to see every user's selections, manage
+the underlying board/grade/subject/syllabus catalog, and generate coupon codes.
 
-Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), Razorpay, and a
+Built with Next.js (App Router), Supabase (Postgres + Auth + Row Level Security), CCAvenue, and a
 separate LLM orchestration service (Anthropic Claude by default, or Azure OpenAI) with a
 cache/knowledge-base pipeline in front of the LLM.
 
@@ -23,16 +23,16 @@ Four containers:
         │                                       │    │     │
         ▼                                       ▼    ▼     ▼
    Supabase (hosted)                   Redis   Claude/   observability
-   + Razorpay                         (cache)  Azure     (4100, Express)
+   + CCAvenue                         (cache)  Azure     (4100, Express)
         ▲                                      OpenAI         │
         │                                                     ▼
         └─────────────────────────── writes chat_events ──────┘
                                       (token usage, cost, hit counts)
 ```
 
-- **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, Razorpay
-  payment, subscription/entitlement checks, the admin panel, and persisting chat history. It never
-  talks to an LLM SDK directly.
+- **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding, CCAvenue
+  payment, coupon-code redemption, subscription/entitlement checks, the admin panel, and persisting
+  chat history. It never talks to an LLM SDK directly.
 - **`services/orchestrator`** owns everything about *how a question becomes an answer*. For every
   student question it runs a 4-stage pipeline before ever spending an LLM call:
   1. **Syllabus scope gate** — a keyword-overlap check against the subscribed board/grade/subject's
@@ -113,8 +113,10 @@ touching the web app or each other.
 2. **Onboarding** (`/onboarding`) — pick a board (e.g. CBSE, ICSE, West Bengal Board), a grade,
    the subjects offered for that board+grade, and a medium of instruction (English / Hindi /
    Bengali). This creates a `pending_payment` subscription.
-3. **Payment** (`/subscribe`) — Razorpay Checkout. On success the payment signature is verified
-   server-side and the subscription is flipped to `active`.
+3. **Payment** (`/subscribe`) — CCAvenue's hosted checkout (a full-page redirect, not an in-page
+   modal), or a one-time coupon code entered directly on the same page to skip payment entirely.
+   Either way the subscription is flipped to `active` server-side. See "Payments (CCAvenue) and
+   coupon codes" below.
 4. **Dashboard** (`/dashboard`) — left panel lists the subscribed subjects; selecting one scopes
    the right-hand chat panel to that subject, and opens a syllabus panel listing every chapter and
    topic for that subject. Every message is answered by Claude, constrained by a system prompt
@@ -130,6 +132,7 @@ touching the web app or each other.
    approve, reject, or delete entries other students' questions get matched against.
    `/admin/observability` shows total LLM cost/token usage by user, total database-hit count, and
    a per-user drilldown into individual queries and the tokens/cost each one consumed.
+   `/admin/coupons` generates and revokes one-time free-access coupon codes.
    `/admin/authorization` (superadmin only) controls which of these pages each individual admin
    can access — see "Per-page admin authorization" below.
 
@@ -597,10 +600,11 @@ Three additions on top of Supabase Auth's default email/password:
   control (superadmin-only, DB-enforced — see `0004_superadmin_and_staff_access.sql`), and an
   active subscription can be cancelled from the same page. A `pending_payment` one instead gets
   an **"Activate without payment"** button (`activateSubscriptionWithoutPayment`) — the admin-side
-  counterpart to `/api/razorpay/verify`'s activation, setting the same `status`/`activated_at`
-  fields but skipping the signature check entirely rather than mimicking it.
-  `razorpay_payment_id` is deliberately left null, so a subscription activated this way stays
-  distinguishable in the data from one that was actually paid for.
+  counterpart to `/api/ccavenue/callback`'s activation, setting the same `status`/`activated_at`
+  fields but skipping the CCAvenue response entirely rather than mimicking it.
+  `ccavenue_tracking_id` is deliberately left null, so a subscription activated this way stays
+  distinguishable in the data from one that was actually paid for (see "Payments (CCAvenue)" below
+  for the self-service equivalent of this same escape hatch — a coupon code).
 - **Delete** — the detail page's "Danger zone" permanently deletes the auth user, which cascades
   (`on delete cascade`) to their profile, subscriptions, subscription subjects, chat history, and
   admin page permissions. Gated so an admin can't delete themselves or another staff account —
@@ -615,7 +619,7 @@ Role (`user`/`admin`/`superadmin`) still governs the big things — subscription
 whether `/admin` is reachable at all, and role changes themselves (superadmin-only, DB-enforced —
 see `0004_superadmin_and_staff_access.sql`). Layered on top, `/admin/authorization` (superadmin
 only) controls a finer thing: **which individual admin pages a given admin can see** — Users,
-Catalog, Answer bank, Observability — independent of their role. A brand-new admin starts with
+Catalog, Answer bank, Observability, Coupons — independent of their role. A brand-new admin starts with
 every page granted (matches what "admin" meant before this existed); a superadmin can then narrow
 it per person from `/admin/authorization`. Superadmins themselves always have every page and can't
 be restricted here.
@@ -627,6 +631,63 @@ security boundary. An admin who lands on a page they've been unauthorized from �
 had bookmarked before a superadmin revoked it — is redirected to `/admin/no-access` rather than
 back into another permission check, which avoids a redirect loop for an admin with zero page
 grants.
+
+### Payments (CCAvenue) and coupon codes
+
+Replaced Razorpay with CCAvenue, since that's the merchant account this deployment actually has.
+The two gateways integrate very differently, which shows up in the shape of the code:
+
+- **CCAvenue is redirect-based, not an in-page modal.** Razorpay's checkout.js opens a JS modal in
+  the current page and calls back with a signature to verify client-side-initiated. CCAvenue's
+  classic integration instead redirects the whole browser to a hosted checkout page and POSTs back
+  with the result — so `CCAvenueCheckout` (`src/app/subscribe/ccavenue-checkout.tsx`) doesn't open
+  anything; it fetches an encrypted request blob from `/api/ccavenue/initiate`, writes it into a
+  hidden form via refs (not React state, to avoid any render-timing race with the submit), and calls
+  `form.submit()` to navigate away entirely.
+- **The encryption *is* the integrity check.** `src/lib/ccavenue.ts` implements CCAvenue's
+  documented scheme: the working key is MD5-hashed into an AES-128 key, paired with a fixed
+  (CCAvenue-specified, not this app's choice) 16-byte IV. `POST /api/ccavenue/initiate` builds the
+  request string (`merchant_id`, `order_id`, `amount`, `redirect_url`, `cancel_url`, ...) and
+  encrypts it server-side — `merchant_id` and the working key never reach the browser, only the
+  resulting ciphertext and the (non-secret) `access_code`. `POST /api/ccavenue/callback` is where
+  CCAvenue redirects the customer's browser back to (both `redirect_url` and `cancel_url` point at
+  it, distinguished by `order_status` in the decrypted response) — since only someone holding the
+  working key could have produced a payload that decrypts cleanly, there's no separate signature
+  check the way Razorpay's HMAC verification needed; a clean decrypt plus `order_status === "Success"`
+  is the whole check. It then activates the subscription via the service-role client (no
+  user-facing UPDATE policy exists on `subscriptions` — see `0002_rls_policies.sql`) and redirects
+  the browser on to `/dashboard`, or back to `/subscribe?error=...` on failure/cancel.
+- **No separate order-id column.** Razorpay minted its own order id server-side and the app had to
+  remember it (`razorpay_order_id`). CCAvenue instead takes whatever `order_id` *we* send — so
+  `/api/ccavenue/initiate` just uses the subscription's own `id`, and the callback looks the
+  subscription up directly with no extra lookup column needed. Only `ccavenue_tracking_id`
+  (CCAvenue's own transaction reference, for audit/support) is stored, replacing the old
+  `razorpay_payment_id` (`0019_ccavenue_and_coupons.sql`).
+- **Not verified against a live CCAvenue sandbox.** This was implemented from CCAvenue's documented
+  integration scheme, without the ability to test against their actual test environment from here —
+  test the full flow with CCAvenue's sandbox credentials (`CCAVENUE_ENV=test`) before relying on it.
+
+**Coupon codes** are a separate, self-service escape hatch that bypasses the payment gateway
+entirely — functionally the same end state as the admin's existing `activateSubscriptionWithoutPayment`
+(see "User management (CRUD)" above), just gated by knowing a valid code instead of admin access.
+
+- `/admin/coupons` generates codes in a chosen batch size (`generateCouponCodes` in
+  `src/app/admin/coupons/actions.ts`) — 12 characters from a 32-symbol alphabet that excludes
+  visually-ambiguous characters (no `0`/`O`, `1`/`I`/`L`, or `U`), grouped as `XXXX-XXXX-XXXX` for
+  readability, with enough entropy (60 bits) that no collision-retry logic is needed. An unused
+  code can be revoked (deleted); a used one is kept as a permanent record of which student it
+  granted access to, the same way the answer bank never hard-deletes a rejected entry.
+- On `/subscribe`, a "Have a coupon code?" field (`CouponForm` /
+  `redeemCoupon` in `src/app/subscribe/actions.ts`) claims the code and activates the pending
+  subscription in one step. **Single-use overall**, not per-student: once any one student redeems a
+  code, it's permanently spent for everyone. Claiming is atomic (`update ... where used_by is null`,
+  returning the updated row or nothing) — a race between two simultaneous redemption attempts for the
+  same code can't both succeed, the same double-guard pattern the old Razorpay verify route used for
+  its own activation update.
+- `coupon_codes` has no student-facing RLS policy at all (admin-only, `is_admin()`-gated) —
+  redemption authenticates the caller in application code first, then does the actual lookup/claim
+  and subscription activation through the service-role client, the same pattern every
+  subscription-status change in this app already follows.
 
 ## Local setup
 
@@ -685,8 +746,10 @@ cp services/observability/.env.example services/observability/.env.local
   `http://localhost:4000` if running the orchestrator directly with `npm run dev` instead.
 - `ORCHESTRATOR_SHARED_SECRET` — any random string; must exactly match the same variable in
   `services/orchestrator/.env.local`.
-- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — Razorpay dashboard → Settings → API Keys. Use test
-  mode keys for local development.
+- `CCAVENUE_MERCHANT_ID` / `CCAVENUE_ACCESS_CODE` / `CCAVENUE_WORKING_KEY` — CCAvenue dashboard →
+  Business Settings → API Keys.
+- `CCAVENUE_ENV` — `test` (default) uses CCAvenue's sandbox at `test.ccavenue.com`; set to
+  `production` only once you're using live merchant credentials.
 
 **`services/orchestrator/.env.local`** (the orchestration service):
 
@@ -790,8 +853,16 @@ server-side when a subscription is created — the client never supplies the amo
 
 - Replace/extend the seeded sample syllabus with the real, complete syllabus for every board and
   grade you offer, via `/admin/catalog`.
-- Set up Razorpay webhooks if you want to handle payment failures/refunds beyond the
-  checkout-success flow already implemented in `src/app/api/razorpay/verify/route.ts`.
+- **Test the CCAvenue integration against their sandbox before going live** (`CCAVENUE_ENV=test`) —
+  it was implemented from CCAvenue's documented encryption scheme without access to a live sandbox
+  from here. Confirm a full pay → redirect → activate round trip, and a cancelled/failed payment
+  round trip, both land on the right `/subscribe?error=...` or `/dashboard` outcome.
+- Consider adding a reconciliation path for an abandoned payment: CCAvenue's classic redirect
+  integration activates a subscription only when the customer's browser makes it back to
+  `/api/ccavenue/callback` — if they close the tab after paying but before the redirect completes,
+  the subscription stays `pending_payment` with no automatic recovery, same gap the old Razorpay
+  integration had. The admin's "Activate without payment" button
+  (`activateSubscriptionWithoutPayment`) is the only manual recovery today.
 - Configure Supabase Auth email templates / SMTP for production-grade signup emails.
 - **Always set `ORCHESTRATOR_SHARED_SECRET` and `OBSERVABILITY_SHARED_SECRET`** in every env file
   in production. Without them, the orchestrator and observability service accept requests from

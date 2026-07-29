@@ -35,6 +35,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Observability
               </Link>
             )}
+            {canSee("coupons") && (
+              <Link href="/admin/coupons" className="text-foreground/70 hover:text-foreground">
+                Coupons
+              </Link>
+            )}
             {isSuperadmin && (
               <Link href="/admin/authorization" className="text-foreground/70 hover:text-foreground">
                 Authorization
