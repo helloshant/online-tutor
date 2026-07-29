@@ -451,7 +451,7 @@ its figure.
   philosophy as `addTag`: an invalid file (wrong type, over 4MB) silently no-ops rather than wiring up
   a dedicated error-message flow for one row-level control.
 - **Practice panel**: `/api/answer-bank/search` now selects `image_url` alongside `question`/`answer`,
-  and each result renders the image (if present) between the question and answer text.
+  and each result renders the image (if present) after the question and answer text, not between them.
 - **Not wired into "Relevant Exercises" in chat.** That flow goes through the orchestrator's
   `/v1/topic-exercises` endpoint, which can return either banked entries *or* freshly LLM-generated
   ones in the same response — the LLM-generated half can never have an image, and plumbing

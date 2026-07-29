@@ -218,6 +218,9 @@ export function PracticePanel({
                       <p className="font-medium">
                         {i + 1}. <MathText text={r.question} />
                       </p>
+                      <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                        <MathText text={r.answer} />
+                      </p>
                       {r.image_url && (
                         // eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset
                         <img
@@ -226,9 +229,6 @@ export function PracticePanel({
                           className="mt-1.5 max-h-64 rounded-lg border border-border object-contain"
                         />
                       )}
-                      <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                        <MathText text={r.answer} />
-                      </p>
                       <button
                         type="button"
                         onClick={() => onAskAbout(r.question, r.answer)}
