@@ -612,6 +612,30 @@ Three additions on top of Supabase Auth's default email/password:
 
   All three are gated by `requireAdminPage("users")`, same as every other action on that page.
 
+### Signup-source tracking
+
+Every promotion channel (referral, WhatsApp/Telegram groups, paid ads, SEO landing pages, ...) can
+tag its links with standard query params, and the app remembers which one actually produced each
+signup — visible per-user as a Source column on `/admin`.
+
+- `src/proxy.ts` captures `?utm_source=` (or `?ref=` as a shorter alternative for informal links,
+  e.g. a reseller's own code) and `?utm_campaign=` the first time either appears on any page, and
+  stores them in cookies (`to_signup_source` / `to_signup_campaign`, 30-day expiry) — **first-touch**
+  attribution, so a later click (e.g. a friend's referral link after someone already arrived from an
+  ad) doesn't overwrite credit for whichever channel brought them here originally.
+- **Native (email/password) signup** forwards the cookies into `supabase.auth.signUp()`'s
+  `options.data`, the same mechanism `full_name` already uses — they land in `raw_user_meta_data`
+  and `handle_new_tutorops_user()` (`0022_signup_source.sql`) persists them onto the new
+  `profiles.signup_source` / `signup_campaign` columns at insert time.
+- **Google sign-in** has no equivalent hook — `signInWithOAuth()` doesn't accept custom metadata the
+  way `signUp()` does — so `src/app/auth/callback/route.ts` instead patches the profile row after
+  the code exchange, but only when the account was created in the last minute (`data.user.created_at`)
+  *and* `signup_source` is still null. Both guards exist for the same reason: this callback route is
+  reused on every subsequent Google login too, and without them a returning user who later clicks a
+  promo link would have their original signup silently reattributed to that later click.
+- Both columns are nullable and stay null for any account that predates this feature or arrived with
+  no tracking params at all — there's no backfill.
+
 ### User management (CRUD)
 
 `/admin` (the Users page) covers the full lifecycle of an account, not just viewing it:

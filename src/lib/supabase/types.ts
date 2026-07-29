@@ -20,6 +20,14 @@ export type Profile = {
   // every password change (see 0011_password_lifecycle.sql).
   password_changed_at: string | null;
   created_at: string;
+  // Where this signup came from -- captured as a first-touch cookie by
+  // src/proxy.ts (?utm_source=/?ref=, ?utm_campaign=) and written at
+  // account-creation time (src/app/signup/actions.ts for native signup,
+  // src/app/auth/callback/route.ts for Google). Null for any account that
+  // predates this (0022_signup_source.sql) or arrived with no tracking
+  // params at all.
+  signup_source: string | null;
+  signup_campaign: string | null;
 };
 
 export type Board = {

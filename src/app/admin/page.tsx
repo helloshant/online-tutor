@@ -55,6 +55,8 @@ export default async function AdminUsersPage() {
       medium: sub?.medium,
       status: sub?.status,
       subjects,
+      signupSource: profile?.signup_source,
+      signupCampaign: profile?.signup_campaign,
       passwordStatus: !hasEmailIdentityById.get(u.id)
         ? ("google" as const)
         : isPasswordExpired(profile ?? null)
@@ -128,6 +130,7 @@ export default async function AdminUsersPage() {
               <th className="px-4 py-3">Medium</th>
               <th className="px-4 py-3">Subjects</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Password</th>
             </tr>
           </thead>
@@ -178,6 +181,13 @@ export default async function AdminUsersPage() {
                     "—"
                   )}
                 </td>
+                <td className="px-4 py-3 text-foreground/70">
+                  {row.signupSource
+                    ? row.signupCampaign
+                      ? `${row.signupSource} (${row.signupCampaign})`
+                      : row.signupSource
+                    : "—"}
+                </td>
                 <td className="px-4 py-3">
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -195,7 +205,7 @@ export default async function AdminUsersPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-foreground/50">
+                <td colSpan={10} className="px-4 py-8 text-center text-foreground/50">
                   No users yet.
                 </td>
               </tr>
