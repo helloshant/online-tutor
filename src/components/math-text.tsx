@@ -13,18 +13,29 @@ const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^$\n]+?)\$|\\\((
 
 // Bulk-imported textbook content (e.g. Ganit Prakash, see the Answer Bank's
 // bulk import) is often transcribed as plain-text pseudo-math rather than
-// LaTeX -- caret exponents like `x^(1/a)`, `k^a`, or `(16)^(-3/2)` -- which
-// the pass above never touches, since there's no \( \) or $ $ around it.
-// This handles that one specific, common convention (not a general
-// math-notation parser): render the exponent as a raised <sup>, no KaTeX
-// involved. The base can be a plain alphanumeric run (`x`, `k`) or a single
-// level of parentheses (`(16)`, `(⁵√8)`) -- the latter is needed for roots
-// and grouped terms, which show up constantly in this exact kind of
-// problem. Already-correct Unicode superscripts (kᵃ, k⁰, ...) display fine
+// LaTeX -- caret exponents like `x^(1/a)`, `x^-5`, or nested ones like
+// `{(x^-5)^(2/3)}^(-3/10)` -- which the pass above never touches, since
+// there's no \( \) or $ $ around it. This handles that one specific, common
+// convention (not a general math-notation parser): render the exponent as
+// a raised <sup>, no KaTeX involved.
+//
+// The base can be a plain alphanumeric run (`x`), or a single level of
+// parens/braces/brackets (`(16)`, `{...}`, `[...]`) -- all three show up in
+// this kind of problem, for roots, grouped terms, and nested exponents. The
+// exponent can be wrapped the same way, or bare with an optional leading
+// minus (`^a`, `^-5`).
+//
+// Both the matched base and exponent are run back through this same
+// function recursively -- each is always strictly shorter than the full
+// match (it excludes at least the `^` itself), so this always terminates --
+// which is what lets a caret expression nested inside a parenthesized/
+// braced/bracketed base or exponent get its own <sup> treatment too,
+// instead of being swallowed as inert text once the outer expression
+// matches. Already-correct Unicode superscripts (kᵃ, k⁰, ...) display fine
 // on their own and simply don't match this pattern.
-const CARET_BASE = "(?:[A-Za-z0-9]+|\\([^()\\n]*\\))";
+const CARET_BASE = "(?:[A-Za-z0-9]+|\\([^()\\n]*\\)|\\{[^{}\\n]*\\}|\\[[^\\[\\]\\n]*\\])";
 const CARET_EXPONENT_PATTERN = new RegExp(
-  `(${CARET_BASE})\\^\\(([^()\\n]+)\\)|(${CARET_BASE})\\^([A-Za-z0-9]+)`,
+  `(${CARET_BASE})\\^(?:\\(([^()\\n]+)\\)|\\{([^{}\\n]+)\\}|\\[([^\\[\\]\\n]+)\\]|(-?[A-Za-z0-9]+))`,
   "g"
 );
 
@@ -38,12 +49,12 @@ function renderCaretExponents(text: string, nextKey: () => number): React.ReactN
       parts.push(text.slice(lastIndex, index));
     }
 
-    const base = match[1] ?? match[3];
-    const exponent = match[2] ?? match[4];
+    const base = match[1];
+    const exponent = match[2] ?? match[3] ?? match[4] ?? match[5];
     parts.push(
       <span key={nextKey()}>
-        {base}
-        <sup>{exponent}</sup>
+        {renderCaretExponents(base, nextKey)}
+        <sup>{renderCaretExponents(exponent, nextKey)}</sup>
       </span>
     );
 
