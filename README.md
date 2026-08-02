@@ -495,13 +495,23 @@ Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...
 that's how an LLM naturally writes math — rendered as plain text that shows up as literal
 backslashes and braces instead of the notation it's meant to be. `src/components/math-text.tsx`
 (`MathText`) splits a string on those four delimiter styles and renders each math segment with
-[KaTeX](https://katex.org/), leaving everything else as plain text; both chat message bubbles
-(`chat-panel.tsx`) and topic summaries/exercises (`topic-summary-message.tsx`) render their content
-through it instead of directly interpolating the raw string. `katex.renderToString`'s output is
-inserted via `dangerouslySetInnerHTML` — the standard, intended way to use KaTeX; it does not permit
-arbitrary HTML injection through its LaTeX parser, so this is safe even though the string being
-rendered is LLM-generated. `throwOnError: false` renders a parse error inline (in red) rather than
-crashing the message it's in.
+[KaTeX](https://katex.org/), leaving everything else as plain text; chat message bubbles
+(`chat-panel.tsx`), topic summaries/exercises (`topic-summary-message.tsx`), the Practice panel's
+search results (`practice-panel.tsx`), and the admin Answer Bank list (`admin/answer-bank/page.tsx`)
+all render their content through it instead of directly interpolating the raw string.
+`katex.renderToString`'s output is inserted via `dangerouslySetInnerHTML` — the standard, intended
+way to use KaTeX; it does not permit arbitrary HTML injection through its LaTeX parser, so this is
+safe even though the string being rendered is LLM-generated. `throwOnError: false` renders a parse
+error inline (in red) rather than crashing the message it's in.
+
+Bulk-imported textbook content (e.g. Ganit Prakash) is frequently transcribed as plain-text
+pseudo-math rather than LaTeX — caret exponents like `x^(1/a)` — which the LaTeX-delimiter pass
+never touches, since there's no `\( \)`/`$ $` around it. `MathText` also runs a second, narrower
+pass over whatever's left outside actual LaTeX segments, matching that one specific caret-exponent
+convention and rendering it as a raised `<sup>` directly (no KaTeX involved for this case) — this
+isn't a general math-notation parser, just that one common pattern. Unicode superscripts already
+present in imported text (`kᵃ`, `k⁰`, ...) render fine on their own and simply don't match either
+pass.
 
 ### Image / screenshot questions (vision, not OCR)
 

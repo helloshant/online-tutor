@@ -11,10 +11,50 @@ import "katex/dist/katex.min.css";
 // with KaTeX, leaving everything else as plain text.
 const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)/g;
 
+// Bulk-imported textbook content (e.g. Ganit Prakash, see the Answer Bank's
+// bulk import) is often transcribed as plain-text pseudo-math rather than
+// LaTeX -- caret exponents like `x^(1/a)` or `k^a` -- which the pass above
+// never touches, since there's no \( \) or $ $ around it. This handles that
+// one specific, common convention (not a general math-notation parser):
+// render the exponent as a raised <sup>, no KaTeX involved. Already-correct
+// Unicode superscripts (kᵃ, k⁰, ...) display fine on their own and simply
+// don't match this pattern.
+const CARET_EXPONENT_PATTERN = /([A-Za-z0-9]+)\^\(([^()\n]+)\)|([A-Za-z0-9]+)\^([A-Za-z0-9]+)/g;
+
+function renderCaretExponents(text: string, nextKey: () => number): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(CARET_EXPONENT_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      parts.push(text.slice(lastIndex, index));
+    }
+
+    const base = match[1] ?? match[3];
+    const exponent = match[2] ?? match[4];
+    parts.push(
+      <span key={nextKey()}>
+        {base}
+        <sup>{exponent}</sup>
+      </span>
+    );
+
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
+}
+
 export function MathText({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let key = 0;
+  const nextKey = () => key++;
 
   // matchAll iterates its own internal copy of the regex rather than
   // mutating MATH_PATTERN's lastIndex, unlike a manual exec() loop -- safe
@@ -22,7 +62,7 @@ export function MathText({ text }: { text: string }) {
   for (const match of text.matchAll(MATH_PATTERN)) {
     const index = match.index ?? 0;
     if (index > lastIndex) {
-      parts.push(text.slice(lastIndex, index));
+      parts.push(...renderCaretExponents(text.slice(lastIndex, index), nextKey));
     }
 
     const displayLatex = match[1] ?? match[2];
@@ -35,9 +75,9 @@ export function MathText({ text }: { text: string }) {
 
     parts.push(
       displayMode ? (
-        <span key={key++} className="my-1 block" dangerouslySetInnerHTML={{ __html: html }} />
+        <span key={nextKey()} className="my-1 block" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
-        <span key={key++} dangerouslySetInnerHTML={{ __html: html }} />
+        <span key={nextKey()} dangerouslySetInnerHTML={{ __html: html }} />
       )
     );
 
@@ -45,7 +85,7 @@ export function MathText({ text }: { text: string }) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+    parts.push(...renderCaretExponents(text.slice(lastIndex), nextKey));
   }
 
   return <>{parts}</>;
