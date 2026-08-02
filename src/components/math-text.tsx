@@ -13,13 +13,20 @@ const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^$\n]+?)\$|\\\((
 
 // Bulk-imported textbook content (e.g. Ganit Prakash, see the Answer Bank's
 // bulk import) is often transcribed as plain-text pseudo-math rather than
-// LaTeX -- caret exponents like `x^(1/a)` or `k^a` -- which the pass above
-// never touches, since there's no \( \) or $ $ around it. This handles that
-// one specific, common convention (not a general math-notation parser):
-// render the exponent as a raised <sup>, no KaTeX involved. Already-correct
-// Unicode superscripts (kᵃ, k⁰, ...) display fine on their own and simply
-// don't match this pattern.
-const CARET_EXPONENT_PATTERN = /([A-Za-z0-9]+)\^\(([^()\n]+)\)|([A-Za-z0-9]+)\^([A-Za-z0-9]+)/g;
+// LaTeX -- caret exponents like `x^(1/a)`, `k^a`, or `(16)^(-3/2)` -- which
+// the pass above never touches, since there's no \( \) or $ $ around it.
+// This handles that one specific, common convention (not a general
+// math-notation parser): render the exponent as a raised <sup>, no KaTeX
+// involved. The base can be a plain alphanumeric run (`x`, `k`) or a single
+// level of parentheses (`(16)`, `(⁵√8)`) -- the latter is needed for roots
+// and grouped terms, which show up constantly in this exact kind of
+// problem. Already-correct Unicode superscripts (kᵃ, k⁰, ...) display fine
+// on their own and simply don't match this pattern.
+const CARET_BASE = "(?:[A-Za-z0-9]+|\\([^()\\n]*\\))";
+const CARET_EXPONENT_PATTERN = new RegExp(
+  `(${CARET_BASE})\\^\\(([^()\\n]+)\\)|(${CARET_BASE})\\^([A-Za-z0-9]+)`,
+  "g"
+);
 
 function renderCaretExponents(text: string, nextKey: () => number): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
