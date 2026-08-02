@@ -130,8 +130,19 @@ export async function removeImage(id: string) {
 // (services/orchestrator/src/exerciseParser.ts) -- deliberately duplicated
 // rather than shared, same as every other type/parser this web app
 // mirrors from the orchestrator, since the two are independently deployed
-// packages with no shared code path.
-const IMPORT_BLOCK_PATTERN = /^Q:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*)$/im;
+// packages with no shared code path. "A:" is optional -- a question whose
+// entire answer is a diagram/handwritten working (image-only, no text) is
+// imported with an empty answer, then the admin attaches the image
+// afterward via setImage on that row in the main list.
+const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
+// Not anchored to the very start of the remaining text (unlike
+// QUESTION_PREFIX_PATTERN) -- it's searched for anywhere via .match() below,
+// which is what lets a multi-line question be told apart from a one-line
+// question with no answer at all: a lazy quantifier with an *optional*
+// "\nA:" suffix would instead just stop at the block's first line break
+// (its earliest opportunity to satisfy $ in multiline mode) whenever no
+// "A:" line is present, silently truncating anything after it.
+const ANSWER_LINE_PATTERN = /\r?\n^A:\s*/im;
 
 function parseImportBlocks(text: string): { question: string; answer: string }[] {
   // Normalize CRLF/CR up front -- pasting from a Windows-originated source
@@ -146,11 +157,22 @@ function parseImportBlocks(text: string): { question: string; answer: string }[]
   for (const rawBlock of blocks) {
     const block = rawBlock.trim();
     if (!block) continue;
-    const match = block.match(IMPORT_BLOCK_PATTERN);
-    if (!match) continue;
-    const question = match[1].trim();
-    const answer = match[2].trim();
-    if (!question || !answer) continue;
+    if (!QUESTION_PREFIX_PATTERN.test(block)) continue;
+
+    const withoutPrefix = block.replace(QUESTION_PREFIX_PATTERN, "");
+    const answerMatch = withoutPrefix.match(ANSWER_LINE_PATTERN);
+
+    let question: string;
+    let answer: string;
+    if (answerMatch && answerMatch.index !== undefined) {
+      question = withoutPrefix.slice(0, answerMatch.index).trim();
+      answer = withoutPrefix.slice(answerMatch.index + answerMatch[0].length).trim();
+    } else {
+      question = withoutPrefix.trim();
+      answer = "";
+    }
+
+    if (!question) continue;
     rows.push({ question, answer });
   }
 
@@ -165,7 +187,12 @@ const MIN_RANK = 0.1;
 
 export interface BulkImportState {
   error?: string;
-  success?: { imported: number; skippedDuplicates: number; totalParsed: number };
+  success?: {
+    imported: number;
+    skippedDuplicates: number;
+    totalParsed: number;
+    importedWithoutAnswer: number;
+  };
 }
 
 // Bulk-imported content is admin-curated (a real textbook or exam paper),
@@ -199,8 +226,8 @@ export async function bulkImportAnswers(
   if (rows.length === 0) {
     return {
       error:
-        'Could not find any "Q: ... / A: ..." blocks in that text. Check the format and that ' +
-        "entries are separated by a line of three or more dashes (---).",
+        'Could not find any "Q: ..." blocks in that text. Check the format and that entries are ' +
+        "separated by a line of three or more dashes (---).",
     };
   }
 
@@ -260,5 +287,12 @@ export async function bulkImportAnswers(
   }
 
   revalidatePath("/admin/answer-bank");
-  return { success: { imported: toInsert.length, skippedDuplicates, totalParsed: rows.length } };
+  return {
+    success: {
+      imported: toInsert.length,
+      skippedDuplicates,
+      totalParsed: rows.length,
+      importedWithoutAnswer: toInsert.filter((r) => !r.answer).length,
+    },
+  };
 }

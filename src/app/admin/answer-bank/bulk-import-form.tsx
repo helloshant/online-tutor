@@ -80,7 +80,10 @@ export function BulkImportForm({
           quality check applied, and tagged so students can find them by source (e.g. &ldquo;Ganit
           Prakash&rdquo; or &ldquo;WBJEE 2023&rdquo;). Each question is checked against what&apos;s
           already banked for this board/grade/subject/medium and skipped if a close match already
-          exists, so re-importing the same source twice won&apos;t create duplicates.
+          exists, so re-importing the same source twice won&apos;t create duplicates. The{" "}
+          <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> line is optional — leave it
+          out for a question whose entire answer is a diagram or handwritten working, then attach
+          it as an image on that row afterward (below) instead of typing it out.
         </p>
         <div className="flex flex-wrap gap-2">
           <select
@@ -167,7 +170,7 @@ export function BulkImportForm({
           rows={8}
           required
           placeholder={
-            "Q: <question>\nA: <complete solution>\n---\nQ: <next question>\nA: <its solution>"
+            "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
           }
           className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
         />
@@ -185,8 +188,13 @@ export function BulkImportForm({
             {state.success.skippedDuplicates > 0
               ? ` (${state.success.skippedDuplicates} skipped as duplicate${
                   state.success.skippedDuplicates === 1 ? "" : "s"
-                } of what's already banked).`
-              : "."}
+                } of what's already banked)`
+              : ""}
+            .
+            {state.success.importedWithoutAnswer > 0 &&
+              ` ${state.success.importedWithoutAnswer} imported with no text answer — attach an image to ${
+                state.success.importedWithoutAnswer === 1 ? "it" : "them"
+              } below.`}
           </p>
         )}
       </form>

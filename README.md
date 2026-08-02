@@ -377,7 +377,10 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   tag chip, or filter-form submit overrides). A **bulk import** section (collapsed `<details>`,
   `BulkImportForm`, a client component using `useActionState` for flash feedback — same pattern as
   `SetPasswordForm`) accepts the same `Q: ... / A: ... / ---` block format the orchestrator's
-  exercise generation uses, a board/grade/subject/medium selection, an *optional* topic (its own
+  exercise generation uses — `A:` itself is optional, for a question whose entire answer is a
+  diagram or handwritten working rather than text; it imports with an empty answer, and the image
+  gets attached to that row afterward the normal way (see "Answer bank images" above) — a
+  board/grade/subject/medium selection, an *optional* topic (its own
   dropdown, populated client-side once all four scope fields are picked — left unset by default,
   since a book chapter or exam paper usually spans several topics, but assignable when a specific
   question genuinely belongs to one), and a comma-separated tag list applied to every question in
