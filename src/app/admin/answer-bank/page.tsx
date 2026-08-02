@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
 import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
 import {
+  addImage,
   addTag,
   approveAnswer,
   deleteAnswer,
@@ -10,7 +11,6 @@ import {
   removeImage,
   removeTag,
   restoreAnswer,
-  setImage,
 } from "./actions";
 import { BulkImportForm } from "./bulk-import-form";
 
@@ -298,41 +298,44 @@ export default async function AnswerBankPage({
                 <MathText text={row.answer} />
               </p>
 
-              <div className="mt-3">
-                {row.image_url ? (
-                  <div className="flex items-start gap-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset */}
-                    <img
-                      src={row.image_url}
-                      alt="Attached figure for this question"
-                      className="h-24 w-24 rounded-lg border border-border object-cover"
-                    />
-                    <form action={removeImage.bind(null, row.id)}>
-                      <button type="submit" className="text-xs text-foreground/50 hover:underline">
-                        Remove image
-                      </button>
-                    </form>
+              <div className="mt-3 space-y-2">
+                {row.image_urls.length > 0 && (
+                  <div className="flex flex-wrap items-start gap-2">
+                    {row.image_urls.map((url) => (
+                      <div key={url} className="flex flex-col items-center gap-1">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset */}
+                        <img
+                          src={url}
+                          alt="Attached figure for this question"
+                          className="h-24 w-24 rounded-lg border border-border object-cover"
+                        />
+                        <form action={removeImage.bind(null, row.id, url)}>
+                          <button type="submit" className="text-xs text-foreground/50 hover:underline">
+                            Remove
+                          </button>
+                        </form>
+                      </div>
+                    ))}
                   </div>
-                ) : (
-                  <form
-                    action={setImage.bind(null, row.id)}
-                    encType="multipart/form-data"
-                    className="flex items-center gap-2"
-                  >
-                    <input
-                      type="file"
-                      name="image"
-                      accept="image/jpeg,image/png,image/gif,image/webp"
-                      className="text-xs text-foreground/60"
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-brand/5"
-                    >
-                      Add image
-                    </button>
-                  </form>
                 )}
+                <form
+                  action={addImage.bind(null, row.id)}
+                  encType="multipart/form-data"
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="file"
+                    name="image"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    className="text-xs text-foreground/60"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-brand/5"
+                  >
+                    {row.image_urls.length > 0 ? "Add another image" : "Add image"}
+                  </button>
+                </form>
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-1.5">

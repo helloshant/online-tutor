@@ -1,10 +1,21 @@
 "use server";
 
+import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
+
+// Public bucket created in 0017_answer_bank_image.sql -- see that migration
+// for why no storage.objects policy is needed (only this service-role
+// client ever writes). Each row gets its own "folder" (storage keys are
+// just slash-delimited strings; Supabase Storage has no real directory
+// concept) so a row can hold more than one image -- keyed `${id}/${uuid}`
+// rather than a name derived from the upload, so two images with the same
+// original filename never collide, and deleteAnswer below can clean up
+// every image for a row with a single list() + remove().
+const IMAGE_BUCKET = "answer-bank-images";
 
 // The scope fields needed to evict the matching Redis entry -- the review
 // page already has the full row loaded, so these are passed straight
@@ -49,6 +60,16 @@ export async function restoreAnswer(id: string) {
 export async function deleteAnswer(scope: AnswerBankScope) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+
+  // Otherwise every attached image would be orphaned in storage forever
+  // once the row itself is gone -- list() rather than reading image_urls
+  // off the row, since this only needs the storage keys (all under this
+  // row's own "folder"), not the public URLs.
+  const { data: files } = await supabase.storage.from(IMAGE_BUCKET).list(scope.id);
+  if (files && files.length > 0) {
+    await supabase.storage.from(IMAGE_BUCKET).remove(files.map((f) => `${scope.id}/${f.name}`));
+  }
+
   await supabase.from("answered_questions").delete().eq("id", scope.id);
   await invalidateCachedAnswer(scope);
   revalidatePath("/admin/answer-bank");
@@ -78,10 +99,6 @@ export async function removeTag(id: string, tag: string) {
   revalidatePath("/admin/answer-bank");
 }
 
-// Public bucket created in 0017_answer_bank_image.sql -- see that migration
-// for why no storage.objects policy is needed (only this service-role
-// client ever writes).
-const IMAGE_BUCKET = "answer-bank-images";
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 // Well under Supabase Storage's own limits -- a textbook page photo doesn't
 // need to be huge to be legible, and this keeps upload latency reasonable
@@ -91,8 +108,10 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 // Silently no-ops on an invalid/missing file, same philosophy as addTag
 // above (a simple per-row action with no dedicated feedback UI) -- there's
 // no useActionState wired up for this row-level form, so there's nowhere to
-// surface an error message anyway.
-export async function setImage(id: string, formData: FormData) {
+// surface an error message anyway. Read-then-write and appends rather than
+// replaces (same pattern as addTag) -- a row can accumulate several images
+// "one after another" instead of each upload overwriting the last.
+export async function addImage(id: string, formData: FormData) {
   await requireAdminPage("answer_bank");
   const file = formData.get("image") as File | null;
   if (!file || file.size === 0 || file.size > MAX_IMAGE_BYTES || !ALLOWED_IMAGE_TYPES.has(file.type)) {
@@ -100,12 +119,10 @@ export async function setImage(id: string, formData: FormData) {
   }
 
   const supabase = createAdminClient();
-  // One fixed path per row (upsert: true) rather than a filename derived
-  // from the upload -- a re-upload always replaces the same object instead
-  // of accumulating orphaned files under this id.
+  const path = `${id}/${crypto.randomUUID()}`;
   const { error: uploadError } = await supabase.storage
     .from(IMAGE_BUCKET)
-    .upload(id, file, { contentType: file.type, upsert: true });
+    .upload(path, file, { contentType: file.type });
   if (uploadError) {
     console.error("Answer bank image upload failed:", uploadError);
     return;
@@ -113,16 +130,30 @@ export async function setImage(id: string, formData: FormData) {
 
   const {
     data: { publicUrl },
-  } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(id);
-  await supabase.from("answered_questions").update({ image_url: publicUrl }).eq("id", id);
+  } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+
+  const { data } = await supabase.from("answered_questions").select("image_urls").eq("id", id).single();
+  const imageUrls = [...(data?.image_urls ?? []), publicUrl];
+  await supabase.from("answered_questions").update({ image_urls: imageUrls }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
 
-export async function removeImage(id: string) {
+// imageUrl identifies which of the row's (possibly several) images to
+// remove -- both from the array and from storage, by recovering the
+// storage path from the tail of its public URL.
+export async function removeImage(id: string, imageUrl: string) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
-  await supabase.storage.from(IMAGE_BUCKET).remove([id]);
-  await supabase.from("answered_questions").update({ image_url: null }).eq("id", id);
+
+  const { data } = await supabase.from("answered_questions").select("image_urls").eq("id", id).single();
+  const imageUrls = (data?.image_urls ?? []).filter((url: string) => url !== imageUrl);
+  await supabase.from("answered_questions").update({ image_urls: imageUrls }).eq("id", id);
+
+  const marker = `/object/public/${IMAGE_BUCKET}/`;
+  const markerIndex = imageUrl.indexOf(marker);
+  if (markerIndex >= 0) {
+    await supabase.storage.from(IMAGE_BUCKET).remove([imageUrl.slice(markerIndex + marker.length)]);
+  }
   revalidatePath("/admin/answer-bank");
 }
 
@@ -132,8 +163,8 @@ export async function removeImage(id: string) {
 // mirrors from the orchestrator, since the two are independently deployed
 // packages with no shared code path. "A:" is optional -- a question whose
 // entire answer is a diagram/handwritten working (image-only, no text) is
-// imported with an empty answer, then the admin attaches the image
-// afterward via setImage on that row in the main list.
+// imported with an empty answer, then the admin attaches the image(s)
+// afterward via addImage on that row in the main list.
 const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
 // Not anchored to the very start of the remaining text (unlike
 // QUESTION_PREFIX_PATTERN) -- it's searched for anywhere via .match() below,
