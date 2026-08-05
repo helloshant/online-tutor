@@ -46,6 +46,10 @@ export async function rejectAnswer(scope: AnswerBankScope) {
   revalidatePath("/admin/answer-bank");
 }
 
+export interface EditAnswerState {
+  success?: boolean;
+}
+
 // scope carries the row's *pre-edit* question (and everything else needed
 // to evict the matching cache entry -- see AnswerBankScope) while the new
 // question/answer text comes from formData; validation_status is left
@@ -53,11 +57,24 @@ export async function rejectAnswer(scope: AnswerBankScope) {
 // shouldn't silently change its review state the way approve/reject do.
 // Answer can be blank, same as bulk import -- a question whose entire
 // answer is an attached image has no text answer at all.
-export async function editAnswer(scope: AnswerBankScope, formData: FormData) {
+//
+// Takes (prevState, formData) rather than just (formData) -- unlike every
+// other row-level action in this file -- specifically so the client side
+// (edit-answer-form.tsx) can drive this through useActionState and see
+// when a save actually landed, needed to close the <details> disclosure
+// afterward: its open/closed state is native DOM state, not something a
+// server re-render can touch on its own, so without this it stays open
+// across the post-save refresh and reads as a second edit window popping
+// up instead of the row just updating.
+export async function editAnswer(
+  scope: AnswerBankScope,
+  _prevState: EditAnswerState,
+  formData: FormData
+): Promise<EditAnswerState> {
   await requireAdminPage("answer_bank");
   const question = ((formData.get("question") as string | null) ?? "").trim();
   const answer = ((formData.get("answer") as string | null) ?? "").trim();
-  if (!question) return;
+  if (!question) return {};
 
   const supabase = createAdminClient();
   await supabase.from("answered_questions").update({ question, answer }).eq("id", scope.id);
@@ -67,6 +84,7 @@ export async function editAnswer(scope: AnswerBankScope, formData: FormData) {
   // on its own -- same reasoning as rejectAnswer.
   await invalidateCachedAnswer(scope);
   revalidatePath("/admin/answer-bank");
+  return { success: true };
 }
 
 // Undoes an approve/reject decision back to the implicit-validation default,

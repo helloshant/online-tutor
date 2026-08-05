@@ -367,13 +367,19 @@ provenance labels a student can search by directly, e.g. "show me exercises from
 "questions from WBJEE 2023."
 
 - **Admin: editing, tagging, topic linkage, and bulk import** (`/admin/answer-bank`). Every entry —
-  however it originated — has an "Edit question/answer" disclosure (`<details>`, no client JS) with
-  a form pre-filled from the current text; submitting it calls `editAnswer` in `actions.ts`, which
-  updates `question`/`answer` (answer can be left blank, same as bulk import's optional `A:` line)
-  and evicts the matching Redis cache entry the same way `rejectAnswer` does — otherwise a stale
-  cached answer under the old question or old wording would keep being served until its TTL expired
-  on its own. `validation_status` is left untouched by an edit; approving/rejecting is still its own
-  separate action, so fixing a typo doesn't silently change a row's review state. Every entry can
+  however it originated — has an "Edit question/answer" disclosure (`EditAnswerForm`, the one client
+  component on this otherwise server-actions-only page) with a form pre-filled from the current
+  text; submitting it calls `editAnswer` in `actions.ts`, which updates `question`/`answer` (answer
+  can be left blank, same as bulk import's optional `A:` line) and evicts the matching Redis cache
+  entry the same way `rejectAnswer` does — otherwise a stale cached answer under the old question or
+  old wording would keep being served until its TTL expired on its own. `validation_status` is left
+  untouched by an edit; approving/rejecting is still its own separate action, so fixing a typo
+  doesn't silently change a row's review state. `editAnswer` takes `(scope, prevState, formData)`
+  rather than the `(scope, formData)` every other row-level action here uses, specifically so
+  `EditAnswerForm` can drive it through `useActionState` and see when a save actually lands — needed
+  to close the `<details>` afterward, since its open/closed state is native DOM state a server
+  re-render can't touch on its own; without that it stays open across the post-save refresh and
+  reads as a second edit window popping up instead of the row just updating. Every entry can
   also have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a plain
   read-modify-write against the `tags` array; fine for an admin-only tool with no meaningful
   concurrent-edit risk). The row list also shows each entry's syllabus topic when it has one (joined

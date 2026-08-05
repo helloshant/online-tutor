@@ -7,13 +7,13 @@ import {
   addTag,
   approveAnswer,
   deleteAnswer,
-  editAnswer,
   rejectAnswer,
   removeImage,
   removeTag,
   restoreAnswer,
 } from "./actions";
 import { BulkImportForm } from "./bulk-import-form";
+import { EditAnswerForm } from "./edit-answer-form";
 
 const STATUS_FILTERS: { value: AnswerValidationStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -299,43 +299,18 @@ export default async function AnswerBankPage({
                 <MathText text={row.answer} />
               </p>
 
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs font-medium text-brand hover:underline">
-                  Edit question/answer
-                </summary>
-                <form
-                  action={editAnswer.bind(null, {
-                    id: row.id,
-                    boardId: row.board_id,
-                    gradeId: row.grade_id,
-                    subjectId: row.subject_id,
-                    medium: row.medium,
-                    question: row.question,
-                  })}
-                  className="mt-2 space-y-2"
-                >
-                  <textarea
-                    name="question"
-                    defaultValue={row.question}
-                    rows={2}
-                    required
-                    className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-                  />
-                  <textarea
-                    name="answer"
-                    defaultValue={row.answer}
-                    rows={4}
-                    placeholder="Leave blank for an image-only answer"
-                    className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark"
-                  >
-                    Save
-                  </button>
-                </form>
-              </details>
+              <EditAnswerForm
+                scope={{
+                  id: row.id,
+                  boardId: row.board_id,
+                  gradeId: row.grade_id,
+                  subjectId: row.subject_id,
+                  medium: row.medium,
+                  question: row.question,
+                }}
+                question={row.question}
+                answer={row.answer}
+              />
 
               <div className="mt-3 space-y-2">
                 {row.image_urls.length > 0 && (
