@@ -450,6 +450,14 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   already-answered question). Sending straight away with an explicit "explain in detail" framing
   avoids both — no `/api/chat` or orchestrator changes needed either way, since the endpoint just
   answers whatever message text it's given.
+- **Re-fetches when the tab is switched back into**, not just when a filter changes. Since Chat/
+  Practice/Topics stay mounted the whole time (see above), a search's `results` would otherwise sit
+  in memory unchanged indefinitely — including after an admin edits that exact content on
+  `/admin/answer-bank` while the student happened to be on the Chat tab. `dashboard-shell.tsx` passes
+  `active={mainTab === "practice"}` down; a `wasActiveRef`-guarded effect re-runs the current search
+  only on the false→true transition (not on every render while already active, which the
+  filter-change effect already covers) so switching tabs is what triggers the refresh, not a timer or
+  a manual button.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying

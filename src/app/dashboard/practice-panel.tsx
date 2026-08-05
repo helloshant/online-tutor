@@ -20,12 +20,20 @@ export function PracticePanel({
   gradeId,
   subjectId,
   medium,
+  active,
   onAskAbout,
 }: {
   boardId: string;
   gradeId: string;
   subjectId: string;
   medium: Medium;
+  // Whether the Practice tab is the one currently showing -- dashboard-shell
+  // keeps this panel mounted (just hidden via CSS) when switching tabs, so
+  // its already-fetched `results` would otherwise sit stale in memory
+  // indefinitely; this is what lets the effect below re-fetch whenever the
+  // tab is switched back into, so an admin edit made while the student was
+  // on Chat actually shows up instead of requiring a full page reload.
+  active: boolean;
   // Switches to the Chat tab and sends a detailed-explanation request for
   // this result, so a student who doesn't follow a banked solution can dig
   // into it conversationally instead of hitting a dead end here -- Practice
@@ -45,6 +53,11 @@ export function PracticePanel({
   // Guards against a slow earlier request (e.g. after quickly switching
   // topics) resolving after a newer one and clobbering fresher results.
   const requestIdRef = useRef(0);
+  // Tracks the previous `active` value so the effect below can fire only on
+  // the false->true transition (tab just switched into), not on every
+  // render while already active -- filter changes while active are already
+  // handled by the other effect below.
+  const wasActiveRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +154,20 @@ export function PracticePanel({
       await runSearch(0, false);
     })();
   }, [selectedTopicId, selectedTag, runSearch]);
+
+  // Re-fetches whenever the student switches back to this tab, so content
+  // edited elsewhere (the admin Answer Bank page, in another tab/session)
+  // while they were on Chat actually shows up here -- see the `active` prop
+  // comment above for why this can't just rely on the effect above.
+  useEffect(() => {
+    const justBecameActive = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (!justBecameActive) return;
+    if (!selectedTopicId && !selectedTag) return;
+    void (async () => {
+      await runSearch(0, false);
+    })();
+  }, [active, selectedTopicId, selectedTag, runSearch]);
 
   const chapters: { chapter: string; topics: SyllabusTopic[] }[] = [];
   for (const topic of topics) {

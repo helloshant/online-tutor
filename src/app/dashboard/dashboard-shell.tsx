@@ -284,6 +284,7 @@ export function DashboardShell({
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
                     medium={medium}
+                    active={mainTab === "practice"}
                     onAskAbout={handleAskAboutPractice}
                   />
                 </div>
