@@ -118,7 +118,11 @@ export function PracticePanel({
       if (offset > 0) params.set("offset", String(offset));
 
       try {
-        const res = await fetch(`/api/answer-bank/search?${params.toString()}`);
+        // no-store, not the default cache mode -- rules out a browser (or
+        // any intermediary proxy) serving a stale response for an identical
+        // GET URL instead of actually re-querying, on top of everything
+        // below that decides *when* to re-run this in the first place.
+        const res = await fetch(`/api/answer-bank/search?${params.toString()}`, { cache: "no-store" });
         const body = await res.json().catch(() => null);
         if (requestIdRef.current !== requestId) return; // superseded by a newer search
         if (!res.ok || !Array.isArray(body?.results)) {
@@ -155,10 +159,11 @@ export function PracticePanel({
     })();
   }, [selectedTopicId, selectedTag, runSearch]);
 
-  // Re-fetches whenever the student switches back to this tab, so content
-  // edited elsewhere (the admin Answer Bank page, in another tab/session)
-  // while they were on Chat actually shows up here -- see the `active` prop
-  // comment above for why this can't just rely on the effect above.
+  // Re-fetches whenever the student switches back to this *in-app* tab
+  // (Chat -> Practice within the same browser tab), so content edited
+  // elsewhere while they were on Chat actually shows up here -- see the
+  // `active` prop comment above for why this can't just rely on the effect
+  // above it.
   useEffect(() => {
     const justBecameActive = active && !wasActiveRef.current;
     wasActiveRef.current = active;
@@ -167,6 +172,33 @@ export function PracticePanel({
     void (async () => {
       await runSearch(0, false);
     })();
+  }, [active, selectedTopicId, selectedTag, runSearch]);
+
+  // Same idea, but for the *browser* tab/window regaining focus -- e.g. an
+  // admin edit made in a separate browser tab pointed at
+  // /admin/answer-bank, then switching back to the one showing this
+  // dashboard, with Practice already the active in-app tab the whole time.
+  // That's a different browser tab entirely, so nothing above (all in-app
+  // React state) would ever observe it happening; only these two events
+  // fire on the return trip regardless of which one the browser uses --
+  // `visibilitychange` covers switching tabs, `focus` covers switching
+  // windows/apps and coming back.
+  useEffect(() => {
+    function handleFocus() {
+      if (document.visibilityState === "hidden") return;
+      if (!active) return;
+      if (!selectedTopicId && !selectedTag) return;
+      void (async () => {
+        await runSearch(0, false);
+      })();
+    }
+
+    document.addEventListener("visibilitychange", handleFocus);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [active, selectedTopicId, selectedTag, runSearch]);
 
   const chapters: { chapter: string; topics: SyllabusTopic[] }[] = [];

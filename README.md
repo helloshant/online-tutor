@@ -450,14 +450,20 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   already-answered question). Sending straight away with an explicit "explain in detail" framing
   avoids both — no `/api/chat` or orchestrator changes needed either way, since the endpoint just
   answers whatever message text it's given.
-- **Re-fetches when the tab is switched back into**, not just when a filter changes. Since Chat/
-  Practice/Topics stay mounted the whole time (see above), a search's `results` would otherwise sit
-  in memory unchanged indefinitely — including after an admin edits that exact content on
-  `/admin/answer-bank` while the student happened to be on the Chat tab. `dashboard-shell.tsx` passes
-  `active={mainTab === "practice"}` down; a `wasActiveRef`-guarded effect re-runs the current search
-  only on the false→true transition (not on every render while already active, which the
-  filter-change effect already covers) so switching tabs is what triggers the refresh, not a timer or
-  a manual button.
+- **Re-fetches on two different kinds of "coming back to this tab,"** not just when a filter
+  changes — since Chat/Practice/Topics stay mounted the whole time (see above), a search's `results`
+  would otherwise sit in memory unchanged indefinitely, including after an admin edits that exact
+  content on `/admin/answer-bank`. Neither is a timer or a manual refresh button:
+  1. Switching **in-app** tabs (Chat → Practice) within the same browser tab. `dashboard-shell.tsx`
+     passes `active={mainTab === "practice"}` down; a `wasActiveRef`-guarded effect re-runs the
+     current search only on the false→true transition (not on every render while already active,
+     which the filter-change effect already covers).
+  2. Switching **browser** tabs/windows and back — e.g. editing a question on `/admin/answer-bank`
+     in a separate browser tab, then returning to the one already showing Practice. That's a
+     different browser tab entirely, so no in-app React state (including #1 above) ever sees it
+     happen; only `visibilitychange`/`window focus` listeners fire on that return trip. Also fetches
+     with `cache: "no-store"`, ruling out a stale cached response for an identical GET URL as a
+     contributing factor on top of both of these.
 - **Not yet built**: natural-language tag querying from inside the chat box itself (typing "show me
   WBJEE 2023 questions" as an ordinary message and having it get detected and routed to a tag search
   instead of the tutor). The Practice panel above is the dedicated-UI foundation; chat-based querying
