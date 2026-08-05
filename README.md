@@ -366,9 +366,16 @@ vocabulary needing rename-once-updates-everywhere semantics) are a second, indep
 provenance labels a student can search by directly, e.g. "show me exercises from Ganit Prakash" or
 "questions from WBJEE 2023."
 
-- **Admin: tagging, topic linkage, and bulk import** (`/admin/answer-bank`). Every entry — however
-  it originated — can have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a
-  plain read-modify-write against the `tags` array; fine for an admin-only tool with no meaningful
+- **Admin: editing, tagging, topic linkage, and bulk import** (`/admin/answer-bank`). Every entry —
+  however it originated — has an "Edit question/answer" disclosure (`<details>`, no client JS) with
+  a form pre-filled from the current text; submitting it calls `editAnswer` in `actions.ts`, which
+  updates `question`/`answer` (answer can be left blank, same as bulk import's optional `A:` line)
+  and evicts the matching Redis cache entry the same way `rejectAnswer` does — otherwise a stale
+  cached answer under the old question or old wording would keep being served until its TTL expired
+  on its own. `validation_status` is left untouched by an edit; approving/rejecting is still its own
+  separate action, so fixing a typo doesn't silently change a row's review state. Every entry can
+  also have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a plain
+  read-modify-write against the `tags` array; fine for an admin-only tool with no meaningful
   concurrent-edit risk). The row list also shows each entry's syllabus topic when it has one (joined
   from `syllabus_topics` via `topic_id`), and the filter row now has `?board=`/`?grade=`/`?subject=`/
   `?medium=`/`?topic=` alongside the existing `?status=`/`?tag=` — the topic dropdown only appears

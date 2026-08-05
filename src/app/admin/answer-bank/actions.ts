@@ -46,6 +46,29 @@ export async function rejectAnswer(scope: AnswerBankScope) {
   revalidatePath("/admin/answer-bank");
 }
 
+// scope carries the row's *pre-edit* question (and everything else needed
+// to evict the matching cache entry -- see AnswerBankScope) while the new
+// question/answer text comes from formData; validation_status is left
+// untouched, since editing content an admin is already looking at
+// shouldn't silently change its review state the way approve/reject do.
+// Answer can be blank, same as bulk import -- a question whose entire
+// answer is an attached image has no text answer at all.
+export async function editAnswer(scope: AnswerBankScope, formData: FormData) {
+  await requireAdminPage("answer_bank");
+  const question = ((formData.get("question") as string | null) ?? "").trim();
+  const answer = ((formData.get("answer") as string | null) ?? "").trim();
+  if (!question) return;
+
+  const supabase = createAdminClient();
+  await supabase.from("answered_questions").update({ question, answer }).eq("id", scope.id);
+  // The cache is keyed by question text, so a stale entry under the old
+  // phrasing (if the question changed) or the old answer (if just that
+  // changed) would otherwise keep being served until its Redis TTL expires
+  // on its own -- same reasoning as rejectAnswer.
+  await invalidateCachedAnswer(scope);
+  revalidatePath("/admin/answer-bank");
+}
+
 // Undoes an approve/reject decision back to the implicit-validation default,
 // so a mistaken click isn't permanent. No cache eviction needed here -- an
 // auto_approved row is servable again, and the next matching question just

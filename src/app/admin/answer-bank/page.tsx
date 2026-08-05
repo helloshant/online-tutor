@@ -7,6 +7,7 @@ import {
   addTag,
   approveAnswer,
   deleteAnswer,
+  editAnswer,
   rejectAnswer,
   removeImage,
   removeTag,
@@ -297,6 +298,44 @@ export default async function AnswerBankPage({
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
                 <MathText text={row.answer} />
               </p>
+
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs font-medium text-brand hover:underline">
+                  Edit question/answer
+                </summary>
+                <form
+                  action={editAnswer.bind(null, {
+                    id: row.id,
+                    boardId: row.board_id,
+                    gradeId: row.grade_id,
+                    subjectId: row.subject_id,
+                    medium: row.medium,
+                    question: row.question,
+                  })}
+                  className="mt-2 space-y-2"
+                >
+                  <textarea
+                    name="question"
+                    defaultValue={row.question}
+                    rows={2}
+                    required
+                    className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+                  />
+                  <textarea
+                    name="answer"
+                    defaultValue={row.answer}
+                    rows={4}
+                    placeholder="Leave blank for an image-only answer"
+                    className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark"
+                  >
+                    Save
+                  </button>
+                </form>
+              </details>
 
               <div className="mt-3 space-y-2">
                 {row.image_urls.length > 0 && (
