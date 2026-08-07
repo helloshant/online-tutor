@@ -34,6 +34,7 @@ export function BulkImportForm({
   const [topicId, setTopicId] = useState("");
   const [topics, setTopics] = useState<TopicOption[]>([]);
   const hasFullScope = Boolean(boardId && gradeId && subjectId && medium);
+  const [mode, setMode] = useState<"text" | "pdf">("text");
 
   // topicId is reset directly in each scope field's own change handler
   // below, not here -- any state a fetch effect resets as a side effect of
@@ -73,7 +74,7 @@ export function BulkImportForm({
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-brand/5">
         Bulk import (e.g. a textbook or past exam paper)
       </summary>
-      <form action={formAction} className="space-y-3 px-3 pb-4">
+      <form action={formAction} encType="multipart/form-data" className="space-y-3 px-3 pb-4">
         <p className="text-xs text-foreground/60">
           For real, sourced questions (a textbook&apos;s exercise set, a past exam paper) rather
           than LLM-generated practice — these are stored <b>admin-approved</b> immediately, no
@@ -85,6 +86,26 @@ export function BulkImportForm({
           out for a question whose entire answer is a diagram or handwritten working, then attach
           it as an image on that row afterward (below) instead of typing it out.
         </p>
+        <div className="flex gap-4 text-sm">
+          <label className="flex items-center gap-1.5">
+            <input
+              type="radio"
+              name="mode"
+              checked={mode === "text"}
+              onChange={() => setMode("text")}
+            />
+            Paste text
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input
+              type="radio"
+              name="mode"
+              checked={mode === "pdf"}
+              onChange={() => setMode("pdf")}
+            />
+            Upload PDF
+          </label>
+        </div>
         <div className="flex flex-wrap gap-2">
           <select
             name="boardId"
@@ -164,16 +185,34 @@ export function BulkImportForm({
             className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           />
         </div>
-        <textarea
-          key={state?.success ? "cleared" : "text"}
-          name="bulkText"
-          rows={8}
-          required
-          placeholder={
-            "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
-          }
-          className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-        />
+        {mode === "text" ? (
+          <textarea
+            key={state?.success ? "cleared" : "text"}
+            name="bulkText"
+            rows={8}
+            required
+            placeholder={
+              "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
+            }
+            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+          />
+        ) : (
+          <div className="space-y-1">
+            <input
+              key={state?.success ? "cleared" : "file"}
+              type="file"
+              name="file"
+              accept=".pdf,application/pdf"
+              required
+              className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
+            />
+            <p className="text-xs text-foreground/60">
+              The PDF must have selectable/embedded text in the same <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code>/
+              <code className="rounded bg-brand/10 px-1 py-0.5">A:</code>/<code className="rounded bg-brand/10 px-1 py-0.5">---</code>{" "}
+              format shown above — a scan or photo with no text layer won&apos;t work. Max 20MB.
+            </p>
+          </div>
+        )}
         <button
           disabled={pending}
           className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"

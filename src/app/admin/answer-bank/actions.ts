@@ -1,6 +1,7 @@
 "use server";
 
 import crypto from "node:crypto";
+import { extractText, getDocumentProxy } from "unpdf";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
@@ -267,59 +268,39 @@ export interface BulkImportState {
   };
 }
 
-// Bulk-imported content is admin-curated (a real textbook or exam paper),
-// not LLM output -- it skips validateAnswerForStorage entirely (that
-// heuristic exists to catch a generated answer hedging or reading like a
-// question asked back, neither of which applies to hand-sourced content)
-// and is stored admin_approved so it's immediately servable, same trust
-// level as manually approving a pending_review entry.
-export async function bulkImportAnswers(
-  _prevState: BulkImportState,
-  formData: FormData
+type ParsedImportRow = { question: string; answer: string };
+
+// Shared by both import entry points below (pasted text and PDF upload) --
+// everything from here on (dedup, insert, the returned counts) is
+// identical either way; only how `rows` got produced differs. Bulk-
+// imported content is admin-curated (a real textbook or exam paper), not
+// LLM output -- it skips validateAnswerForStorage entirely (that heuristic
+// exists to catch a generated answer hedging or reading like a question
+// asked back, neither of which applies to hand-sourced content) and is
+// stored admin_approved so it's immediately servable, same trust level as
+// manually approving a pending_review entry.
+async function importParsedRows(
+  rows: ParsedImportRow[],
+  tags: string[],
+  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null }
 ): Promise<BulkImportState> {
-  await requireAdminPage("answer_bank");
-
-  const boardId = formData.get("boardId") as string | null;
-  const gradeId = formData.get("gradeId") as string | null;
-  const subjectId = formData.get("subjectId") as string | null;
-  const medium = formData.get("medium") as Medium | null;
-  const topicId = (formData.get("topicId") as string | null) || null;
-  const tags = ((formData.get("tags") as string | null) ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  const text = (formData.get("bulkText") as string | null) ?? "";
-
-  if (!boardId || !gradeId || !subjectId || !medium || !text.trim()) {
-    return { error: "Board, grade, subject, medium, and the question text are all required." };
-  }
-
-  const rows = parseImportBlocks(text);
-  if (rows.length === 0) {
-    return {
-      error:
-        'Could not find any "Q: ..." blocks in that text. Check the format and that entries are ' +
-        "separated by a line of three or more dashes (---).",
-    };
-  }
-
   const supabase = createAdminClient();
 
   // Per-row dedup against whatever's already banked for this board/grade/
   // subject/medium (the same RPC the chat pipeline and exercise generation
-  // use for their own dedup checks) -- re-pasting the same source a second
-  // time (e.g. after fixing a typo elsewhere in the document) would
-  // otherwise silently pile up duplicate rows forever, since bulk import
-  // has no other write-time safeguard the way LLM-generated content does.
-  const toInsert: { question: string; answer: string }[] = [];
+  // use for their own dedup checks) -- re-importing the same source a
+  // second time (e.g. after fixing a typo elsewhere in it) would otherwise
+  // silently pile up duplicate rows forever, since bulk import has no other
+  // write-time safeguard the way LLM-generated content does.
+  const toInsert: ParsedImportRow[] = [];
   let skippedDuplicates = 0;
   for (const row of rows) {
     const { data, error } = await supabase
       .rpc("search_answer_bank", {
-        p_board_id: boardId,
-        p_grade_id: gradeId,
-        p_subject_id: subjectId,
-        p_medium: medium,
+        p_board_id: scope.boardId,
+        p_grade_id: scope.gradeId,
+        p_subject_id: scope.subjectId,
+        p_medium: scope.medium,
         p_query: row.question,
         p_min_rank: MIN_RANK,
       })
@@ -341,11 +322,11 @@ export async function bulkImportAnswers(
   if (toInsert.length > 0) {
     const { error } = await supabase.from("answered_questions").insert(
       toInsert.map((r) => ({
-        board_id: boardId,
-        grade_id: gradeId,
-        subject_id: subjectId,
-        medium,
-        topic_id: topicId,
+        board_id: scope.boardId,
+        grade_id: scope.gradeId,
+        subject_id: scope.subjectId,
+        medium: scope.medium,
+        topic_id: scope.topicId,
         question: r.question,
         answer: r.answer,
         validation_status: "admin_approved" as const,
@@ -367,4 +348,97 @@ export async function bulkImportAnswers(
       importedWithoutAnswer: toInsert.filter((r) => !r.answer).length,
     },
   };
+}
+
+export async function bulkImportAnswers(
+  _prevState: BulkImportState,
+  formData: FormData
+): Promise<BulkImportState> {
+  await requireAdminPage("answer_bank");
+
+  const boardId = formData.get("boardId") as string | null;
+  const gradeId = formData.get("gradeId") as string | null;
+  const subjectId = formData.get("subjectId") as string | null;
+  const medium = formData.get("medium") as Medium | null;
+  const topicId = (formData.get("topicId") as string | null) || null;
+  const tags = ((formData.get("tags") as string | null) ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  if (!boardId || !gradeId || !subjectId || !medium) {
+    return { error: "Board, grade, subject, and medium are all required." };
+  }
+
+  // The two input methods (pasted text vs. a PDF upload) share this one
+  // action, distinguished by which of these two fields is actually
+  // present, rather than being two separate actions/forms -- the scope
+  // fields above are identical for either, and BulkImportForm's toggle just
+  // swaps which content input is shown.
+  const file = formData.get("file") as File | null;
+  if (file && file.size > 0) {
+    return importPdf(file, tags, { boardId, gradeId, subjectId, medium, topicId });
+  }
+
+  const text = (formData.get("bulkText") as string | null) ?? "";
+  if (!text.trim()) {
+    return { error: "Paste some Q:/A: text, or choose a PDF file, to import." };
+  }
+
+  const rows = parseImportBlocks(text);
+  if (rows.length === 0) {
+    return {
+      error:
+        'Could not find any "Q: ..." blocks in that text. Check the format and that entries are ' +
+        "separated by a line of three or more dashes (---).",
+    };
+  }
+
+  return importParsedRows(rows, tags, { boardId, gradeId, subjectId, medium, topicId });
+}
+
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+// The PDF's extracted text is run through the exact same Q:/A:/---
+// convention as the pasted-text format (parseImportBlocks below) -- this
+// isn't OCR or an AI-driven "read the questions off this scanned page"
+// extractor, just a different way of getting Q:/A:/--- formatted text into
+// the importer, for a document that started life as (or was exported to) a
+// PDF instead of being pasted directly. A scanned/photographed PDF with no
+// selectable text produces no usable text at all and every block gets
+// skipped -- same as pasting nothing.
+async function importPdf(
+  file: File,
+  tags: string[],
+  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null }
+): Promise<BulkImportState> {
+  if (!file.name.toLowerCase().endsWith(".pdf")) {
+    return { error: "Only .pdf files are supported." };
+  }
+  if (file.size > MAX_PDF_BYTES) {
+    return { error: "That file is too large (max 20MB)." };
+  }
+  if (file.type && file.type !== "application/pdf") {
+    return { error: "That doesn't look like a valid .pdf file." };
+  }
+
+  let rows: ParsedImportRow[];
+  try {
+    const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+    const { text } = await extractText(pdf, { mergePages: true });
+    rows = parseImportBlocks(text);
+  } catch (err) {
+    console.error("PDF parse failed:", err);
+    return { error: "Could not read that file. Make sure it's a valid, uncorrupted .pdf." };
+  }
+
+  if (rows.length === 0) {
+    return {
+      error:
+        'Could not find any "Q: ..." blocks in that PDF\'s text. This only reads selectable/embedded ' +
+        "text (not a scan/photo with no text layer) in the same Q:/A:/--- format as pasted text.",
+    };
+  }
+
+  return importParsedRows(rows, tags, scope);
 }
