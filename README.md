@@ -412,6 +412,26 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   subsequent block into the answer of whatever came before it (the same fix was applied to the
   orchestrator's identical, deliberately-duplicated `parseGeneratedExercises` in `exerciseParser.ts`,
   which it's kept in sync with).
+- **Spreadsheet upload is the second way to feed the same bulk import.** A "Paste text" / "Upload
+  spreadsheet (.xlsx)" radio toggle in `BulkImportForm` swaps which content input is shown — the
+  board/grade/subject/medium/topic/tags scope fields above it are shared between both, since they're
+  identical either way. Both submit to the same `bulkImportAnswers` action, which branches on
+  whether a `file` was actually attached; everything after parsing (dedup against
+  `search_answer_bank`, the insert, `admin_approved` status, the reported counts) is one shared
+  `importParsedRows` helper, so the two input methods only differ in how `{question, answer, tags}`
+  rows get produced. The spreadsheet's first row is column headers (case-insensitive, any order):
+  `question` (required per row), `answer` (optional, same meaning as an omitted `A:` line), `tags`
+  (optional, comma-separated *within* the cell — merged with the batch-level Tags field rather than
+  replacing it, so e.g. every row already gets "Koshe Dekho 3.1" from the form and a handful of rows
+  can add "hard" or "WBJEE 2023" on top). Parsed with
+  [`exceljs`](https://github.com/exceljs/exceljs) rather than the more commonly-reached-for `xlsx`
+  (SheetJS) package — the version of `xlsx` published to the npm registry carries two unpatched
+  high-severity CVEs (prototype pollution, ReDoS) that SheetJS has only fixed in versions they
+  distribute from their own CDN, not npm; `exceljs` doesn't have that problem and is a normal,
+  actively-maintained npm dependency like everything else here. Capped at 5MB
+  (`MAX_SPREADSHEET_BYTES`) and validated by both extension and MIME type before being parsed at
+  all. Images still can't go *in* the spreadsheet either way — a row with no `answer` gets its image
+  attached afterward the normal way (see "Answer bank images" above), same as an omitted `A:` line.
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither
