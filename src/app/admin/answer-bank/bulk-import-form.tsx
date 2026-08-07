@@ -216,7 +216,10 @@ export function BulkImportForm({
               First row is column headers: <code className="rounded bg-brand/10 px-1 py-0.5">question</code>{" "}
               (required per row), <code className="rounded bg-brand/10 px-1 py-0.5">answer</code> (optional),{" "}
               <code className="rounded bg-brand/10 px-1 py-0.5">tags</code> (optional, comma-separated within
-              the cell — merged with the Tags field above, not replacing it).
+              the cell — merged with the Tags field above, not replacing it). A picture inserted
+              anywhere within a row (Excel/Sheets&apos; own Insert → Picture, not typed into a cell) is
+              attached to that row&apos;s answer automatically — the same as an image-only answer with a
+              blank <code className="rounded bg-brand/10 px-1 py-0.5">answer</code> cell.
             </p>
           </div>
         )}

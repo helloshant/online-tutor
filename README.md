@@ -418,20 +418,40 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   identical either way. Both submit to the same `bulkImportAnswers` action, which branches on
   whether a `file` was actually attached; everything after parsing (dedup against
   `search_answer_bank`, the insert, `admin_approved` status, the reported counts) is one shared
-  `importParsedRows` helper, so the two input methods only differ in how `{question, answer, tags}`
-  rows get produced. The spreadsheet's first row is column headers (case-insensitive, any order):
-  `question` (required per row), `answer` (optional, same meaning as an omitted `A:` line), `tags`
-  (optional, comma-separated *within* the cell — merged with the batch-level Tags field rather than
-  replacing it, so e.g. every row already gets "Koshe Dekho 3.1" from the form and a handful of rows
-  can add "hard" or "WBJEE 2023" on top). Parsed with
+  `importParsedRows` helper, so the two input methods only differ in how `{question, answer, tags,
+  imageBuffers}` rows get produced. The spreadsheet's first row is column headers (case-insensitive,
+  any order): `question` (required per row), `answer` (optional, same meaning as an omitted `A:`
+  line), `tags` (optional, comma-separated *within* the cell — merged with the batch-level Tags field
+  rather than replacing it, so e.g. every row already gets "Koshe Dekho 3.1" from the form and a
+  handful of rows can add "hard" or "WBJEE 2023" on top). Parsed with
   [`exceljs`](https://github.com/exceljs/exceljs) rather than the more commonly-reached-for `xlsx`
   (SheetJS) package — the version of `xlsx` published to the npm registry carries two unpatched
   high-severity CVEs (prototype pollution, ReDoS) that SheetJS has only fixed in versions they
   distribute from their own CDN, not npm; `exceljs` doesn't have that problem and is a normal,
-  actively-maintained npm dependency like everything else here. Capped at 5MB
-  (`MAX_SPREADSHEET_BYTES`) and validated by both extension and MIME type before being parsed at
-  all. Images still can't go *in* the spreadsheet either way — a row with no `answer` gets its image
-  attached afterward the normal way (see "Answer bank images" above), same as an omitted `A:` line.
+  actively-maintained npm dependency like everything else here. Capped at 20MB
+  (`MAX_SPREADSHEET_BYTES`) and validated by both extension and MIME type before being parsed at all.
+- **Images *can* go in the spreadsheet, unlike the pasted-text format.** A picture inserted into the
+  sheet itself (Excel/Sheets' own Insert → Picture, not typed into a cell — images are floating
+  drawings anchored to a position, not cell values, so `eachRow`'s per-cell walk never sees them) is
+  matched to a data row and attached as that row's answer image, the same way `addImage` attaches one
+  manually after the fact. `extractRowImages` does this in a separate pass over
+  `worksheet.getImages()`: each image's anchor `range.tl.row` (0-indexed, floored to handle an image
+  not perfectly aligned to a row boundary) converts to the same 1-indexed row numbering `eachRow`
+  uses, so `parseSpreadsheetRows` can look up a row's images by its own `rowNumber` — which column the
+  image visually sits under doesn't matter, only which row. A row can carry more than one image.
+  Uploading happens in `importParsedRows`, after the row insert (not before) — each surviving row is
+  given a client-generated `id` up front specifically so its images have a known storage path
+  (`${id}/${randomUUID()}`) to upload to right after, rather than depending on
+  `.insert().select()` preserving array order (which Postgres/PostgREST don't actually guarantee).
+  Raising `MAX_SPREADSHEET_BYTES` to 20MB (from an earlier 5MB, before images were supported) required
+  also raising `experimental.serverActions.bodySizeLimit` in `next.config.ts` to `24mb` — Next's own
+  default there is 1MB, which was already silently under the *existing* 4MB single-image cap
+  (`MAX_IMAGE_BYTES`) before this; nobody had hit it yet, but it would have failed the moment someone
+  tried to upload an image over ~1MB. A row's `question` cell is still required even when its answer
+  is entirely an embedded image — not because it's shown anywhere alongside the image, but because
+  the dedup check matches on question text, and a shared placeholder for every image-only row would
+  make every one after the first silently register as a false-positive duplicate of it on any later
+  re-import.
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither

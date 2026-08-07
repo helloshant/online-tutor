@@ -1,7 +1,7 @@
 "use server";
 
 import crypto from "node:crypto";
-import { Workbook, type Worksheet } from "exceljs";
+import { Workbook, type Image, type Worksheet } from "exceljs";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
@@ -268,7 +268,21 @@ export interface BulkImportState {
   };
 }
 
-type ParsedImportRow = { question: string; answer: string; tags: string[] };
+// exceljs's own .d.ts declares an ambient `Buffer extends ArrayBuffer` type
+// (not Node's real Buffer, which newer @types/node makes incompatible with
+// it structurally) -- derived from Image itself rather than typed as
+// `Buffer` here, so this doesn't fight that declaration.
+type RowImage = { extension: string; buffer: NonNullable<Image["buffer"]> };
+
+type ParsedImportRow = {
+  question: string;
+  answer: string;
+  tags: string[];
+  // Only ever set for a spreadsheet-sourced row (text-paste rows have
+  // nothing analogous) -- images embedded in the sheet itself, matched to
+  // this row by anchor position. See extractRowImages.
+  imageBuffers?: RowImage[];
+};
 
 // Shared by both import entry points below (pasted text and spreadsheet
 // upload) -- everything from here on (dedup, insert, the returned counts)
@@ -291,7 +305,13 @@ async function importParsedRows(
   // second time (e.g. after fixing a typo elsewhere in it) would otherwise
   // silently pile up duplicate rows forever, since bulk import has no other
   // write-time safeguard the way LLM-generated content does.
-  const toInsert: ParsedImportRow[] = [];
+  //
+  // Each surviving row gets a client-generated id up front, inserted
+  // explicitly rather than left to the column's default -- that's what
+  // lets any of its images be uploaded to a known storage path right after
+  // the insert, without depending on .insert().select() preserving array
+  // order (which Postgres/PostgREST don't actually guarantee).
+  const toInsert: (ParsedImportRow & { id: string })[] = [];
   let skippedDuplicates = 0;
   for (const row of rows) {
     const { data, error } = await supabase
@@ -315,12 +335,13 @@ async function importParsedRows(
       skippedDuplicates += 1;
       continue;
     }
-    toInsert.push(row);
+    toInsert.push({ ...row, id: crypto.randomUUID() });
   }
 
   if (toInsert.length > 0) {
     const { error } = await supabase.from("answered_questions").insert(
       toInsert.map((r) => ({
+        id: r.id,
         board_id: scope.boardId,
         grade_id: scope.gradeId,
         subject_id: scope.subjectId,
@@ -335,6 +356,31 @@ async function importParsedRows(
     if (error) {
       console.error("Bulk import insert failed:", error);
       return { error: "Something went wrong while saving. Please try again." };
+    }
+
+    // Uploaded the same way addImage does (its own random path per image
+    // under the row's "folder") -- only reachable here, after the row
+    // actually exists, since the path is keyed off its id.
+    for (const row of toInsert) {
+      if (!row.imageBuffers || row.imageBuffers.length === 0) continue;
+      const imageUrls: string[] = [];
+      for (const img of row.imageBuffers) {
+        const path = `${row.id}/${crypto.randomUUID()}`;
+        const { error: uploadError } = await supabase.storage
+          .from(IMAGE_BUCKET)
+          .upload(path, img.buffer, { contentType: `image/${img.extension}` });
+        if (uploadError) {
+          console.error("Spreadsheet row image upload failed:", uploadError);
+          continue;
+        }
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+        imageUrls.push(publicUrl);
+      }
+      if (imageUrls.length > 0) {
+        await supabase.from("answered_questions").update({ image_urls: imageUrls }).eq("id", row.id);
+      }
     }
   }
 
@@ -403,16 +449,21 @@ const ALLOWED_SPREADSHEET_TYPES = new Set([
   // is the .xlsx extension check below, not this set.
   "application/octet-stream",
 ]);
-// Generous for a spreadsheet of banked questions -- even a few thousand
-// rows of plain text comes nowhere close to this.
-const MAX_SPREADSHEET_BYTES = 5 * 1024 * 1024;
+// Generous for a spreadsheet of banked questions with a handful of
+// embedded images -- plain text alone would never come close to this, but
+// photos of textbook pages add up fast.
+const MAX_SPREADSHEET_BYTES = 20 * 1024 * 1024;
 
 // First row is headers (case-insensitive, any order): "question" (required
 // per row), "answer" (optional -- blank means the answer is an image,
 // attached afterward the normal way), "tags" (optional, comma-separated
 // within the cell, merged with the batch-level tags field rather than
 // replacing it -- e.g. every row already gets "Koshe Dekho 3.1" from the
-// form, and a few specific rows can add "hard" or "WBJEE 2023" on top).
+// form, and a few specific rows can add "hard" or "WBJEE 2023" on top). A
+// picture inserted (Excel's own Insert > Picture) anywhere within a row --
+// doesn't matter which column -- is attached to that row's answer the same
+// way addImage attaches one manually, so an image-only answer can be
+// pasted straight into the sheet instead of typed out and uploaded later.
 async function importSpreadsheet(
   file: File,
   batchTags: string[],
@@ -422,7 +473,7 @@ async function importSpreadsheet(
     return { error: "Only .xlsx spreadsheet files are supported." };
   }
   if (file.size > MAX_SPREADSHEET_BYTES) {
-    return { error: "That file is too large (max 5MB)." };
+    return { error: "That file is too large (max 20MB)." };
   }
   if (!ALLOWED_SPREADSHEET_TYPES.has(file.type)) {
     return { error: "That doesn't look like a valid .xlsx file." };
@@ -437,7 +488,9 @@ async function importSpreadsheet(
     // raw ArrayBuffer directly satisfies that declared type without a
     // pointless Buffer.from() copy in between.
     await workbook.xlsx.load(await file.arrayBuffer());
-    rows = parseSpreadsheetRows(workbook.worksheets[0], batchTags);
+    const worksheet = workbook.worksheets[0];
+    const rowImages = worksheet ? extractRowImages(workbook, worksheet) : new Map<number, RowImage[]>();
+    rows = parseSpreadsheetRows(worksheet, batchTags, rowImages);
   } catch (err) {
     console.error("Spreadsheet parse failed:", err);
     return { error: "Could not read that file. Make sure it's a valid, uncorrupted .xlsx spreadsheet." };
@@ -454,7 +507,37 @@ async function importSpreadsheet(
   return importParsedRows(rows, scope);
 }
 
-function parseSpreadsheetRows(worksheet: Worksheet | undefined, batchTags: string[]): ParsedImportRow[] {
+// Images are floating drawings anchored to a position, not cell values --
+// eachRow's per-cell walk below never sees them, so they're extracted in
+// this completely separate pass and matched to a data row by anchor
+// position instead. Keyed by the same 1-indexed row numbering eachRow
+// uses, so parseSpreadsheetRows can look a row's images up directly by its
+// own `rowNumber`.
+function extractRowImages(workbook: Workbook, worksheet: Worksheet): Map<number, RowImage[]> {
+  const byRow = new Map<number, RowImage[]>();
+
+  for (const img of worksheet.getImages()) {
+    const media = workbook.getImage(Number(img.imageId));
+    if (!media.buffer) continue;
+    // Anchor rows are 0-indexed (row 0 is the header row) -- +1 converts to
+    // eachRow's 1-indexed numbering. Floored since an image dragged to sit
+    // fully inside a row can still have a fractional offset from that
+    // row's exact top edge; its top-left corner is what tells us which row
+    // it visually belongs to.
+    const rowNumber = Math.floor(img.range.tl.row) + 1;
+    const list = byRow.get(rowNumber) ?? [];
+    list.push({ extension: media.extension, buffer: media.buffer });
+    byRow.set(rowNumber, list);
+  }
+
+  return byRow;
+}
+
+function parseSpreadsheetRows(
+  worksheet: Worksheet | undefined,
+  batchTags: string[],
+  rowImages: Map<number, RowImage[]>
+): ParsedImportRow[] {
   if (!worksheet) return [];
 
   let headers: string[] = [];
@@ -478,13 +561,24 @@ function parseSpreadsheetRows(worksheet: Worksheet | undefined, batchTags: strin
     });
 
     const question = record.question ?? "";
+    // Same requirement as the text-paste format -- "question" is always
+    // needed, even for an image-only answer, both because the dedup check
+    // matches on question text (a shared placeholder for every image-only
+    // row would make the second one onward silently match the first as a
+    // false-positive "duplicate" on any later re-import) and because it's
+    // what's actually shown as the question everywhere in the app.
     if (!question) return;
     const answer = record.answer ?? "";
     const rowTags = (record.tags ?? "")
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    rows.push({ question, answer, tags: Array.from(new Set([...batchTags, ...rowTags])) });
+    rows.push({
+      question,
+      answer,
+      tags: Array.from(new Set([...batchTags, ...rowTags])),
+      imageBuffers: rowImages.get(rowNumber),
+    });
   });
 
   return rows;
