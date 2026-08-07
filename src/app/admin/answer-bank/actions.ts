@@ -223,10 +223,28 @@ const QUESTION_PREFIX_PATTERN = /^Q:+\s*/i;
 // "A:" line is present, silently truncating anything after it.
 const ANSWER_LINE_PATTERN = /\r?\n^A:+\s*/im;
 
+export type ParsedImportRow = { question: string; answer: string; imageFilenames: string[] };
+
+// An "IMG: file1.png, file2.png" line lets one block reference the diagram(s)
+// that go with it out of a separate multi-file picker (matched by filename,
+// not position -- far more robust than the spreadsheet import's old
+// cell-anchor-based matching, and doesn't depend on any particular file
+// order). Stripped out before question/answer splitting -- wherever it
+// lands in the block (there's no fixed convention for whether it belongs
+// right after the answer or right after a question with none), it's never
+// part of the actual question/answer text.
+const IMAGE_LINE_PATTERN = /^[ \t]*IMG:\s*(.+)$/gim;
+
 // Shared by both block-splitting strategies below -- everything past "this
 // chunk of text is one Q:/A: entry" is identical either way.
-function parseBlock(rawBlock: string): { question: string; answer: string } | null {
-  const block = rawBlock.trim();
+function parseBlock(rawBlock: string): ParsedImportRow | null {
+  const imageFilenames: string[] = [];
+  const withoutImageLines = rawBlock.replace(IMAGE_LINE_PATTERN, (_match, names: string) => {
+    imageFilenames.push(...names.split(",").map((n) => n.trim()).filter(Boolean));
+    return "";
+  });
+
+  const block = withoutImageLines.trim();
   if (!block) return null;
   if (!QUESTION_PREFIX_PATTERN.test(block)) return null;
 
@@ -244,10 +262,10 @@ function parseBlock(rawBlock: string): { question: string; answer: string } | nu
   }
 
   if (!question) return null;
-  return { question, answer };
+  return { question, answer, imageFilenames };
 }
 
-function parseImportBlocks(text: string): { question: string; answer: string }[] {
+function parseImportBlocks(text: string): ParsedImportRow[] {
   // Normalize CRLF/CR up front -- pasting from a Windows-originated source
   // (or through some clipboard managers/editors) can leave "\r\n" line
   // endings, and a stray "\r" sitting right before the separator's "\n"
@@ -255,7 +273,7 @@ function parseImportBlocks(text: string): { question: string; answer: string }[]
   // every subsequent block into the answer of whatever came before it.
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const blocks = normalized.split(/\n-{3,}\n/);
-  const rows: { question: string; answer: string }[] = [];
+  const rows: ParsedImportRow[] = [];
 
   for (const rawBlock of blocks) {
     const row = parseBlock(rawBlock);
@@ -284,7 +302,7 @@ function parseImportBlocks(text: string): { question: string; answer: string }[]
 // parsed result, since the "Question <n>" line the source PDF was actually
 // observed to produce belongs to the *next* block by document order, not
 // whichever block happens to end up holding it after slicing.
-function parsePdfBlocks(text: string): { question: string; answer: string }[] {
+function parsePdfBlocks(text: string): ParsedImportRow[] {
   const normalized = text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -296,7 +314,7 @@ function parsePdfBlocks(text: string): { question: string; answer: string }[] {
     .replace(/^[ \t]*Answer[ \t]*$/gim, "");
 
   const starts = [...normalized.matchAll(/^Q:+\s*/gim)];
-  const rows: { question: string; answer: string }[] = [];
+  const rows: ParsedImportRow[] = [];
 
   for (let i = 0; i < starts.length; i++) {
     const start = starts[i].index;
@@ -322,24 +340,50 @@ export interface BulkImportState {
     skippedDuplicates: number;
     totalParsed: number;
     importedWithoutAnswer: number;
+    imagesAttached: number;
+    // "IMG: ..." references that couldn't be honored -- no file with that
+    // exact name was in the picker, or it existed but failed the same
+    // type/size check addImage applies. Surfaced by name rather than just a
+    // count so a typo is a two-second fix instead of a re-read of the
+    // whole import.
+    unmatchedImageRefs: string[];
   };
 }
 
-type ParsedImportRow = { question: string; answer: string };
+// Runs `fn` over `items` with at most `limit` in flight at once. A plain
+// sequential loop here was, by far, the slowest part of a several-hundred-
+// row import (one Postgres round trip per row, one after another); firing
+// them all via a bare Promise.all instead would open as many concurrent
+// connections as there are rows, which doesn't scale the same way. This is
+// the middle ground -- meaningfully faster without hammering the database.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
-// Shared by both import entry points below (pasted text and PDF upload) --
-// everything from here on (dedup, insert, the returned counts) is
-// identical either way; only how `rows` got produced differs. Bulk-
-// imported content is admin-curated (a real textbook or exam paper), not
-// LLM output -- it skips validateAnswerForStorage entirely (that heuristic
-// exists to catch a generated answer hedging or reading like a question
-// asked back, neither of which applies to hand-sourced content) and is
-// stored admin_approved so it's immediately servable, same trust level as
-// manually approving a pending_review entry.
+// Shared by all three import entry points below (pasted text, an uploaded
+// .txt file, and a PDF upload) -- everything from here on (dedup, image
+// matching, insert, the returned counts) is identical regardless; only how
+// `rows` got produced differs. Bulk-imported content is admin-curated (a
+// real textbook or exam paper), not LLM output -- it skips
+// validateAnswerForStorage entirely (that heuristic exists to catch a
+// generated answer hedging or reading like a question asked back, neither
+// of which applies to hand-sourced content) and is stored admin_approved so
+// it's immediately servable, same trust level as manually approving a
+// pending_review entry.
 async function importParsedRows(
   rows: ParsedImportRow[],
   tags: string[],
-  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null }
+  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null },
+  imageFiles: File[]
 ): Promise<BulkImportState> {
   const supabase = createAdminClient();
 
@@ -349,9 +393,7 @@ async function importParsedRows(
   // second time (e.g. after fixing a typo elsewhere in it) would otherwise
   // silently pile up duplicate rows forever, since bulk import has no other
   // write-time safeguard the way LLM-generated content does.
-  const toInsert: ParsedImportRow[] = [];
-  let skippedDuplicates = 0;
-  for (const row of rows) {
+  const isDuplicate = await mapWithConcurrency(rows, 8, async (row) => {
     const { data, error } = await supabase
       .rpc("search_answer_bank", {
         p_board_id: scope.boardId,
@@ -369,16 +411,66 @@ async function importParsedRows(
       // should just risk an occasional duplicate instead.
       console.error("Bulk import dedup check failed:", error);
     }
-    if (data) {
-      skippedDuplicates += 1;
-      continue;
+    return Boolean(data);
+  });
+
+  const toInsert = rows.filter((_row, i) => !isDuplicate[i]);
+  const skippedDuplicates = rows.length - toInsert.length;
+
+  // Each row gets its id assigned here rather than left to insert()'s
+  // default, so an image can be uploaded to its final "${id}/${uuid}"
+  // storage path (the same convention addImage uses) and included in the
+  // very same insert -- no separate update pass needed once the row
+  // exists, and no window where the row is briefly imageless.
+  type InsertRow = ParsedImportRow & { id: string; imageUrls: string[] };
+  const withIds: InsertRow[] = toInsert.map((r) => ({ ...r, id: crypto.randomUUID(), imageUrls: [] }));
+
+  // Images are matched to a row by filename (from that block's "IMG:"
+  // line), against whatever was actually included in the multi-file
+  // picker -- not by upload order or position, which is exactly the
+  // fragile matching the old spreadsheet-embedded-image import relied on
+  // and this replaces.
+  const filesByName = new Map(imageFiles.filter((f) => f.size > 0).map((f) => [f.name, f]));
+  const unmatchedImageRefs = new Set<string>();
+  let imagesAttached = 0;
+
+  const uploadTasks: { row: InsertRow; filename: string; file: File }[] = [];
+  for (const row of withIds) {
+    for (const filename of row.imageFilenames) {
+      const file = filesByName.get(filename);
+      if (!file || file.size > MAX_IMAGE_BYTES || !ALLOWED_IMAGE_TYPES.has(file.type)) {
+        unmatchedImageRefs.add(filename);
+        continue;
+      }
+      uploadTasks.push({ row, filename, file });
     }
-    toInsert.push(row);
   }
 
-  if (toInsert.length > 0) {
+  await mapWithConcurrency(uploadTasks, 8, async ({ row, filename, file }) => {
+    const path = `${row.id}/${crypto.randomUUID()}`;
+    const { error: uploadError } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(path, file, { contentType: file.type });
+    if (uploadError) {
+      console.error("Bulk import image upload failed:", uploadError);
+      unmatchedImageRefs.add(filename);
+      return;
+    }
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+    // Synchronous push, so concurrent uploads for the same multi-image row
+    // never race each other -- JS has no true parallelism within a single
+    // request, only interleaved async tasks, and nothing awaits between
+    // reading `row` and mutating it here.
+    row.imageUrls.push(publicUrl);
+    imagesAttached += 1;
+  });
+
+  if (withIds.length > 0) {
     const { error } = await supabase.from("answered_questions").insert(
-      toInsert.map((r) => ({
+      withIds.map((r) => ({
+        id: r.id,
         board_id: scope.boardId,
         grade_id: scope.gradeId,
         subject_id: scope.subjectId,
@@ -388,6 +480,7 @@ async function importParsedRows(
         answer: r.answer,
         validation_status: "admin_approved" as const,
         tags,
+        image_urls: r.imageUrls,
       }))
     );
     if (error) {
@@ -399,10 +492,12 @@ async function importParsedRows(
   revalidatePath("/admin/answer-bank");
   return {
     success: {
-      imported: toInsert.length,
+      imported: withIds.length,
       skippedDuplicates,
       totalParsed: rows.length,
-      importedWithoutAnswer: toInsert.filter((r) => !r.answer).length,
+      importedWithoutAnswer: withIds.filter((r) => !r.answer).length,
+      imagesAttached,
+      unmatchedImageRefs: [...unmatchedImageRefs],
     },
   };
 }
@@ -427,19 +522,42 @@ export async function bulkImportAnswers(
     return { error: "Board, grade, subject, and medium are all required." };
   }
 
-  // The two input methods (pasted text vs. a PDF upload) share this one
-  // action, distinguished by which of these two fields is actually
-  // present, rather than being two separate actions/forms -- the scope
-  // fields above are identical for either, and BulkImportForm's toggle just
-  // swaps which content input is shown.
-  const file = formData.get("file") as File | null;
-  if (file && file.size > 0) {
-    return importPdf(file, tags, { boardId, gradeId, subjectId, medium, topicId });
+  const scope = { boardId, gradeId, subjectId, medium, topicId };
+
+  // One multi-file picker regardless of content source below -- each image
+  // is matched to a row by its own "IMG:" reference (see parseBlock), not
+  // by which mode the form happened to be in.
+  const imageFiles = formData.getAll("images").filter((f): f is File => f instanceof File);
+
+  // Three ways to supply the actual Q:/A: content, distinguished by which
+  // of these fields is actually present, rather than three separate
+  // actions/forms -- the scope fields and image picker above are identical
+  // regardless, and BulkImportForm's toggle just swaps which content input
+  // is shown.
+  const pdfFile = formData.get("pdfFile") as File | null;
+  if (pdfFile && pdfFile.size > 0) {
+    return importPdf(pdfFile, tags, scope, imageFiles);
   }
 
-  const text = (formData.get("bulkText") as string | null) ?? "";
+  // A .txt upload takes priority over the textarea when both are present --
+  // it exists specifically for a paste too large to comfortably type/edit
+  // in a browser textarea, so if it's there, it's the intended source.
+  const textFile = formData.get("textFile") as File | null;
+  let text: string;
+  if (textFile && textFile.size > 0) {
+    if (!textFile.name.toLowerCase().endsWith(".txt")) {
+      return { error: "Only .txt files are supported for the text upload." };
+    }
+    if (textFile.size > MAX_TEXT_FILE_BYTES) {
+      return { error: "That file is too large (max 5MB of text)." };
+    }
+    text = await textFile.text();
+  } else {
+    text = (formData.get("bulkText") as string | null) ?? "";
+  }
+
   if (!text.trim()) {
-    return { error: "Paste some Q:/A: text, or choose a PDF file, to import." };
+    return { error: "Paste some Q:/A: text, upload a .txt file, or choose a PDF file, to import." };
   }
 
   const rows = parseImportBlocks(text);
@@ -451,8 +569,10 @@ export async function bulkImportAnswers(
     };
   }
 
-  return importParsedRows(rows, tags, { boardId, gradeId, subjectId, medium, topicId });
+  return importParsedRows(rows, tags, scope, imageFiles);
 }
+
+const MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024;
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
@@ -468,7 +588,8 @@ const MAX_PDF_BYTES = 20 * 1024 * 1024;
 async function importPdf(
   file: File,
   tags: string[],
-  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null }
+  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null },
+  imageFiles: File[]
 ): Promise<BulkImportState> {
   if (!file.name.toLowerCase().endsWith(".pdf")) {
     return { error: "Only .pdf files are supported." };
@@ -499,5 +620,5 @@ async function importPdf(
     };
   }
 
-  return importParsedRows(rows, tags, scope);
+  return importParsedRows(rows, tags, scope, imageFiles);
 }

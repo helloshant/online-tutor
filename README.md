@@ -391,9 +391,16 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `BulkImportForm`, a client component using `useActionState` for flash feedback — same pattern as
   `SetPasswordForm`) accepts the same `Q: ... / A: ... / ---` block format the orchestrator's
   exercise generation uses — `A:` itself is optional, for a question whose entire answer is a
-  diagram or handwritten working rather than text; it imports with an empty answer, and the image
-  gets attached to that row afterward the normal way (see "Answer bank images" above) — a
-  board/grade/subject/medium selection, an *optional* topic (its own
+  diagram or handwritten working rather than text. A diagram doesn't have to be attached
+  afterward the normal per-row way (see "Answer bank images" above) either: an `IMG:
+  filename.png[, filename2.png]` line anywhere in a block (one or more filenames,
+  comma-separated) marks which of the files picked in a second, multi-select file input belong
+  to that question — matched by filename against whatever was actually selected, not by upload
+  order or position, so there's no fragile anchoring to get wrong the way the earlier
+  spreadsheet-embedded-image attempt had. A reference to a filename that wasn't actually
+  selected (a typo, or a file left out of the picker) doesn't fail the import; that question
+  still goes in, and its unmatched reference comes back in the result so it can be fixed by
+  hand — a board/grade/subject/medium selection, an *optional* topic (its own
   dropdown, populated client-side once all four scope fields are picked — left unset by default,
   since a book chapter or exam paper usually spans several topics, but assignable when a specific
   question genuinely belongs to one), and a comma-separated tag list applied to every question in
@@ -402,7 +409,15 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   authenticates as `service_role`) before being written, so re-importing the same source a second
   time skips whatever's already banked instead of duplicating it — and the form reports back exactly
   how many of the parsed questions were imported vs. skipped as duplicates, or a specific error if
-  none could be parsed at all (no more silent no-ops on a malformed paste). Bulk-imported rows still
+  none could be parsed at all (no more silent no-ops on a malformed paste). Those dedup checks run
+  with bounded concurrency (`mapWithConcurrency`, 8 in flight at a time) rather than one at a time —
+  a plain sequential loop was, by far, the slowest part of importing a source with hundreds of
+  questions (one Postgres round trip per row, back to back), and a bare `Promise.all` over the whole
+  batch would just as clumsily open as many concurrent connections as there are rows. Row IDs are
+  generated client-side (`crypto.randomUUID()`) before the insert rather than left to the column's
+  own default, so any matched image can be uploaded straight to its final `${id}/${uuid}` storage
+  path (same convention `addImage` uses) and included in the very same insert — no separate update
+  pass, and no window where a freshly-imported row is briefly imageless. Bulk-imported rows still
   skip `validateAnswerForStorage` entirely (that heuristic exists to catch an LLM-generated answer
   hedging or reading like a question asked back — neither applies to hand-sourced content) and are
   stored `admin_approved` immediately. `parseImportBlocks` normalizes `\r\n`/`\r` to `\n` before
@@ -412,24 +427,42 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   subsequent block into the answer of whatever came before it (the same fix was applied to the
   orchestrator's identical, deliberately-duplicated `parseGeneratedExercises` in `exerciseParser.ts`,
   which it's kept in sync with). The same form has a **"Paste text" / "Upload PDF"** toggle
-  (`mode`, client-only — it just switches which control renders, since the server action tells the
-  two apart by whether a `file` was actually submitted, not by any toggle value): a scanned textbook
-  chapter or exam paper as a PDF can be uploaded directly instead of copy-pasting its text out by
-  hand. `bulkImportAnswers` branches to `importPdf` when a non-empty `file` is present; it extracts
-  the PDF's selectable/embedded text with `unpdf` (`getDocumentProxy` + `extractText(pdf,
-  { mergePages: true })` — merged rather than per-page, since a `Q:`/`A:` block can straddle a page
-  break) and hands the result to `parsePdfBlocks` rather than the paste box's `parseImportBlocks` —
-  the two share a `parseBlock` helper for turning one chunk of text into a question/answer, but split
-  the raw text into those chunks differently. Pasted text uses an explicit `---` line as the block
-  separator because there's no other reliable boundary in freehand typing; a PDF's questions already
-  run one after another on the page with no such marker, so `parsePdfBlocks` instead treats every
-  line starting with `Q:` as the start of a new block (requiring `---` there too was the original
-  bug — a real PDF's whole extracted text became one giant "block" that didn't start with `Q:`,
-  because of a title/header line above the first question, and the import reported zero results).
-  Otherwise this is still "get the text out, then treat it like a paste," not OCR or AI-based
-  extraction, so it only works on a PDF with a real text layer (a scan or photo of a page with no
-  embedded text extracts nothing and reports the same "couldn't find any Q: blocks" error as an
-  empty paste). `unpdf` was chosen over the more common
+  (`mode`, client-only — it just switches which controls render, since the server action tells the
+  content source apart by which of `pdfFile`/`textFile`/`bulkText` was actually submitted, not by
+  any toggle value): a scanned textbook chapter or exam paper as a PDF can be uploaded directly
+  instead of copy-pasting its text out by hand. "Paste text" mode itself accepts the content two
+  ways — typed/pasted into the `bulkText` textarea, or as an uploaded `.txt` file (`textFile`,
+  preferred over the textarea when both are present) carrying the exact same `Q:`/`A:`/`---`/`IMG:`
+  format — hundreds of entries are easier to author, review, and fix in a real text editor than in a
+  browser `<textarea>`, and both sources run through the identical `parseImportBlocks`. `pdfFile`
+  present routes to `importPdf` instead; it extracts the PDF's selectable/embedded text with `unpdf`
+  (`getDocumentProxy` + `extractText(pdf, { mergePages: true })` — merged rather than per-page, since
+  a `Q:`/`A:` block can straddle a page break) and hands the result to `parsePdfBlocks` rather than
+  the paste path's `parseImportBlocks` — the two share a `parseBlock` helper for turning one chunk of
+  text into a question/answer/image-reference triple, but split the raw text into those chunks
+  differently. Pasted or uploaded text uses an explicit `---` line as the block separator because
+  there's no other reliable boundary in freehand-authored content; a PDF's questions already run one
+  after another on the page with no such marker, so `parsePdfBlocks` instead treats every line
+  starting with `Q:` as the start of a new block (requiring `---` there too was the original bug — a
+  real PDF's whole extracted text became one giant "block" that didn't start with `Q:`, because of a
+  title/header line above the first question, and the import reported zero results). Also PDF-only:
+  a worksheet template that prints a human-readable "Question `<n>`" heading above each `Q:` marker
+  and a plain "Answer" heading above each `A:` marker (common in print-styled answer keys) would
+  otherwise leak onto the end of the *previous* row's answer/question as trailing noise, since a
+  block only knows where the *next* `Q:` starts, not where the current entry's real content ends —
+  both heading conventions, and a `- - -` (space-separated) variant of the dash separator some PDF
+  text layers produce instead of flush dashes, are stripped before block boundaries are found.
+  `QUESTION_PREFIX_PATTERN`/`ANSWER_LINE_PATTERN` match one-or-more colons (`Q:+`/`A:+`) rather than
+  exactly one, for the same PDF-specific reason: a source that fakes a bold label by drawing it
+  twice at a tiny offset (common when a script's embedded font subset has no true bold variant, e.g.
+  Bengali) hands the text layer back a doubled `Q::`/`A::`. Otherwise this is still "get the text
+  out, then treat it like a paste," not OCR or AI-based extraction, so it only works on a PDF with a
+  real text layer (a scan or photo of a page with no embedded text extracts nothing and reports the
+  same "couldn't find any Q: blocks" error as an empty paste) — and it inherits any content-fidelity
+  defect already baked into that text layer (the same bold-via-double-draw trick that doubles a
+  label's colon can double an entire clause of body text too, which `Q:+`/`A:+` can't and doesn't try
+  to undo, since collapsing a merely-repeated real phrase would be unsafe to do blindly). `unpdf` was
+  chosen over the more common
   `pdf-parse`/`pdfjs-dist` direct usage because it's built and actively maintained specifically for
   serverless/edge Node runtimes with no native bindings, which is what a Next.js Server Action runs
   under. Capped at `MAX_PDF_BYTES` (20MB) — well above a typical scanned-chapter PDF — which in turn

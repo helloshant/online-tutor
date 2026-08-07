@@ -83,8 +83,11 @@ export function BulkImportForm({
           already banked for this board/grade/subject/medium and skipped if a close match already
           exists, so re-importing the same source twice won&apos;t create duplicates. The{" "}
           <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> line is optional — leave it
-          out for a question whose entire answer is a diagram or handwritten working, then attach
-          it as an image on that row afterward (below) instead of typing it out.
+          out for a question whose entire answer is a diagram or handwritten working. A diagram can
+          be attached right in this same import: add a line{" "}
+          <code className="rounded bg-brand/10 px-1 py-0.5">IMG: filename.png</code> anywhere in
+          that question&apos;s block, pick the matching file(s) below, and they&apos;re uploaded and
+          linked to the right row automatically — no separate per-row step needed.
         </p>
         <div className="flex gap-4 text-sm">
           <label className="flex items-center gap-1.5">
@@ -186,22 +189,36 @@ export function BulkImportForm({
           />
         </div>
         {mode === "text" ? (
-          <textarea
-            key={state?.success ? "cleared" : "text"}
-            name="bulkText"
-            rows={8}
-            required
-            placeholder={
-              "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
-            }
-            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-          />
+          <div className="space-y-2">
+            <textarea
+              key={state?.success ? "cleared" : "text"}
+              name="bulkText"
+              rows={8}
+              placeholder={
+                "Q: <question>\nA: <complete solution>\nIMG: diagram.png\n---\nQ: <next question>\nA: <its solution>"
+              }
+              className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+            />
+            <div className="flex items-center gap-2">
+              <label htmlFor="textFile" className="whitespace-nowrap text-xs text-foreground/60">
+                …or for a large batch, upload a .txt file in the same format instead:
+              </label>
+              <input
+                key={state?.success ? "cleared" : "textFile"}
+                id="textFile"
+                type="file"
+                name="textFile"
+                accept=".txt,text/plain"
+                className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-xs file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs"
+              />
+            </div>
+          </div>
         ) : (
           <div className="space-y-1">
             <input
-              key={state?.success ? "cleared" : "file"}
+              key={state?.success ? "cleared" : "pdfFile"}
               type="file"
-              name="file"
+              name="pdfFile"
               accept=".pdf,application/pdf"
               required
               className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
@@ -218,6 +235,21 @@ export function BulkImportForm({
             </p>
           </div>
         )}
+        <div className="space-y-1">
+          <input
+            key={state?.success ? "cleared" : "images"}
+            type="file"
+            name="images"
+            accept="image/*"
+            multiple
+            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
+          />
+          <p className="text-xs text-foreground/60">
+            Optional: select every diagram file referenced by an{" "}
+            <code className="rounded bg-brand/10 px-1 py-0.5">IMG:</code> line above, all at once —
+            each is matched to its question by filename, so pick as many as you need in one go.
+          </p>
+        </div>
         <button
           disabled={pending}
           className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
@@ -226,20 +258,34 @@ export function BulkImportForm({
         </button>
         {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
         {state?.success && (
-          <p className="text-sm text-green-600">
-            Imported {state.success.imported} of {state.success.totalParsed} question
-            {state.success.totalParsed === 1 ? "" : "s"}
-            {state.success.skippedDuplicates > 0
-              ? ` (${state.success.skippedDuplicates} skipped as duplicate${
-                  state.success.skippedDuplicates === 1 ? "" : "s"
-                } of what's already banked)`
-              : ""}
-            .
-            {state.success.importedWithoutAnswer > 0 &&
-              ` ${state.success.importedWithoutAnswer} imported with no text answer — attach an image to ${
-                state.success.importedWithoutAnswer === 1 ? "it" : "them"
-              } below.`}
-          </p>
+          <div className="space-y-1">
+            <p className="text-sm text-green-600">
+              Imported {state.success.imported} of {state.success.totalParsed} question
+              {state.success.totalParsed === 1 ? "" : "s"}
+              {state.success.skippedDuplicates > 0
+                ? ` (${state.success.skippedDuplicates} skipped as duplicate${
+                    state.success.skippedDuplicates === 1 ? "" : "s"
+                  } of what's already banked)`
+                : ""}
+              .
+              {state.success.importedWithoutAnswer > 0 &&
+                ` ${state.success.importedWithoutAnswer} imported with no text answer — attach an image to ${
+                  state.success.importedWithoutAnswer === 1 ? "it" : "them"
+                } below.`}
+              {state.success.imagesAttached > 0 &&
+                ` ${state.success.imagesAttached} image${
+                  state.success.imagesAttached === 1 ? "" : "s"
+                } attached via IMG: references.`}
+            </p>
+            {state.success.unmatchedImageRefs.length > 0 && (
+              <p className="text-sm text-amber-600">
+                Couldn&apos;t match {state.success.unmatchedImageRefs.length === 1 ? "this" : "these"}{" "}
+                IMG: reference{state.success.unmatchedImageRefs.length === 1 ? "" : "s"} to a selected
+                file (typo, or not picked above?): {state.success.unmatchedImageRefs.join(", ")}. That
+                question/answer still imported — attach the image manually on its row below instead.
+              </p>
+            )}
+          </div>
         )}
       </form>
     </details>
