@@ -1,7 +1,6 @@
 "use server";
 
 import crypto from "node:crypto";
-import { extractText, getDocumentProxy } from "unpdf";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
@@ -207,13 +206,7 @@ export async function removeImage(id: string, imageUrl: string) {
 // entire answer is a diagram/handwritten working (image-only, no text) is
 // imported with an empty answer, then the admin attaches the image(s)
 // afterward via addImage on that row in the main list.
-// "Q:+" rather than "Q:" -- a PDF exported from a source that fakes a bold
-// label by drawing it twice at a tiny offset (common for scripts with no
-// true bold variant embedded, e.g. a Bengali font subset) hands the text
-// layer back a doubled "Q::" for what only ever looked like one colon on
-// the page; matching one-or-more keeps that from leaving a stray leading
-// ":" on every imported question.
-const QUESTION_PREFIX_PATTERN = /^Q:+\s*/i;
+const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
 // Not anchored to the very start of the remaining text (unlike
 // QUESTION_PREFIX_PATTERN) -- it's searched for anywhere via .match() below,
 // which is what lets a multi-line question be told apart from a one-line
@@ -221,7 +214,7 @@ const QUESTION_PREFIX_PATTERN = /^Q:+\s*/i;
 // "\nA:" suffix would instead just stop at the block's first line break
 // (its earliest opportunity to satisfy $ in multiline mode) whenever no
 // "A:" line is present, silently truncating anything after it.
-const ANSWER_LINE_PATTERN = /\r?\n^A:+\s*/im;
+const ANSWER_LINE_PATTERN = /\r?\n^A:\s*/im;
 
 export type ParsedImportRow = { question: string; answer: string; imageFilenames: string[] };
 
@@ -235,8 +228,6 @@ export type ParsedImportRow = { question: string; answer: string; imageFilenames
 // part of the actual question/answer text.
 const IMAGE_LINE_PATTERN = /^[ \t]*IMG:\s*(.+)$/gim;
 
-// Shared by both block-splitting strategies below -- everything past "this
-// chunk of text is one Q:/A: entry" is identical either way.
 function parseBlock(rawBlock: string): ParsedImportRow | null {
   const imageFilenames: string[] = [];
   const withoutImageLines = rawBlock.replace(IMAGE_LINE_PATTERN, (_match, names: string) => {
@@ -277,50 +268,6 @@ function parseImportBlocks(text: string): ParsedImportRow[] {
 
   for (const rawBlock of blocks) {
     const row = parseBlock(rawBlock);
-    if (row) rows.push(row);
-  }
-
-  return rows;
-}
-
-// A PDF's extracted text has no "---" separator lines to split on the way a
-// hand-typed paste does -- a textbook page or exam paper just runs one
-// question after another with no blank convention marking where one ends
-// and the next begins. So instead of requiring an explicit separator, each
-// line starting with "Q:" is itself treated as the start of a new block --
-// the same marker parseBlock already needs to recognize a block as a
-// question in the first place. Any "---" the source document happens to
-// contain anyway is stripped first so it doesn't leak into an answer's text.
-//
-// A block runs from one "Q:" up to (but not stopping any earlier than) the
-// next one, so any print-only heading a worksheet template puts between an
-// answer and the following question -- a "Question <n>" label above the
-// next "Q:" marker, an "Answer" label above the "A:" marker -- would
-// otherwise get swept into the previous row's answer/question text as
-// trailing noise, since nothing else marks where the real content ends.
-// Both are stripped as whole lines up front rather than trimmed off the
-// parsed result, since the "Question <n>" line the source PDF was actually
-// observed to produce belongs to the *next* block by document order, not
-// whichever block happens to end up holding it after slicing.
-function parsePdfBlocks(text: string): ParsedImportRow[] {
-  const normalized = text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    // A line of 3+ dashes, tolerating the individual dashes coming out
-    // space-separated ("- - -") -- text extraction can insert a space
-    // between adjacent glyphs that render flush together on the page.
-    .replace(/^[ \t]*(?:-[ \t]*){3,}$/gm, "")
-    .replace(/^[ \t]*Question\s+\S+[ \t]*$/gim, "")
-    .replace(/^[ \t]*Answer[ \t]*$/gim, "");
-
-  const starts = [...normalized.matchAll(/^Q:+\s*/gim)];
-  const rows: ParsedImportRow[] = [];
-
-  for (let i = 0; i < starts.length; i++) {
-    const start = starts[i].index;
-    if (start === undefined) continue;
-    const end = starts[i + 1]?.index ?? normalized.length;
-    const row = parseBlock(normalized.slice(start, end));
     if (row) rows.push(row);
   }
 
@@ -369,10 +316,10 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
-// Shared by all three import entry points below (pasted text, an uploaded
-// .txt file, and a PDF upload) -- everything from here on (dedup, image
-// matching, insert, the returned counts) is identical regardless; only how
-// `rows` got produced differs. Bulk-imported content is admin-curated (a
+// Shared by both import entry points below (pasted text and an uploaded
+// .txt file) -- everything from here on (dedup, image matching, insert, the
+// returned counts) is identical regardless; only how `rows` got produced
+// differs. Bulk-imported content is admin-curated (a
 // real textbook or exam paper), not LLM output -- it skips
 // validateAnswerForStorage entirely (that heuristic exists to catch a
 // generated answer hedging or reading like a question asked back, neither
@@ -529,19 +476,12 @@ export async function bulkImportAnswers(
   // by which mode the form happened to be in.
   const imageFiles = formData.getAll("images").filter((f): f is File => f instanceof File);
 
-  // Three ways to supply the actual Q:/A: content, distinguished by which
-  // of these fields is actually present, rather than three separate
-  // actions/forms -- the scope fields and image picker above are identical
-  // regardless, and BulkImportForm's toggle just swaps which content input
-  // is shown.
-  const pdfFile = formData.get("pdfFile") as File | null;
-  if (pdfFile && pdfFile.size > 0) {
-    return importPdf(pdfFile, tags, scope, imageFiles);
-  }
-
-  // A .txt upload takes priority over the textarea when both are present --
-  // it exists specifically for a paste too large to comfortably type/edit
-  // in a browser textarea, so if it's there, it's the intended source.
+  // Two ways to supply the actual Q:/A: content, distinguished by which of
+  // these fields is actually present -- the scope fields and image picker
+  // above are identical regardless. A .txt upload takes priority over the
+  // textarea when both are present -- it exists specifically for a paste
+  // too large to comfortably type/edit in a browser textarea, so if it's
+  // there, it's the intended source.
   const textFile = formData.get("textFile") as File | null;
   let text: string;
   if (textFile && textFile.size > 0) {
@@ -557,7 +497,7 @@ export async function bulkImportAnswers(
   }
 
   if (!text.trim()) {
-    return { error: "Paste some Q:/A: text, upload a .txt file, or choose a PDF file, to import." };
+    return { error: "Paste some Q:/A: text, or upload a .txt file, to import." };
   }
 
   const rows = parseImportBlocks(text);
@@ -573,52 +513,3 @@ export async function bulkImportAnswers(
 }
 
 const MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024;
-
-const MAX_PDF_BYTES = 20 * 1024 * 1024;
-
-// The PDF's extracted text is run through the same Q:/A: convention as the
-// pasted-text format, minus the "---" separator requirement (parsePdfBlocks
-// above splits on each "Q:" line instead) -- this isn't OCR or an
-// AI-driven "read the questions off this scanned page" extractor, just a
-// different way of getting Q:/A: formatted text into the importer, for a
-// document that started life as (or was exported to) a PDF instead of
-// being pasted directly. A scanned/photographed PDF with no selectable
-// text produces no usable text at all and every block gets skipped -- same
-// as pasting nothing.
-async function importPdf(
-  file: File,
-  tags: string[],
-  scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null },
-  imageFiles: File[]
-): Promise<BulkImportState> {
-  if (!file.name.toLowerCase().endsWith(".pdf")) {
-    return { error: "Only .pdf files are supported." };
-  }
-  if (file.size > MAX_PDF_BYTES) {
-    return { error: "That file is too large (max 20MB)." };
-  }
-  if (file.type && file.type !== "application/pdf") {
-    return { error: "That doesn't look like a valid .pdf file." };
-  }
-
-  let rows: ParsedImportRow[];
-  try {
-    const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
-    const { text } = await extractText(pdf, { mergePages: true });
-    rows = parsePdfBlocks(text);
-  } catch (err) {
-    console.error("PDF parse failed:", err);
-    return { error: "Could not read that file. Make sure it's a valid, uncorrupted .pdf." };
-  }
-
-  if (rows.length === 0) {
-    return {
-      error:
-        'Could not find any "Q: ..." blocks in that PDF\'s text. This only reads selectable/embedded ' +
-        'text (not a scan/photo with no text layer) -- make sure each question starts a line with ' +
-        '"Q:" (a "---" separator is not needed here, unlike the paste box).',
-    };
-  }
-
-  return importParsedRows(rows, tags, scope, imageFiles);
-}

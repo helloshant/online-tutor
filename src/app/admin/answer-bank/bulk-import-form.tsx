@@ -34,7 +34,6 @@ export function BulkImportForm({
   const [topicId, setTopicId] = useState("");
   const [topics, setTopics] = useState<TopicOption[]>([]);
   const hasFullScope = Boolean(boardId && gradeId && subjectId && medium);
-  const [mode, setMode] = useState<"text" | "pdf">("text");
 
   // topicId is reset directly in each scope field's own change handler
   // below, not here -- any state a fetch effect resets as a side effect of
@@ -89,26 +88,6 @@ export function BulkImportForm({
           that question&apos;s block, pick the matching file(s) below, and they&apos;re uploaded and
           linked to the right row automatically — no separate per-row step needed.
         </p>
-        <div className="flex gap-4 text-sm">
-          <label className="flex items-center gap-1.5">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "text"}
-              onChange={() => setMode("text")}
-            />
-            Paste text
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "pdf"}
-              onChange={() => setMode("pdf")}
-            />
-            Upload PDF
-          </label>
-        </div>
         <div className="flex flex-wrap gap-2">
           <select
             name="boardId"
@@ -188,53 +167,30 @@ export function BulkImportForm({
             className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           />
         </div>
-        {mode === "text" ? (
-          <div className="space-y-2">
-            <textarea
-              key={state?.success ? "cleared" : "text"}
-              name="bulkText"
-              rows={8}
-              placeholder={
-                "Q: <question>\nA: <complete solution>\nIMG: diagram.png\n---\nQ: <next question>\nA: <its solution>"
-              }
-              className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-            />
-            <div className="flex items-center gap-2">
-              <label htmlFor="textFile" className="whitespace-nowrap text-xs text-foreground/60">
-                …or for a large batch, upload a .txt file in the same format instead:
-              </label>
-              <input
-                key={state?.success ? "cleared" : "textFile"}
-                id="textFile"
-                type="file"
-                name="textFile"
-                accept=".txt,text/plain"
-                className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-xs file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-1">
+        <div className="space-y-2">
+          <textarea
+            key={state?.success ? "cleared" : "text"}
+            name="bulkText"
+            rows={8}
+            placeholder={
+              "Q: <question>\nA: <complete solution>\nIMG: diagram.png\n---\nQ: <next question>\nA: <its solution>"
+            }
+            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+          />
+          <div className="flex items-center gap-2">
+            <label htmlFor="textFile" className="whitespace-nowrap text-xs text-foreground/60">
+              …or for a large batch, upload a .txt file in the same format instead:
+            </label>
             <input
-              key={state?.success ? "cleared" : "pdfFile"}
+              key={state?.success ? "cleared" : "textFile"}
+              id="textFile"
               type="file"
-              name="pdfFile"
-              accept=".pdf,application/pdf"
-              required
-              className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
+              name="textFile"
+              accept=".txt,text/plain"
+              className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-xs file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs"
             />
-            <p className="text-xs text-foreground/60">
-              The PDF must have selectable/embedded text (a scan or photo with no text layer
-              won&apos;t work), with each question starting a line with{" "}
-              <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code> and its answer on a line
-              starting <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> — unlike the
-              paste box, no <code className="rounded bg-brand/10 px-1 py-0.5">---</code> separator
-              is needed between questions here; each new{" "}
-              <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code> line already marks where
-              the next one starts. Max 20MB.
-            </p>
           </div>
-        )}
+        </div>
         <div className="space-y-1">
           <input
             key={state?.success ? "cleared" : "images"}

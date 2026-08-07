@@ -426,49 +426,18 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   separator's newline used to stop the split from matching there at all, silently swallowing every
   subsequent block into the answer of whatever came before it (the same fix was applied to the
   orchestrator's identical, deliberately-duplicated `parseGeneratedExercises` in `exerciseParser.ts`,
-  which it's kept in sync with). The same form has a **"Paste text" / "Upload PDF"** toggle
-  (`mode`, client-only — it just switches which controls render, since the server action tells the
-  content source apart by which of `pdfFile`/`textFile`/`bulkText` was actually submitted, not by
-  any toggle value): a scanned textbook chapter or exam paper as a PDF can be uploaded directly
-  instead of copy-pasting its text out by hand. "Paste text" mode itself accepts the content two
-  ways — typed/pasted into the `bulkText` textarea, or as an uploaded `.txt` file (`textFile`,
-  preferred over the textarea when both are present) carrying the exact same `Q:`/`A:`/`---`/`IMG:`
-  format — hundreds of entries are easier to author, review, and fix in a real text editor than in a
-  browser `<textarea>`, and both sources run through the identical `parseImportBlocks`. `pdfFile`
-  present routes to `importPdf` instead; it extracts the PDF's selectable/embedded text with `unpdf`
-  (`getDocumentProxy` + `extractText(pdf, { mergePages: true })` — merged rather than per-page, since
-  a `Q:`/`A:` block can straddle a page break) and hands the result to `parsePdfBlocks` rather than
-  the paste path's `parseImportBlocks` — the two share a `parseBlock` helper for turning one chunk of
-  text into a question/answer/image-reference triple, but split the raw text into those chunks
-  differently. Pasted or uploaded text uses an explicit `---` line as the block separator because
-  there's no other reliable boundary in freehand-authored content; a PDF's questions already run one
-  after another on the page with no such marker, so `parsePdfBlocks` instead treats every line
-  starting with `Q:` as the start of a new block (requiring `---` there too was the original bug — a
-  real PDF's whole extracted text became one giant "block" that didn't start with `Q:`, because of a
-  title/header line above the first question, and the import reported zero results). Also PDF-only:
-  a worksheet template that prints a human-readable "Question `<n>`" heading above each `Q:` marker
-  and a plain "Answer" heading above each `A:` marker (common in print-styled answer keys) would
-  otherwise leak onto the end of the *previous* row's answer/question as trailing noise, since a
-  block only knows where the *next* `Q:` starts, not where the current entry's real content ends —
-  both heading conventions, and a `- - -` (space-separated) variant of the dash separator some PDF
-  text layers produce instead of flush dashes, are stripped before block boundaries are found.
-  `QUESTION_PREFIX_PATTERN`/`ANSWER_LINE_PATTERN` match one-or-more colons (`Q:+`/`A:+`) rather than
-  exactly one, for the same PDF-specific reason: a source that fakes a bold label by drawing it
-  twice at a tiny offset (common when a script's embedded font subset has no true bold variant, e.g.
-  Bengali) hands the text layer back a doubled `Q::`/`A::`. Otherwise this is still "get the text
-  out, then treat it like a paste," not OCR or AI-based extraction, so it only works on a PDF with a
-  real text layer (a scan or photo of a page with no embedded text extracts nothing and reports the
-  same "couldn't find any Q: blocks" error as an empty paste) — and it inherits any content-fidelity
-  defect already baked into that text layer (the same bold-via-double-draw trick that doubles a
-  label's colon can double an entire clause of body text too, which `Q:+`/`A:+` can't and doesn't try
-  to undo, since collapsing a merely-repeated real phrase would be unsafe to do blindly). `unpdf` was
-  chosen over the more common
-  `pdf-parse`/`pdfjs-dist` direct usage because it's built and actively maintained specifically for
-  serverless/edge Node runtimes with no native bindings, which is what a Next.js Server Action runs
-  under. Capped at `MAX_PDF_BYTES` (20MB) — well above a typical scanned-chapter PDF — which in turn
-  required raising `next.config.ts`'s `experimental.serverActions.bodySizeLimit` from Next's 1MB
-  default to `24mb`; that default turned out to already be silently under the *existing* 4MB
-  single-image-upload cap too, since nothing this size had been sent through a Server Action before.
+  which it's kept in sync with). The content itself can be supplied two ways — typed/pasted into the
+  `bulkText` textarea, or as an uploaded `.txt` file (`textFile`, preferred over the textarea when
+  both are present) carrying the exact same `Q:`/`A:`/`---`/`IMG:` format — hundreds of entries are
+  easier to author, review, and fix in a real text editor than in a browser `<textarea>`, and both
+  sources run through the identical `parseImportBlocks`. This form previously also accepted a direct
+  PDF upload (extracting a PDF's text layer with `unpdf` and feeding it through a PDF-specific block
+  splitter), but that path was removed — text (typed, pasted, or as a `.txt` file) is the one
+  supported source now. Raising `next.config.ts`'s `experimental.serverActions.bodySizeLimit` from
+  Next's 1MB default to `24mb` stays in place regardless, since a `.txt` file up to
+  `MAX_TEXT_FILE_BYTES` plus several diagram images can still add up past the default — and that
+  default turned out to already be silently under the *existing* 4MB single-image-upload cap too,
+  since nothing this size had been sent through a Server Action before.
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither

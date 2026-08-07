@@ -7,9 +7,10 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     serverActions: {
-      // Default is 1MB, which is well under the answer bank's PDF bulk
-      // import cap (20MB, see MAX_PDF_BYTES in admin/answer-bank/actions.ts)
-      // and was already silently under the 4MB single-image-upload cap too.
+      // Default is 1MB, which is well under a bulk import submission (a
+      // .txt file up to MAX_TEXT_FILE_BYTES plus several diagram images at
+      // up to MAX_IMAGE_BYTES each, see admin/answer-bank/actions.ts) and
+      // was already silently under the single-image-upload cap too.
       bodySizeLimit: "24mb",
     },
   },
