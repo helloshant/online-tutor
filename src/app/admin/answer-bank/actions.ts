@@ -207,7 +207,13 @@ export async function removeImage(id: string, imageUrl: string) {
 // entire answer is a diagram/handwritten working (image-only, no text) is
 // imported with an empty answer, then the admin attaches the image(s)
 // afterward via addImage on that row in the main list.
-const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
+// "Q:+" rather than "Q:" -- a PDF exported from a source that fakes a bold
+// label by drawing it twice at a tiny offset (common for scripts with no
+// true bold variant embedded, e.g. a Bengali font subset) hands the text
+// layer back a doubled "Q::" for what only ever looked like one colon on
+// the page; matching one-or-more keeps that from leaving a stray leading
+// ":" on every imported question.
+const QUESTION_PREFIX_PATTERN = /^Q:+\s*/i;
 // Not anchored to the very start of the remaining text (unlike
 // QUESTION_PREFIX_PATTERN) -- it's searched for anywhere via .match() below,
 // which is what lets a multi-line question be told apart from a one-line
@@ -215,7 +221,7 @@ const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
 // "\nA:" suffix would instead just stop at the block's first line break
 // (its earliest opportunity to satisfy $ in multiline mode) whenever no
 // "A:" line is present, silently truncating anything after it.
-const ANSWER_LINE_PATTERN = /\r?\n^A:\s*/im;
+const ANSWER_LINE_PATTERN = /\r?\n^A:+\s*/im;
 
 // Shared by both block-splitting strategies below -- everything past "this
 // chunk of text is one Q:/A: entry" is identical either way.
@@ -267,13 +273,29 @@ function parseImportBlocks(text: string): { question: string; answer: string }[]
 // the same marker parseBlock already needs to recognize a block as a
 // question in the first place. Any "---" the source document happens to
 // contain anyway is stripped first so it doesn't leak into an answer's text.
+//
+// A block runs from one "Q:" up to (but not stopping any earlier than) the
+// next one, so any print-only heading a worksheet template puts between an
+// answer and the following question -- a "Question <n>" label above the
+// next "Q:" marker, an "Answer" label above the "A:" marker -- would
+// otherwise get swept into the previous row's answer/question text as
+// trailing noise, since nothing else marks where the real content ends.
+// Both are stripped as whole lines up front rather than trimmed off the
+// parsed result, since the "Question <n>" line the source PDF was actually
+// observed to produce belongs to the *next* block by document order, not
+// whichever block happens to end up holding it after slicing.
 function parsePdfBlocks(text: string): { question: string; answer: string }[] {
   const normalized = text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
-    .replace(/^[ \t]*-{3,}[ \t]*$/gm, "");
+    // A line of 3+ dashes, tolerating the individual dashes coming out
+    // space-separated ("- - -") -- text extraction can insert a space
+    // between adjacent glyphs that render flush together on the page.
+    .replace(/^[ \t]*(?:-[ \t]*){3,}$/gm, "")
+    .replace(/^[ \t]*Question\s+\S+[ \t]*$/gim, "")
+    .replace(/^[ \t]*Answer[ \t]*$/gim, "");
 
-  const starts = [...normalized.matchAll(/^Q:\s*/gim)];
+  const starts = [...normalized.matchAll(/^Q:+\s*/gim)];
   const rows: { question: string; answer: string }[] = [];
 
   for (let i = 0; i < starts.length; i++) {
