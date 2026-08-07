@@ -68,50 +68,23 @@ export function BulkImportForm({
     setTopicId("");
   }
 
-  // Both modes post to the same action (bulkImportAnswers) -- it branches
-  // on whether a file was actually attached, so this just decides which of
-  // the two content inputs is visible/required, not which action runs.
-  const [mode, setMode] = useState<"text" | "spreadsheet">("text");
-
   return (
     <details className="mt-8 rounded-lg border border-border">
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-brand/5">
         Bulk import (e.g. a textbook or past exam paper)
       </summary>
-      <form action={formAction} encType="multipart/form-data" className="space-y-3 px-3 pb-4">
+      <form action={formAction} className="space-y-3 px-3 pb-4">
         <p className="text-xs text-foreground/60">
           For real, sourced questions (a textbook&apos;s exercise set, a past exam paper) rather
           than LLM-generated practice — these are stored <b>admin-approved</b> immediately, no
           quality check applied, and tagged so students can find them by source (e.g. &ldquo;Ganit
           Prakash&rdquo; or &ldquo;WBJEE 2023&rdquo;). Each question is checked against what&apos;s
           already banked for this board/grade/subject/medium and skipped if a close match already
-          exists, so re-importing the same source twice won&apos;t create duplicates. An answer is
-          optional either way — leave it out for a question whose entire answer is a diagram or
-          handwritten working, then attach it as an image on that row afterward (below) instead of
-          typing it out.
+          exists, so re-importing the same source twice won&apos;t create duplicates. The{" "}
+          <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> line is optional — leave it
+          out for a question whose entire answer is a diagram or handwritten working, then attach
+          it as an image on that row afterward (below) instead of typing it out.
         </p>
-        <div className="flex gap-4 text-xs font-medium">
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="radio"
-              name="importMode"
-              checked={mode === "text"}
-              onChange={() => setMode("text")}
-              className="accent-brand"
-            />
-            Paste text
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="radio"
-              name="importMode"
-              checked={mode === "spreadsheet"}
-              onChange={() => setMode("spreadsheet")}
-              className="accent-brand"
-            />
-            Upload spreadsheet (.xlsx)
-          </label>
-        </div>
         <div className="flex flex-wrap gap-2">
           <select
             name="boardId"
@@ -191,38 +164,16 @@ export function BulkImportForm({
             className="min-w-[16rem] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           />
         </div>
-        {mode === "text" ? (
-          <textarea
-            key={state?.success ? "cleared" : "text"}
-            name="bulkText"
-            rows={8}
-            required
-            placeholder={
-              "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
-            }
-            className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
-          />
-        ) : (
-          <div>
-            <input
-              key={state?.success ? "cleared" : "file"}
-              type="file"
-              name="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              required
-              className="text-sm text-foreground/60"
-            />
-            <p className="mt-1.5 text-xs text-foreground/50">
-              First row is column headers: <code className="rounded bg-brand/10 px-1 py-0.5">question</code>{" "}
-              (required per row), <code className="rounded bg-brand/10 px-1 py-0.5">answer</code> (optional),{" "}
-              <code className="rounded bg-brand/10 px-1 py-0.5">tags</code> (optional, comma-separated within
-              the cell — merged with the Tags field above, not replacing it). A picture inserted
-              anywhere within a row (Excel/Sheets&apos; own Insert → Picture, not typed into a cell) is
-              attached to that row&apos;s answer automatically — the same as an image-only answer with a
-              blank <code className="rounded bg-brand/10 px-1 py-0.5">answer</code> cell.
-            </p>
-          </div>
-        )}
+        <textarea
+          key={state?.success ? "cleared" : "text"}
+          name="bulkText"
+          rows={8}
+          required
+          placeholder={
+            "Q: <question>\nA: <complete solution>\n---\nQ: <question with an image-only answer>\n---\nQ: <next question>\nA: <its solution>"
+          }
+          className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
+        />
         <button
           disabled={pending}
           className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
