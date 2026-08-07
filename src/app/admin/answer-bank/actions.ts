@@ -217,6 +217,30 @@ const QUESTION_PREFIX_PATTERN = /^Q:\s*/i;
 // "A:" line is present, silently truncating anything after it.
 const ANSWER_LINE_PATTERN = /\r?\n^A:\s*/im;
 
+// Shared by both block-splitting strategies below -- everything past "this
+// chunk of text is one Q:/A: entry" is identical either way.
+function parseBlock(rawBlock: string): { question: string; answer: string } | null {
+  const block = rawBlock.trim();
+  if (!block) return null;
+  if (!QUESTION_PREFIX_PATTERN.test(block)) return null;
+
+  const withoutPrefix = block.replace(QUESTION_PREFIX_PATTERN, "");
+  const answerMatch = withoutPrefix.match(ANSWER_LINE_PATTERN);
+
+  let question: string;
+  let answer: string;
+  if (answerMatch && answerMatch.index !== undefined) {
+    question = withoutPrefix.slice(0, answerMatch.index).trim();
+    answer = withoutPrefix.slice(answerMatch.index + answerMatch[0].length).trim();
+  } else {
+    question = withoutPrefix.trim();
+    answer = "";
+  }
+
+  if (!question) return null;
+  return { question, answer };
+}
+
 function parseImportBlocks(text: string): { question: string; answer: string }[] {
   // Normalize CRLF/CR up front -- pasting from a Windows-originated source
   // (or through some clipboard managers/editors) can leave "\r\n" line
@@ -228,25 +252,36 @@ function parseImportBlocks(text: string): { question: string; answer: string }[]
   const rows: { question: string; answer: string }[] = [];
 
   for (const rawBlock of blocks) {
-    const block = rawBlock.trim();
-    if (!block) continue;
-    if (!QUESTION_PREFIX_PATTERN.test(block)) continue;
+    const row = parseBlock(rawBlock);
+    if (row) rows.push(row);
+  }
 
-    const withoutPrefix = block.replace(QUESTION_PREFIX_PATTERN, "");
-    const answerMatch = withoutPrefix.match(ANSWER_LINE_PATTERN);
+  return rows;
+}
 
-    let question: string;
-    let answer: string;
-    if (answerMatch && answerMatch.index !== undefined) {
-      question = withoutPrefix.slice(0, answerMatch.index).trim();
-      answer = withoutPrefix.slice(answerMatch.index + answerMatch[0].length).trim();
-    } else {
-      question = withoutPrefix.trim();
-      answer = "";
-    }
+// A PDF's extracted text has no "---" separator lines to split on the way a
+// hand-typed paste does -- a textbook page or exam paper just runs one
+// question after another with no blank convention marking where one ends
+// and the next begins. So instead of requiring an explicit separator, each
+// line starting with "Q:" is itself treated as the start of a new block --
+// the same marker parseBlock already needs to recognize a block as a
+// question in the first place. Any "---" the source document happens to
+// contain anyway is stripped first so it doesn't leak into an answer's text.
+function parsePdfBlocks(text: string): { question: string; answer: string }[] {
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/^[ \t]*-{3,}[ \t]*$/gm, "");
 
-    if (!question) continue;
-    rows.push({ question, answer });
+  const starts = [...normalized.matchAll(/^Q:\s*/gim)];
+  const rows: { question: string; answer: string }[] = [];
+
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i].index;
+    if (start === undefined) continue;
+    const end = starts[i + 1]?.index ?? normalized.length;
+    const row = parseBlock(normalized.slice(start, end));
+    if (row) rows.push(row);
   }
 
   return rows;
@@ -399,14 +434,15 @@ export async function bulkImportAnswers(
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
-// The PDF's extracted text is run through the exact same Q:/A:/---
-// convention as the pasted-text format (parseImportBlocks below) -- this
-// isn't OCR or an AI-driven "read the questions off this scanned page"
-// extractor, just a different way of getting Q:/A:/--- formatted text into
-// the importer, for a document that started life as (or was exported to) a
-// PDF instead of being pasted directly. A scanned/photographed PDF with no
-// selectable text produces no usable text at all and every block gets
-// skipped -- same as pasting nothing.
+// The PDF's extracted text is run through the same Q:/A: convention as the
+// pasted-text format, minus the "---" separator requirement (parsePdfBlocks
+// above splits on each "Q:" line instead) -- this isn't OCR or an
+// AI-driven "read the questions off this scanned page" extractor, just a
+// different way of getting Q:/A: formatted text into the importer, for a
+// document that started life as (or was exported to) a PDF instead of
+// being pasted directly. A scanned/photographed PDF with no selectable
+// text produces no usable text at all and every block gets skipped -- same
+// as pasting nothing.
 async function importPdf(
   file: File,
   tags: string[],
@@ -426,7 +462,7 @@ async function importPdf(
   try {
     const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
     const { text } = await extractText(pdf, { mergePages: true });
-    rows = parseImportBlocks(text);
+    rows = parsePdfBlocks(text);
   } catch (err) {
     console.error("PDF parse failed:", err);
     return { error: "Could not read that file. Make sure it's a valid, uncorrupted .pdf." };
@@ -436,7 +472,8 @@ async function importPdf(
     return {
       error:
         'Could not find any "Q: ..." blocks in that PDF\'s text. This only reads selectable/embedded ' +
-        "text (not a scan/photo with no text layer) in the same Q:/A:/--- format as pasted text.",
+        'text (not a scan/photo with no text layer) -- make sure each question starts a line with ' +
+        '"Q:" (a "---" separator is not needed here, unlike the paste box).',
     };
   }
 

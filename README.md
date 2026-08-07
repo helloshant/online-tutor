@@ -418,11 +418,18 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   hand. `bulkImportAnswers` branches to `importPdf` when a non-empty `file` is present; it extracts
   the PDF's selectable/embedded text with `unpdf` (`getDocumentProxy` + `extractText(pdf,
   { mergePages: true })` — merged rather than per-page, since a `Q:`/`A:` block can straddle a page
-  break) and feeds the result straight into the exact same `parseImportBlocks` used for pasted text,
-  rather than a separate PDF-specific parser — the PDF path is "get the text out, then treat it
-  exactly like a paste," not OCR or AI-based extraction, so it only works on a PDF with a real text
-  layer (a scan or photo of a page with no embedded text extracts nothing and reports the same
-  "couldn't find any Q: blocks" error as an empty paste). `unpdf` was chosen over the more common
+  break) and hands the result to `parsePdfBlocks` rather than the paste box's `parseImportBlocks` —
+  the two share a `parseBlock` helper for turning one chunk of text into a question/answer, but split
+  the raw text into those chunks differently. Pasted text uses an explicit `---` line as the block
+  separator because there's no other reliable boundary in freehand typing; a PDF's questions already
+  run one after another on the page with no such marker, so `parsePdfBlocks` instead treats every
+  line starting with `Q:` as the start of a new block (requiring `---` there too was the original
+  bug — a real PDF's whole extracted text became one giant "block" that didn't start with `Q:`,
+  because of a title/header line above the first question, and the import reported zero results).
+  Otherwise this is still "get the text out, then treat it like a paste," not OCR or AI-based
+  extraction, so it only works on a PDF with a real text layer (a scan or photo of a page with no
+  embedded text extracts nothing and reports the same "couldn't find any Q: blocks" error as an
+  empty paste). `unpdf` was chosen over the more common
   `pdf-parse`/`pdfjs-dist` direct usage because it's built and actively maintained specifically for
   serverless/edge Node runtimes with no native bindings, which is what a Next.js Server Action runs
   under. Capped at `MAX_PDF_BYTES` (20MB) — well above a typical scanned-chapter PDF — which in turn

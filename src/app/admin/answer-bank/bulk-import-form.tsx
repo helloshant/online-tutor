@@ -207,9 +207,14 @@ export function BulkImportForm({
               className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
             />
             <p className="text-xs text-foreground/60">
-              The PDF must have selectable/embedded text in the same <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code>/
-              <code className="rounded bg-brand/10 px-1 py-0.5">A:</code>/<code className="rounded bg-brand/10 px-1 py-0.5">---</code>{" "}
-              format shown above — a scan or photo with no text layer won&apos;t work. Max 20MB.
+              The PDF must have selectable/embedded text (a scan or photo with no text layer
+              won&apos;t work), with each question starting a line with{" "}
+              <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code> and its answer on a line
+              starting <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> — unlike the
+              paste box, no <code className="rounded bg-brand/10 px-1 py-0.5">---</code> separator
+              is needed between questions here; each new{" "}
+              <code className="rounded bg-brand/10 px-1 py-0.5">Q:</code> line already marks where
+              the next one starts. Max 20MB.
             </p>
           </div>
         )}
