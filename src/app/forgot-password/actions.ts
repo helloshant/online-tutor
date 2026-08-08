@@ -26,9 +26,18 @@ export async function requestPasswordReset(
   const origin = `${protocol}://${host}`;
 
   const supabase = await createClient();
-  await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/callback?next=/reset-password`,
   });
+  // Logged, not surfaced to the user -- the generic message below is
+  // returned either way (see its own comment for why), but a failure here
+  // (e.g. the redirect URL isn't in Supabase's allowlist, the project's
+  // outbound email quota/rate limit is hit) was previously invisible even
+  // in server logs, making "the email never arrived" unfalsifiable from
+  // this end without going to check Supabase's own Auth logs directly.
+  if (error) {
+    console.error("resetPasswordForEmail failed:", error);
+  }
 
   // Same message whether or not the email is registered -- confirming or
   // denying an account's existence here would let this form be used to
