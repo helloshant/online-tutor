@@ -652,7 +652,16 @@ Three additions on top of Supabase Auth's default email/password:
   `error` from `resetPasswordForEmail` is never "no such account," only a genuine failure (a dropped
   connection, the project's redirect-URL allowlist, an email-sending rate limit) -- worth telling the
   user honestly rather than claiming success on top of it, which previously left "the email never
-  arrived" with no way to tell a real failure apart from normal delivery delay.
+  arrived" with no way to tell a real failure apart from normal delivery delay. One real failure mode
+  observed here in local dev: `resetPasswordForEmail` (a *fresh* outbound connection, unlike a
+  request that reuses one already open) failing with `AuthRetryableFetchError: fetch failed` /
+  `status: 0` -- Node's `fetch()` letting the OS resolve Supabase's hostname to an IPv6 address that
+  the local network advertises but doesn't actually route, on a network where other, already-connected
+  traffic to the same host kept working fine. `src/instrumentation.ts` (+ `instrumentation-node.ts`,
+  split out because Next's bundler flags a Node-only `node:dns` import inside a file it also builds
+  for the Edge runtime, even guarded by a runtime check -- see that file's own comment) calls
+  `dns.setDefaultResultOrder("ipv4first")` once at server startup so every outbound fetch, this one
+  included, prefers the route that's actually known to work.
 
 - **Password expiry (native accounts only).** `profiles.password_changed_at` is stamped by two
   triggers in `0011_password_lifecycle.sql`: once at signup (only if the account was created with a
