@@ -277,9 +277,11 @@ export function PracticePanel({
                       <p className="font-medium">
                         {i + 1}. <MathText text={r.question} />
                       </p>
-                      <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                        <MathText text={r.answer} />
-                      </p>
+                      {r.answer && (
+                        <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                          <MathText text={r.answer} />
+                        </p>
+                      )}
                       {r.image_urls.length > 0 && (
                         <div className="mt-1.5 flex flex-col gap-2">
                           {r.image_urls.map((url) => (
