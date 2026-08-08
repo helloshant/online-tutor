@@ -281,14 +281,14 @@ export function PracticePanel({
                         <MathText text={r.answer} />
                       </p>
                       {r.image_urls.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-2">
+                        <div className="mt-1.5 flex flex-col gap-2">
                           {r.image_urls.map((url) => (
                             // eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset
                             <img
                               key={url}
                               src={url}
                               alt="Figure for this question"
-                              className="max-h-64 rounded-lg border border-border object-contain"
+                              className="max-h-64 w-fit self-start rounded-lg border border-border object-contain"
                             />
                           ))}
                         </div>
