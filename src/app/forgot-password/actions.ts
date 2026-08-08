@@ -29,18 +29,21 @@ export async function requestPasswordReset(
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/callback?next=/reset-password`,
   });
-  // Logged, not surfaced to the user -- the generic message below is
-  // returned either way (see its own comment for why), but a failure here
-  // (e.g. the redirect URL isn't in Supabase's allowlist, the project's
-  // outbound email quota/rate limit is hit) was previously invisible even
-  // in server logs, making "the email never arrived" unfalsifiable from
-  // this end without going to check Supabase's own Auth logs directly.
+
+  // Supabase's own API already absorbs the "no account with this email"
+  // case silently (no error) specifically to prevent enumeration -- that
+  // protection happens on their end regardless of what this action does,
+  // so an `error` reaching here is never "no such account," only a real
+  // failure (a dropped connection, the project's redirect-URL allowlist,
+  // an email-sending quota/rate limit). Telling the user the truth here
+  // doesn't weaken the enumeration protection at all, and claiming success
+  // on a genuine failure (the previous behavior) just leaves them checking
+  // an inbox that was never going to receive anything, with no way to tell
+  // the difference from "check back in a few minutes."
   if (error) {
     console.error("resetPasswordForEmail failed:", error);
+    return { error: "Could not send the reset email right now. Please try again in a moment." };
   }
 
-  // Same message whether or not the email is registered -- confirming or
-  // denying an account's existence here would let this form be used to
-  // enumerate registered emails.
   return { message: GENERIC_MESSAGE };
 }

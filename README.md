@@ -646,7 +646,13 @@ Three additions on top of Supabase Auth's default email/password:
 - **Password reset.** "Forgot password?" on `/login` → `/forgot-password` (enter email, calls
   `resetPasswordForEmail`) → emailed link → `/auth/callback?next=/reset-password` → `/reset-password`
   (set a new password via `updateUser`). The forgot-password confirmation message is identical
-  whether or not the email is actually registered, so the form can't be used to enumerate accounts.
+  whether or not the email is actually registered, so the form can't be used to enumerate accounts —
+  but that protection is Supabase's own (it silently returns no error for an unregistered email
+  specifically to prevent this), not something this app additionally has to paper over. So an actual
+  `error` from `resetPasswordForEmail` is never "no such account," only a genuine failure (a dropped
+  connection, the project's redirect-URL allowlist, an email-sending rate limit) -- worth telling the
+  user honestly rather than claiming success on top of it, which previously left "the email never
+  arrived" with no way to tell a real failure apart from normal delivery delay.
 
 - **Password expiry (native accounts only).** `profiles.password_changed_at` is stamped by two
   triggers in `0011_password_lifecycle.sql`: once at signup (only if the account was created with a
