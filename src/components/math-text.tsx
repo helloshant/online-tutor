@@ -93,7 +93,16 @@ export function MathText({ text }: { text: string }) {
 
     parts.push(
       displayMode ? (
-        <span key={nextKey()} className="my-1 block" dangerouslySetInnerHTML={{ __html: html }} />
+        // overflow-x-auto rather than letting a wide equation (a fraction,
+        // a system of equations, a long derivation step -- common in
+        // bulk-imported textbook content) either get visually clipped or
+        // force the whole page into horizontal scroll on a narrow phone;
+        // this way only the equation itself scrolls, within its own box.
+        <span
+          key={nextKey()}
+          className="my-1 block overflow-x-auto"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       ) : (
         <span key={nextKey()} dangerouslySetInnerHTML={{ __html: html }} />
       )
