@@ -292,7 +292,7 @@ export default async function AnswerBankPage({
                   </>
                 )}
               </div>
-              <p className="mt-2 text-sm font-medium">
+              <p className="mt-2 whitespace-pre-wrap text-sm font-medium">
                 <MathText text={row.question} />
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">

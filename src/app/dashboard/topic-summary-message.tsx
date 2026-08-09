@@ -184,7 +184,7 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
                     <ol className="space-y-4">
                       {displayedExercises.map((ex, i) => (
                         <li key={i}>
-                          <p className="font-medium">
+                          <p className="whitespace-pre-wrap font-medium">
                             {i + 1}. <MathText text={ex.question} />
                           </p>
                           <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">

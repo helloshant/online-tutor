@@ -274,7 +274,7 @@ export function PracticePanel({
                 <ol className="space-y-4">
                   {(results ?? []).map((r, i) => (
                     <li key={i} className="rounded-xl border border-border bg-surface p-4 text-sm">
-                      <p className="font-medium">
+                      <p className="whitespace-pre-wrap font-medium">
                         {i + 1}. <MathText text={r.question} />
                       </p>
                       {r.answer && (
