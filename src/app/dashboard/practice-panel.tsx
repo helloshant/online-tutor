@@ -290,7 +290,7 @@ export function PracticePanel({
                               key={url}
                               src={url}
                               alt="Figure for this question"
-                              className="mx-auto h-auto w-[85%] rounded-lg border border-border object-contain"
+                              className="mx-auto h-auto w-[60%] rounded-lg border border-border object-contain"
                             />
                           ))}
                         </div>
