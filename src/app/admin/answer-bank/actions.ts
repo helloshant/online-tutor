@@ -263,7 +263,13 @@ function parseImportBlocks(text: string): ParsedImportRow[] {
   // stops the split below from matching there at all, silently swallowing
   // every subsequent block into the answer of whatever came before it.
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const blocks = normalized.split(/\n-{3,}\n/);
+  // Tolerates a trailing (or leading) space/tab on the "---" line itself --
+  // a mobile keyboard or some clipboard managers can leave one there, and
+  // without this the *entire* paste (every "---" line, not just one)
+  // silently fails to split at all, merging everything into one block that
+  // then either gets rejected outright (doesn't start with "Q:") or, worse,
+  // imported as a single giant garbled question if it happens to.
+  const blocks = normalized.split(/\n[ \t]*-{3,}[ \t]*\n/);
   const rows: ParsedImportRow[] = [];
 
   for (const rawBlock of blocks) {
