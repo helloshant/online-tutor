@@ -9,3 +9,29 @@
 // real document text, so splitting on it can never misfire on genuine
 // content.
 export const IMAGE_MARKER = "";
+
+// The Edit form's <textarea> can neither display nor let someone type
+// IMAGE_MARKER's invisible PUA character, so editAnswer (actions.ts) uses
+// this human-typeable stand-in instead: "[IMAGE N]" always means "this
+// row's Nth currently-attached image" (1-based, plain image_urls array
+// order) -- not "the Nth marker specifically," since an image attached the
+// old flat/per-row way (addImage, no marker at all) is just as
+// repositionable this way as one that already has a marker. A brand-new
+// image being added in the same edit still uses the bulk import's own
+// "IMG: filename.png" line, referencing a file picked in the edit form's
+// own file input, not this placeholder (which only ever refers to an
+// image that already exists on the row).
+export const IMAGE_PLACEHOLDER_PATTERN = /\[IMAGE (\d+)\]/g;
+
+// Populates the Edit form's textareas: every real marker becomes
+// "[IMAGE N]", numbered by its position among *all* markers found (both
+// question and answer, in that order) -- matching how
+// text-with-inline-images.tsx's splitInlineImages recovers the
+// question/answer split from a flat image_urls array in the first place,
+// so "[IMAGE N]" and "the Nth entry of image_urls" agree here too.
+export function markersToPlaceholders(text: string): string {
+  let index = 0;
+  return Array.from(text)
+    .map((ch) => (ch === IMAGE_MARKER ? `[IMAGE ${++index}]` : ch))
+    .join("");
+}

@@ -325,8 +325,12 @@ export default async function AnswerBankPage({
               <div className="mt-3 space-y-2">
                 {row.image_urls.length > 0 && (
                   <div className="flex flex-wrap items-start gap-2">
-                    {row.image_urls.map((url) => (
+                    {row.image_urls.map((url, i) => (
                       <div key={url} className="flex flex-col items-center gap-1">
+                        {/* Matches the "[IMAGE N]" numbering EditAnswerForm's
+                            textarea uses -- lets an admin tell which
+                            placeholder corresponds to which thumbnail. */}
+                        <span className="text-xs text-foreground/50">[IMAGE {i + 1}]</span>
                         {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset */}
                         <img
                           src={url}

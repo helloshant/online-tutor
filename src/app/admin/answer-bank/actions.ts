@@ -3,7 +3,7 @@
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
-import { IMAGE_MARKER } from "@/lib/imageMarker";
+import { IMAGE_MARKER, IMAGE_PLACEHOLDER_PATTERN } from "@/lib/imageMarker";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
@@ -49,6 +49,11 @@ export async function rejectAnswer(scope: AnswerBankScope) {
 
 export interface EditAnswerState {
   success?: boolean;
+  // "IMG: ..." references typed in this edit that couldn't be honored --
+  // same reasons and same philosophy as bulk import's identical field: the
+  // edit still saves, this is just surfaced so a typo is a quick fix
+  // rather than a silent no-op.
+  unmatchedImageRefs?: string[];
 }
 
 // scope carries the row's *pre-edit* question (and everything else needed
@@ -58,6 +63,22 @@ export interface EditAnswerState {
 // shouldn't silently change its review state the way approve/reject do.
 // Answer can be blank, same as bulk import -- a question whose entire
 // answer is an attached image has no text answer at all.
+//
+// The submitted text can carry two kinds of image reference, both
+// resolved to a real IMAGE_MARKER here, in whatever order they actually
+// appear (spanning question then answer) -- see the combined regex below
+// for why this can't be two separate .replace() passes:
+//   - "[IMAGE N]" (IMAGE_PLACEHOLDER_PATTERN) -- repositions the row's
+//     existing Nth image (1-based, current image_urls order), which the
+//     Edit form's textarea shows this way in the first place specifically
+//     because it can neither display nor let someone type
+//     IMAGE_MARKER's real, invisible character.
+//   - "IMG: filename.png" (IMAGE_LINE_PATTERN, the exact same bulk-import
+//     syntax) -- attaches a brand-new file from this form's own picker.
+// Any existing image never referenced by an "[IMAGE N]" placeholder is
+// preserved as a trailing extra rather than silently dropped -- deletion
+// stays the removeImage button's job alone, never an implicit side effect
+// of a plain text edit.
 //
 // Takes (prevState, formData) rather than just (formData) -- unlike every
 // other row-level action in this file -- specifically so the client side
@@ -73,19 +94,106 @@ export async function editAnswer(
   formData: FormData
 ): Promise<EditAnswerState> {
   await requireAdminPage("answer_bank");
-  const question = ((formData.get("question") as string | null) ?? "").trim();
-  const answer = ((formData.get("answer") as string | null) ?? "").trim();
-  if (!question) return {};
+  const rawQuestion = ((formData.get("question") as string | null) ?? "").trim();
+  const rawAnswer = ((formData.get("answer") as string | null) ?? "").trim();
 
   const supabase = createAdminClient();
-  await supabase.from("answered_questions").update({ question, answer }).eq("id", scope.id);
+
+  const { data: currentRow } = await supabase
+    .from("answered_questions")
+    .select("image_urls")
+    .eq("id", scope.id)
+    .single();
+  const existingImageUrls: string[] = currentRow?.image_urls ?? [];
+
+  const newFiles = formData.getAll("images").filter((f): f is File => f instanceof File && f.size > 0);
+  const filesByName = new Map(newFiles.map((f) => [f.name, f]));
+
+  const usedExistingIndices = new Set<number>();
+  const unmatchedImageRefs = new Set<string>();
+  type ResolvedMarker = { kind: "existing"; url: string } | { kind: "new"; filename: string };
+  const resolvedMarkers: ResolvedMarker[] = [];
+
+  function resolveImageRefs(text: string): string {
+    return text.replace(
+      COMBINED_IMAGE_REF_PATTERN,
+      (_match, placeholderNum: string | undefined, imgNames: string | undefined) => {
+        if (placeholderNum !== undefined) {
+          const url = existingImageUrls[Number(placeholderNum) - 1];
+          if (url === undefined) return ""; // stale/out-of-range reference -- drop silently
+          usedExistingIndices.add(Number(placeholderNum) - 1);
+          resolvedMarkers.push({ kind: "existing", url });
+          return IMAGE_MARKER;
+        }
+        const list = (imgNames ?? "").split(",").map((n) => n.trim()).filter(Boolean);
+        let marker = "";
+        for (const filename of list) {
+          const file = filesByName.get(filename);
+          if (!file || file.size > MAX_IMAGE_BYTES || !ALLOWED_IMAGE_TYPES.has(file.type)) {
+            unmatchedImageRefs.add(filename);
+            continue;
+          }
+          resolvedMarkers.push({ kind: "new", filename });
+          marker += IMAGE_MARKER;
+        }
+        return marker;
+      }
+    );
+  }
+
+  const question = resolveImageRefs(rawQuestion);
+  const answer = resolveImageRefs(rawAnswer);
+  if (!question) return { unmatchedImageRefs: [...unmatchedImageRefs] };
+
+  // Upload every "new" resolved marker, by index into resolvedMarkers
+  // rather than push -- same reasoning as bulk import's importParsedRows:
+  // uploads run concurrently, so completion order isn't marker order.
+  const newMarkerIndices = resolvedMarkers.flatMap((m, i) => (m.kind === "new" ? [i] : []));
+  const uploadedUrlByIndex = new Map<number, string>();
+  await mapWithConcurrency(newMarkerIndices, 8, async (index) => {
+    const entry = resolvedMarkers[index];
+    if (entry.kind !== "new") return;
+    const file = filesByName.get(entry.filename);
+    if (!file) return; // already validated present in resolveImageRefs above
+    const path = `${scope.id}/${crypto.randomUUID()}`;
+    const { error: uploadError } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(path, file, { contentType: file.type });
+    if (uploadError) {
+      console.error("Edit image upload failed:", uploadError);
+      unmatchedImageRefs.add(entry.filename);
+      return;
+    }
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+    uploadedUrlByIndex.set(index, publicUrl);
+  });
+
+  // Resolves each marker to its final URL in order, dropping one whose
+  // upload genuinely failed (rare) -- same accepted rough edge as bulk
+  // import: that one marker's slot just renders nothing rather than
+  // shifting every later image out of place.
+  const resolvedUrls: string[] = [];
+  resolvedMarkers.forEach((entry, i) => {
+    if (entry.kind === "existing") {
+      resolvedUrls.push(entry.url);
+      return;
+    }
+    const url = uploadedUrlByIndex.get(i);
+    if (url) resolvedUrls.push(url);
+  });
+  const preservedTrailing = existingImageUrls.filter((_, i) => !usedExistingIndices.has(i));
+  const imageUrls = [...resolvedUrls, ...preservedTrailing];
+
+  await supabase.from("answered_questions").update({ question, answer, image_urls: imageUrls }).eq("id", scope.id);
   // The cache is keyed by question text, so a stale entry under the old
   // phrasing (if the question changed) or the old answer (if just that
   // changed) would otherwise keep being served until its Redis TTL expires
   // on its own -- same reasoning as rejectAnswer.
   await invalidateCachedAnswer(scope);
   revalidatePath("/admin/answer-bank");
-  return { success: true };
+  return { success: true, unmatchedImageRefs: [...unmatchedImageRefs] };
 }
 
 // Undoes an approve/reject decision back to the implicit-validation default,
@@ -230,6 +338,17 @@ export type ParsedImportRow = { question: string; answer: string; imageFilenames
 // the end of the whole answer. A render pass (text-with-inline-images.tsx)
 // splits on the marker to place each image back where its line was.
 const IMAGE_LINE_PATTERN = /^[ \t]*IMG:\s*(.+)$/gim;
+
+// editAnswer's two accepted image references, combined into one pattern so
+// a single .replace() pass resolves them in true left-to-right document
+// order -- two separate passes (all "[IMAGE N]" first, then all "IMG:"
+// lines) would get that order wrong whenever the two are interleaved in
+// the same field. Built from .source rather than written out again, so
+// the two patterns this has to stay in sync with can't quietly drift.
+const COMBINED_IMAGE_REF_PATTERN = new RegExp(
+  `${IMAGE_PLACEHOLDER_PATTERN.source}|${IMAGE_LINE_PATTERN.source}`,
+  "gim"
+);
 
 function parseBlock(rawBlock: string): ParsedImportRow | null {
   const imageFilenames: string[] = [];

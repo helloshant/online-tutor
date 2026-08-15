@@ -379,7 +379,28 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `EditAnswerForm` can drive it through `useActionState` and see when a save actually lands — needed
   to close the `<details>` afterward, since its open/closed state is native DOM state a server
   re-render can't touch on its own; without that it stays open across the post-save refresh and
-  reads as a second edit window popping up instead of the row just updating. Every entry can
+  reads as a second edit window popping up instead of the row just updating. The edit form also
+  understands the same inline-image placement bulk import does, since an edit is the only way to fix
+  a row that never went through the bulk-import parser at all -- e.g. one where an admin typed an
+  `IMG:` line directly into a plain edit before this existed, which just saves as inert text with no
+  processing (`editAnswer` is a separate code path from `parseBlock`/`importParsedRows`, and always
+  has been). Its two textareas display `[IMAGE 1]`, `[IMAGE 2]`, … (`markersToPlaceholders`,
+  `src/lib/imageMarker.ts`) in place of this row's real, invisible `IMAGE_MARKER` characters, numbered
+  by the row's plain `image_urls` order (labeled the same way next to each thumbnail further down the
+  page, so which placeholder is which image is never a guessing game) -- a textarea can neither
+  display nor let someone type that PUA character directly, and "[IMAGE N]" always refers to an
+  *existing* image regardless of whether it already had a marker or was just trailing from the old
+  flat `addImage` flow, so any previously-attached image becomes repositionable this way, not only
+  ones added after this feature existed. A brand-new image still uses the exact bulk-import `IMG:
+  filename.png` syntax, resolved against a second file picker this form now also has. Both reference
+  kinds resolve back to `IMAGE_MARKER` in a single combined-regex pass
+  (`COMBINED_IMAGE_REF_PATTERN`, `IMAGE_PLACEHOLDER_PATTERN.source` joined with `IMAGE_LINE_PATTERN
+  .source`) rather than two separate ones, specifically so the two forms interleaved in the same
+  field resolve in their true left-to-right order instead of "all placeholders first, then all new
+  images" -- the same ordering bug that would otherwise reproduce inside a single edit. An existing
+  image never mentioned by any `[IMAGE N]` in the saved text is preserved as a trailing extra rather
+  than dropped; deletion stays the separate `removeImage` button's job alone, never an implicit
+  side effect of editing the text. Every entry can
   also have tags added or removed inline (`addTag`/`removeTag` in `actions.ts`, a plain
   read-modify-write against the `tags` array; fine for an admin-only tool with no meaningful
   concurrent-edit risk). The row list also shows each entry's syllabus topic when it has one (joined
