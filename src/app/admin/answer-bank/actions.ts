@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
+import { IMAGE_MARKER } from "@/lib/imageMarker";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
@@ -222,17 +223,20 @@ export type ParsedImportRow = { question: string; answer: string; imageFilenames
 // that go with it out of a separate multi-file picker (matched by filename,
 // not position -- far more robust than the spreadsheet import's old
 // cell-anchor-based matching, and doesn't depend on any particular file
-// order). Stripped out before question/answer splitting -- wherever it
-// lands in the block (there's no fixed convention for whether it belongs
-// right after the answer or right after a question with none), it's never
-// part of the actual question/answer text.
+// order). Replaced in place with one IMAGE_MARKER per filename listed
+// (rather than deleted outright) -- wherever the line sat in the block,
+// that's exactly where its image(s) should render, e.g. right after one
+// sub-part's solution and before the next one's, not always trailing at
+// the end of the whole answer. A render pass (text-with-inline-images.tsx)
+// splits on the marker to place each image back where its line was.
 const IMAGE_LINE_PATTERN = /^[ \t]*IMG:\s*(.+)$/gim;
 
 function parseBlock(rawBlock: string): ParsedImportRow | null {
   const imageFilenames: string[] = [];
   const withoutImageLines = rawBlock.replace(IMAGE_LINE_PATTERN, (_match, names: string) => {
-    imageFilenames.push(...names.split(",").map((n) => n.trim()).filter(Boolean));
-    return "";
+    const list = names.split(",").map((n) => n.trim()).filter(Boolean);
+    imageFilenames.push(...list);
+    return IMAGE_MARKER.repeat(list.length);
   });
 
   const block = withoutImageLines.trim();
@@ -301,6 +305,29 @@ export interface BulkImportState {
     // whole import.
     unmatchedImageRefs: string[];
   };
+}
+
+function countOccurrences(text: string, char: string): number {
+  let count = 0;
+  for (const ch of text) if (ch === char) count++;
+  return count;
+}
+
+// Single pass so removing several ordinals from the same string can't shift
+// the ordinal numbering out from under a later removal the way calling this
+// once per ordinal would.
+function stripMarkersAt(text: string, ordinalsToRemove: Set<number>): string {
+  if (ordinalsToRemove.size === 0) return text;
+  let ordinal = -1;
+  let result = "";
+  for (const ch of text) {
+    if (ch === IMAGE_MARKER) {
+      ordinal++;
+      if (ordinalsToRemove.has(ordinal)) continue;
+    }
+    result += ch;
+  }
+  return result;
 }
 
 // Runs `fn` over `items` with at most `limit` in flight at once. A plain
@@ -375,7 +402,7 @@ async function importParsedRows(
   // storage path (the same convention addImage uses) and included in the
   // very same insert -- no separate update pass needed once the row
   // exists, and no window where the row is briefly imageless.
-  type InsertRow = ParsedImportRow & { id: string; imageUrls: string[] };
+  type InsertRow = ParsedImportRow & { id: string; imageUrls: (string | null)[] };
   const withIds: InsertRow[] = toInsert.map((r) => ({ ...r, id: crypto.randomUUID(), imageUrls: [] }));
 
   // Images are matched to a row by filename (from that block's "IMG:"
@@ -387,36 +414,67 @@ async function importParsedRows(
   const unmatchedImageRefs = new Set<string>();
   let imagesAttached = 0;
 
-  const uploadTasks: { row: InsertRow; filename: string; file: File }[] = [];
+  // A reference that can't be resolved to a real, valid file (typo, or a
+  // file left out of the picker) is decided synchronously, before any
+  // upload -- so its IMAGE_MARKER can be stripped from the row's text
+  // right away, keeping "marker count" and "final image_urls length"
+  // exactly aligned for the inline-placement render pass. Uploads for the
+  // remaining, resolved filenames run concurrently below and are assigned
+  // by index (not pushed), since completion order isn't submission order
+  // and a multi-image row needs its images to land in the same order its
+  // markers appear in the text.
+  const uploadTasks: { row: InsertRow; index: number; filename: string; file: File }[] = [];
   for (const row of withIds) {
-    for (const filename of row.imageFilenames) {
+    const questionMarkerCount = countOccurrences(row.question, IMAGE_MARKER);
+    const removeOrdinals: number[] = [];
+    const matchedFilenames: string[] = [];
+
+    row.imageFilenames.forEach((filename, ordinal) => {
       const file = filesByName.get(filename);
       if (!file || file.size > MAX_IMAGE_BYTES || !ALLOWED_IMAGE_TYPES.has(file.type)) {
         unmatchedImageRefs.add(filename);
-        continue;
+        removeOrdinals.push(ordinal);
+        return;
       }
-      uploadTasks.push({ row, filename, file });
+      matchedFilenames.push(filename);
+    });
+
+    if (removeOrdinals.length > 0) {
+      const removeSet = new Set(removeOrdinals);
+      const questionRemove = new Set([...removeSet].filter((o) => o < questionMarkerCount));
+      const answerRemove = new Set(
+        [...removeSet].filter((o) => o >= questionMarkerCount).map((o) => o - questionMarkerCount)
+      );
+      row.question = stripMarkersAt(row.question, questionRemove);
+      row.answer = stripMarkersAt(row.answer, answerRemove);
     }
+
+    row.imageUrls = new Array(matchedFilenames.length).fill(null);
+    matchedFilenames.forEach((filename, index) => {
+      const file = filesByName.get(filename);
+      if (file) uploadTasks.push({ row, index, filename, file });
+    });
   }
 
-  await mapWithConcurrency(uploadTasks, 8, async ({ row, filename, file }) => {
+  await mapWithConcurrency(uploadTasks, 8, async ({ row, index, filename, file }) => {
     const path = `${row.id}/${crypto.randomUUID()}`;
     const { error: uploadError } = await supabase.storage
       .from(IMAGE_BUCKET)
       .upload(path, file, { contentType: file.type });
     if (uploadError) {
       console.error("Bulk import image upload failed:", uploadError);
+      // A rare, genuine upload failure (as opposed to the synchronous
+      // "no matching file" case above) leaves this one marker in the text
+      // with no image behind it -- the render side treats that slot as
+      // simply empty rather than erroring, so this degrades gracefully
+      // instead of breaking the page.
       unmatchedImageRefs.add(filename);
       return;
     }
     const {
       data: { publicUrl },
     } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
-    // Synchronous push, so concurrent uploads for the same multi-image row
-    // never race each other -- JS has no true parallelism within a single
-    // request, only interleaved async tasks, and nothing awaits between
-    // reading `row` and mutating it here.
-    row.imageUrls.push(publicUrl);
+    row.imageUrls[index] = publicUrl;
     imagesAttached += 1;
   });
 
@@ -433,7 +491,11 @@ async function importParsedRows(
         answer: r.answer,
         validation_status: "admin_approved" as const,
         tags,
-        image_urls: r.imageUrls,
+        // Compacts away any null left by a rare mid-upload failure (as
+        // opposed to a synchronously-unmatched filename, whose marker was
+        // already stripped from question/answer above and so never left a
+        // gap here to begin with).
+        image_urls: r.imageUrls.filter((u): u is string => u !== null),
       }))
     );
     if (error) {

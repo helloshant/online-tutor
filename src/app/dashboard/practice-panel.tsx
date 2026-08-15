@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { MathText } from "@/components/math-text";
+import { splitInlineImages, TextWithInlineImages } from "@/components/text-with-inline-images";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 type SearchResult = { question: string; answer: string; image_urls: string[] };
@@ -272,38 +272,47 @@ export function PracticePanel({
             ) : (
               <>
                 <ol className="space-y-4">
-                  {(results ?? []).map((r, i) => (
-                    <li key={i} className="rounded-xl border border-border bg-surface p-4 text-sm">
-                      <p className="whitespace-pre-wrap font-medium">
-                        {i + 1}. <MathText text={r.question} />
-                      </p>
-                      {r.answer && (
-                        <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                          <MathText text={r.answer} />
+                  {(results ?? []).map((r, i) => {
+                    // See text-with-inline-images.tsx -- markers in the
+                    // bulk-imported question always precede markers in the
+                    // answer in image_urls, so this split recovers which
+                    // images belong to which field without storing
+                    // anything extra.
+                    const { questionImages, answerImages } = splitInlineImages(
+                      r.question,
+                      r.answer,
+                      r.image_urls
+                    );
+                    const imageClassName = "mx-auto h-auto w-[60%] rounded-lg border border-border object-contain";
+                    return (
+                      <li key={i} className="rounded-xl border border-border bg-surface p-4 text-sm">
+                        <p className="whitespace-pre-wrap font-medium">
+                          {i + 1}.{" "}
+                          <TextWithInlineImages
+                            text={r.question}
+                            imageUrls={questionImages}
+                            imageClassName={imageClassName}
+                          />
                         </p>
-                      )}
-                      {r.image_urls.length > 0 && (
-                        <div className="mt-1.5 flex flex-col gap-2">
-                          {r.image_urls.map((url) => (
-                            // eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset
-                            <img
-                              key={url}
-                              src={url}
-                              alt="Figure for this question"
-                              className="mx-auto h-auto w-[60%] rounded-lg border border-border object-contain"
+                        {r.answer && (
+                          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                            <TextWithInlineImages
+                              text={r.answer}
+                              imageUrls={answerImages}
+                              imageClassName={imageClassName}
                             />
-                          ))}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => onAskAbout(r.question, r.answer)}
-                        className="mt-2 text-xs font-medium text-brand hover:underline"
-                      >
-                        Explain further in chat →
-                      </button>
-                    </li>
-                  ))}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onAskAbout(r.question, r.answer)}
+                          className="mt-2 text-xs font-medium text-brand hover:underline"
+                        >
+                          Explain further in chat →
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ol>
                 {hasMore && (
                   <button

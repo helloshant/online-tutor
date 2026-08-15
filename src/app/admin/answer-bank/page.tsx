@@ -1,6 +1,6 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { MathText } from "@/components/math-text";
+import { splitInlineImages, TextWithInlineImages } from "@/components/text-with-inline-images";
 import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
 import {
   addImage,
@@ -264,6 +264,16 @@ export default async function AnswerBankPage({
           const subject = (row as unknown as { subjects: { name: string } | null }).subjects;
           const topic = (row as unknown as { syllabus_topics: { chapter: string; topic: string } | null })
             .syllabus_topics;
+          // A bulk-imported row's question/answer may carry inline image
+          // markers (see text-with-inline-images.tsx) -- rendering them
+          // through plain MathText would show the raw marker character
+          // instead of the image it stands in for. This split also gives
+          // the admin the same in-context preview a student sees, not just
+          // the flat "manage images" thumbnail grid further down (which
+          // stays, since it's the only place with a per-image Remove
+          // control).
+          const { questionImages, answerImages } = splitInlineImages(row.question, row.answer, row.image_urls);
+          const inlineImageClassName = "mx-auto h-auto max-w-xs rounded-lg border border-border object-contain";
           return (
             <div key={row.id} className="rounded-xl border border-border bg-surface p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/50">
@@ -293,10 +303,10 @@ export default async function AnswerBankPage({
                 )}
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm font-medium">
-                <MathText text={row.question} />
+                <TextWithInlineImages text={row.question} imageUrls={questionImages} imageClassName={inlineImageClassName} />
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
-                <MathText text={row.answer} />
+                <TextWithInlineImages text={row.answer} imageUrls={answerImages} imageClassName={inlineImageClassName} />
               </p>
 
               <EditAnswerForm

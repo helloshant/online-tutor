@@ -84,9 +84,11 @@ export function BulkImportForm({
           <code className="rounded bg-brand/10 px-1 py-0.5">A:</code> line is optional — leave it
           out for a question whose entire answer is a diagram or handwritten working. A diagram can
           be attached right in this same import: add a line{" "}
-          <code className="rounded bg-brand/10 px-1 py-0.5">IMG: filename.png</code> anywhere in
-          that question&apos;s block, pick the matching file(s) below, and they&apos;re uploaded and
-          linked to the right row automatically — no separate per-row step needed.
+          <code className="rounded bg-brand/10 px-1 py-0.5">IMG: filename.png</code> exactly where
+          that diagram belongs — right after one sub-part&apos;s solution and before the next, for
+          example — and pick the matching file(s) below; each renders at that exact point instead of
+          only ever trailing at the end, so multiple diagrams in one long answer each land next to
+          the working they illustrate.
         </p>
         <div className="flex flex-wrap gap-2">
           <select

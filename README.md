@@ -393,13 +393,17 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   exercise generation uses — `A:` itself is optional, for a question whose entire answer is a
   diagram or handwritten working rather than text. A diagram doesn't have to be attached
   afterward the normal per-row way (see "Answer bank images" above) either: an `IMG:
-  filename.png[, filename2.png]` line anywhere in a block (one or more filenames,
+  filename.png[, filename2.png]` line placed *anywhere* in a block (one or more filenames,
   comma-separated) marks which of the files picked in a second, multi-select file input belong
-  to that question — matched by filename against whatever was actually selected, not by upload
+  to that question, and — this is the part that isn't just "attach it to the row somewhere" —
+  **exactly where** in the question/answer text it renders: right after one sub-part's solution
+  and before the next, for instance, in a single long answer covering several sub-parts each with
+  their own diagram. Matched by filename against whatever was actually selected, not by upload
   order or position, so there's no fragile anchoring to get wrong the way the earlier
   spreadsheet-embedded-image attempt had. A reference to a filename that wasn't actually
   selected (a typo, or a file left out of the picker) doesn't fail the import; that question
-  still goes in, and its unmatched reference comes back in the result so it can be fixed by
+  still goes in, its `IMG:` line's marker (see next paragraph) is removed since there's nothing to
+  place there, and the unmatched reference comes back in the result so it can be fixed by
   hand — a board/grade/subject/medium selection, an *optional* topic (its own
   dropdown, populated client-side once all four scope fields are picked — left unset by default,
   since a book chapter or exam paper usually spans several topics, but assignable when a specific
@@ -438,6 +442,36 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `MAX_TEXT_FILE_BYTES` plus several diagram images can still add up past the default — and that
   default turned out to already be silently under the *existing* 4MB single-image-upload cap too,
   since nothing this size had been sent through a Server Action before.
+- **Inline image placement within one answer** (`IMAGE_MARKER`, `src/lib/imageMarker.ts` — a single
+  Unicode Private Use Area code point, guaranteed never to occur in real document text, so splitting
+  on it can never misfire on genuine content; kept in its own tiny file rather than `actions.ts`
+  itself specifically because a `"use server"` file can only export async Server Actions, not a
+  plain constant). `parseBlock` replaces each `IMG:` line with one `IMAGE_MARKER` per filename
+  listed, in place, instead of deleting the line outright — so a question with several sub-parts,
+  each with its own diagram, can have each `IMG:` line sit right after the sub-part it belongs to,
+  and the marker preserves that exact position all the way through to storage and rendering. Before
+  any upload happens, an unresolvable reference (no matching file in the picker, wrong type, too
+  big) has its marker stripped from the row's `question`/`answer` right away (`stripMarkersAt`, a
+  single pass removing a given set of marker *ordinals* — removing several one at a time would shift
+  the ordinal numbering out from under later removals) so a typo never leaves a dangling marker with
+  nothing behind it. The remaining, resolved filenames upload concurrently (same `mapWithConcurrency`
+  as the dedup checks) but are written into `image_urls` **by index**, not pushed — completion order
+  isn't submission order, and a multi-image row needs its images landing in the same order their
+  markers appear in the text regardless of which upload happens to finish first. Rendering
+  (`text-with-inline-images.tsx`, imported by both this admin list and the student-facing Practice
+  panel) splits the stored text on `IMAGE_MARKER` and interleaves each `image_urls` entry, in order,
+  right after the segment whose marker it replaced; any images beyond the marker count found (the
+  common case for a row that predates this feature, or one built up entirely through the normal
+  per-row `addImage` action, which never inserts a marker at all) render as a trailing block after
+  everything else — the exact old flat-list behavior, so this is a strict superset rather than a
+  breaking change for existing content. `splitInlineImages` recovers which of a row's flat
+  `image_urls` belong to the question vs. the answer without needing to store anything extra: markers
+  are written in question-then-answer order by the parser, so counting markers in `question` alone
+  gives the split point. The one accepted rough edge: a genuine mid-upload failure (as opposed to the
+  synchronously-detected "no matching file" case, which is handled precisely) can shift which image
+  ends up paired with which later marker in that same row, since the final `image_urls` array is
+  compacted after the fact — judged acceptable given how rare an actual upload failure is compared to
+  a typo'd filename.
 - **`GET /api/answer-bank/tags` and `GET /api/answer-bank/search`** both accept an optional `topicId`
   alongside `tag`, so a lookup can be tag-only, topic-only, or both combined (e.g. "Ganit Prakash
   exercises for this specific topic") — `search` requires at least one of the two, since neither
