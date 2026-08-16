@@ -463,6 +463,27 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   `MAX_TEXT_FILE_BYTES` plus several diagram images can still add up past the default — and that
   default turned out to already be silently under the *existing* 4MB single-image-upload cap too,
   since nothing this size had been sent through a Server Action before.
+- **Answer-similarity check on top of `search_answer_bank`'s dedup** (`answerSimilarity`,
+  `MIN_ANSWER_SIMILARITY = 0.5`) — `search_answer_bank`'s own matching is scoped entirely to the
+  `question` column's `tsvector`, which is the right call for its primary use (the chat pipeline
+  matching a student's live question against banked ones, where there's no answer text to compare
+  against yet). Bulk-imported MCQ blocks broke that assumption: a block is often headed by a
+  generic, per-chapter-recurring line like "১১. বহু বিকল্পীয় প্রশ্ন (M.C.Q.)" with everything that
+  actually distinguishes the question pushed down into the answer's sub-parts, so two *different*
+  chapters that happen to number their MCQ section the same way collided as a false-positive
+  full-text match on `question` alone — confirmed against real data where "Koshe Dekhi 7.3" and
+  "Koshe Dekhi 7.4" both used "১১. বহু বিকল্পীয় প্রশ্ন (M.C.Q.)" verbatim as their heading with
+  entirely unrelated answers underneath. Rather than touch `search_answer_bank` itself (it's shared
+  with the chat pipeline, where question-only matching is correct), the fix lives entirely in
+  `importParsedRows`: a question-text match is no longer trusted on its own — `answerSimilarity`
+  additionally compares the matched row's `answer` (already returned by `search_answer_bank`,
+  previously read only for truthiness) against the candidate's `answer` via Jaccard similarity
+  (intersection over union of each answer's lowercased, Unicode-aware word-token set — the same
+  `[^\p{L}\p{N}]+` splitting used elsewhere in this codebase for non-Latin-script tokenizing), and
+  only counts it as a real duplicate above the 0.5 threshold. Calibrated against the real colliding
+  rows above: the two genuinely different MCQ answer sets scored 0.28 (shared boilerplate like
+  "উত্তর: (a)/(b)/(c)/(d)" alone accounts for most of that), while a true or lightly-reworded
+  duplicate scored 1.0 — 0.5 sits with clear room on both sides.
 - **Inline image placement within one answer** (`IMAGE_MARKER`, `src/lib/imageMarker.ts` — a single
   Unicode Private Use Area code point, guaranteed never to occur in real document text, so splitting
   on it can never misfire on genuine content; kept in its own tiny file rather than `actions.ts`

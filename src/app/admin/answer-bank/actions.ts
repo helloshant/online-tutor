@@ -409,6 +409,40 @@ function parseImportBlocks(text: string): ParsedImportRow[] {
 // re-inserting.
 const MIN_RANK = 0.1;
 
+// search_answer_bank's dedup is scoped entirely to `question` text, which is
+// the right call for its primary use (the orchestrator matching a student's
+// live question against banked ones, where there's no answer to compare
+// yet). But bulk-imported MCQ blocks are often structured as a generic,
+// per-chapter-recurring heading -- e.g. "১১. বহু বিকল্পীয় প্রশ্ন (M.C.Q.)" --
+// with all the actual distinguishing content pushed into the answer. Two
+// different chapters that happen to number their MCQ section the same way
+// then collide as a false-positive full-text match on `question` alone, even
+// though their `answer` content is completely unrelated. This re-checks the
+// candidate against the *answer* text of whatever row search_answer_bank
+// matched (already returned by that RPC, just previously unused beyond
+// truthiness) before trusting the match.
+function tokenize(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+}
+
+// Jaccard similarity (intersection over union) of the two answers' word-
+// token sets. Calibrated against real colliding rows from this bank: two
+// genuinely different MCQ answer sets scored 0.28 (shared boilerplate like
+// "উত্তর: (a)/(b)/(c)/(d)" alone gets you most of the way there), while a
+// true duplicate (verbatim or lightly reworded) scored 1.0 -- 0.5 sits
+// cleanly between the two with room either side.
+function answerSimilarity(a: string, b: string): number {
+  const setA = tokenize(a);
+  const setB = tokenize(b);
+  if (setA.size === 0 && setB.size === 0) return 1;
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const token of setA) if (setB.has(token)) intersection++;
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+const MIN_ANSWER_SIMILARITY = 0.5;
+
 export interface BulkImportState {
   error?: string;
   success?: {
@@ -510,7 +544,11 @@ async function importParsedRows(
       // should just risk an occasional duplicate instead.
       console.error("Bulk import dedup check failed:", error);
     }
-    return Boolean(data);
+    if (!data) return false;
+    // A question-text match alone isn't enough -- see answerSimilarity's
+    // comment above. Only trust it as a real duplicate once the matched
+    // row's answer content actually overlaps with this one too.
+    return answerSimilarity(data.answer ?? "", row.answer) >= MIN_ANSWER_SIMILARITY;
   });
 
   const toInsert = rows.filter((_row, i) => !isDuplicate[i]);
