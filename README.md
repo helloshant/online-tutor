@@ -552,6 +552,24 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   already-answered question). Sending straight away with an explicit "explain in detail" framing
   avoids both — no `/api/chat` or orchestrator changes needed either way, since the endpoint just
   answers whatever message text it's given.
+- **Tag picker: collapsed behind a filter input, not a chip cloud.** A subject with a few hundred
+  banked questions can easily accumulate 50+ tags (e.g. one per chapter/exercise — "Koshe Dekhi
+  7.1" through "Koshe Dekhi 21"); rendering every one as an always-visible chip (the original
+  design) meant that block alone could push actual results below the fold on a phone-width screen,
+  with no bound on how much worse it gets as the bank grows. The chip grid now stays collapsed
+  behind a text input (`tagListOpen`, `tagFilter` state) until focused — focusing with no text shows
+  every tag (so browsing is still just one tap away), and typing narrows the list live
+  (case-insensitive substring match), so the common case — a student who already knows the chapter
+  tag they want — is a few keystrokes instead of hunting through rows of chips. While collapsed, the
+  same input doubles as a "currently selected tag" readout (combobox-style: its displayed value is
+  the selected tag when closed, the raw typed filter when open) with an inline ✕ to clear it.
+  Closing happens via the input's own `onBlur`, *except* from a chip click — chip buttons call
+  `onMouseDown={(e) => e.preventDefault()}` to stop the browser's default focus-shift-on-click from
+  blurring the input (and closing the dropdown) a moment before the click's own handler even runs;
+  `selectTag` closes it deliberately afterward instead, plus blurs the input itself so tapping a
+  chip also dismisses the on-screen keyboard on mobile. Both this and the topic dropdown share the
+  same underlying `/api/answer-bank/tags` endpoint and facet-filter behavior from before — this
+  changes only how the tag list is *displayed*, not how filtering works.
 - **Re-fetches on two different kinds of "coming back to this tab,"** not just when a filter
   changes — since Chat/Practice/Topics stay mounted the whole time (see above), a search's `results`
   would otherwise sit in memory unchanged indefinitely, including after an admin edits that exact

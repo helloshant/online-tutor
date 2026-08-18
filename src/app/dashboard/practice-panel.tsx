@@ -45,6 +45,20 @@ export function PracticePanel({
   const [selectedTopicId, setSelectedTopicId] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // The tag *cloud* (every chip at once) doesn't scale -- a subject with a
+  // couple hundred banked questions can easily have 50+ tags, which on a
+  // phone-width screen would push the actual results below the fold behind
+  // a wall of chips. Instead the chip grid stays collapsed behind this text
+  // input until focused, and typing narrows it live -- so browsing the full
+  // set is still one tap away, but the common case (student already knows
+  // the chapter tag they want, e.g. "7.4") is a few keystrokes instead of
+  // hunting through rows of chips.
+  const [tagFilter, setTagFilter] = useState("");
+  const [tagListOpen, setTagListOpen] = useState(false);
+  // Blurred (not preventDefault-ed) via a manual .blur() call after a chip
+  // is clicked, so tapping a chip closes the dropdown and dismisses the
+  // on-screen keyboard on mobile without needing a separate close button.
+  const tagInputRef = useRef<HTMLInputElement>(null);
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
@@ -211,7 +225,18 @@ export function PracticePanel({
   function handleSelectTopic(value: string) {
     setSelectedTopicId(value);
     setSelectedTag(null);
+    setTagFilter("");
+    setTagListOpen(false);
   }
+
+  function selectTag(t: string) {
+    setSelectedTag((cur) => (cur === t ? null : t));
+    setTagFilter("");
+    setTagListOpen(false);
+    tagInputRef.current?.blur();
+  }
+
+  const filteredTags = tags.filter((t) => t.toLowerCase().includes(tagFilter.toLowerCase()));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -244,19 +269,77 @@ export function PracticePanel({
           </select>
 
           {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {tags.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setSelectedTag((cur) => (cur === t ? null : t))}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                    selectedTag === t ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              <div className="relative">
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  // While the dropdown is closed, the field doubles as a
+                  // "currently selected tag" readout (like a combobox) --
+                  // focusing it clears that back to the raw typed filter so
+                  // browsing/typing a fresh query always starts from a blank
+                  // slate rather than needing to backspace the old tag out
+                  // first.
+                  value={tagListOpen ? tagFilter : (selectedTag ?? "")}
+                  onFocus={() => {
+                    setTagListOpen(true);
+                    setTagFilter("");
+                  }}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") e.currentTarget.blur();
+                  }}
+                  onBlur={() => setTagListOpen(false)}
+                  placeholder="Filter by tag (e.g. Koshe Dekhi 7.4)…"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-8 text-sm"
+                />
+                {selectedTag && !tagListOpen && (
+                  <button
+                    type="button"
+                    // mousedown (not click) so this fires before the input's
+                    // onBlur would otherwise close the dropdown/clear focus
+                    // first -- same reasoning as the chip buttons below.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setSelectedTag(null)}
+                    aria-label="Clear tag filter"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground/40 hover:text-foreground"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              {tagListOpen && (
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-surface p-2">
+                  {filteredTags.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {filteredTags.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          // Prevents the input from blurring on click, which
+                          // would otherwise close this dropdown (via onBlur
+                          // above) a moment before the click itself even
+                          // registers -- selectTag() closes it deliberately
+                          // instead, right after applying the selection.
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectTag(t)}
+                          className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                            selectedTag === t
+                              ? "bg-brand text-white"
+                              : "bg-brand/10 text-brand hover:bg-brand/20"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="px-1 py-1 text-xs text-foreground/50">
+                      No tags match &ldquo;{tagFilter}&rdquo;.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
