@@ -10,6 +10,11 @@ const PAGES: { key: AdminPageKey; label: string; description: string }[] = [
   { key: "answer_bank", label: "Answer bank", description: "Review, approve, reject cached answers." },
   { key: "observability", label: "Observability", description: "View LLM cost/token usage and DB hit stats." },
   { key: "coupons", label: "Coupons", description: "Generate and revoke free-access coupon codes." },
+  {
+    key: "chapter_notes",
+    label: "Chapter notes",
+    description: "Author detailed chapter summaries for semantic (RAG) retrieval in chat.",
+  },
 ];
 
 export default async function AuthorizationPage() {

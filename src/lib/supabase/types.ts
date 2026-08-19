@@ -199,7 +199,13 @@ export type ChatEvent = {
   created_at: string;
 };
 
-export type AdminPageKey = "users" | "catalog" | "answer_bank" | "observability" | "coupons";
+export type AdminPageKey =
+  | "users"
+  | "catalog"
+  | "answer_bank"
+  | "observability"
+  | "coupons"
+  | "chapter_notes";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -211,6 +217,25 @@ export type AdminPagePermission = {
   id: string;
   user_id: string;
   page: AdminPageKey;
+  created_at: string;
+};
+
+// Admin-authored detailed chapter content, retrievable by semantic
+// similarity rather than keyword match -- see
+// supabase/migrations/0024_chapter_documents_rag.sql. RLS is enabled with
+// zero client-facing policies, same "backend-only table" posture as
+// answered_questions: the admin panel (src/app/admin/chapter-notes) reads/
+// writes it with the service-role client, there is no ordinary-session path
+// to this table at all. The derived, embedded chapter_document_chunks table
+// is never touched from this app -- only the orchestrator's own separate
+// Supabase connection reads/writes it (same as topic_summaries), so it has
+// no entry here.
+export type ChapterDocument = {
+  id: string;
+  topic_id: string;
+  title: string;
+  content: string;
+  created_by: string | null;
   created_at: string;
 };
 
@@ -323,6 +348,14 @@ export interface Database {
         Insert: Partial<AdminPagePermission>;
         Update: Partial<AdminPagePermission>;
         Relationships: [];
+      };
+      chapter_documents: {
+        Row: ChapterDocument;
+        Insert: Partial<ChapterDocument>;
+        Update: Partial<ChapterDocument>;
+        Relationships: [
+          { foreignKeyName: "chapter_documents_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+        ];
       };
     };
     Views: Record<string, never>;

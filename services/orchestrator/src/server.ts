@@ -3,6 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
+import { embedAndStoreChapterDocument } from "./chapterDocuments.js";
+import { findRelevantChapterChunks } from "./chapterRag.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
@@ -16,6 +18,8 @@ import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate
 import { getStoredTopicSummary, storeTopicSummary } from "./topicSummary.js";
 import type {
   AnswerScope,
+  ChapterDocumentEmbedRequest,
+  ChapterDocumentEmbedResponse,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
   ImageAttachment,
@@ -282,7 +286,29 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     }
   }
 
-  // Stage 4: LLM fallback.
+  // Stage 4: LLM fallback. Semantic retrieval against admin-authored
+  // chapter documents (see chapterRag.ts) runs here, not alongside the
+  // cache/answer-bank stages above -- those need an exact-enough question
+  // match to short-circuit the LLM call entirely, while this only ever
+  // *augments* the prompt the LLM is about to see, so it applies to any
+  // text question reaching this point (including a follow-up like "explain
+  // more", unlike the fresh-question-only cache/database stages) rather
+  // than being gated on isFreshQuestion. Skipped for an image-only message
+  // (nothing to embed) and, same as the syllabus gate, has nothing to do in
+  // staff mode (unrestricted, no single subject's chapter notes to ground
+  // it in).
+  const referenceChunks = studentBody.message.trim()
+    ? await findRelevantChapterChunks(
+        {
+          boardId: studentBody.boardId,
+          gradeId: studentBody.gradeId,
+          subjectId: studentBody.subjectId,
+          medium: studentBody.medium,
+        },
+        studentBody.message
+      )
+    : [];
+
   const systemPrompt = buildTutorSystemPrompt({
     subjectName: studentBody.subjectName,
     boardName: studentBody.boardName,
@@ -291,6 +317,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     topics: studentBody.topics,
     message: studentBody.message,
     hasImage: Boolean(image),
+    referenceChunks,
   });
 
   try {
@@ -369,6 +396,53 @@ app.post("/v1/cache/invalidate", requireSharedSecret, async (req: Request, res: 
 
   await deleteCachedAnswer(body as AnswerScope);
   res.json({ ok: true });
+});
+
+// Called by the web app's admin Chapter Notes action right after it writes
+// or updates a chapter_documents row -- this service holds the only Voyage
+// credentials in the whole app (same reasoning ANTHROPIC_API_KEY never
+// reaches the web app), so embedding has to happen here even though the raw
+// document itself is written directly by the web app's own service-role
+// client, not through this service.
+app.post("/v1/chapter-documents/embed", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<ChapterDocumentEmbedRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.documentId !== "string" ||
+    !body.documentId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.medium !== "string" ||
+    !body.medium ||
+    typeof body.content !== "string"
+  ) {
+    res.status(400).json({
+      error: "documentId, topicId, boardId, gradeId, subjectId, medium, and content are required",
+    });
+    return;
+  }
+
+  const result = await embedAndStoreChapterDocument(
+    body.documentId,
+    {
+      topicId: body.topicId,
+      boardId: body.boardId,
+      gradeId: body.gradeId,
+      subjectId: body.subjectId,
+      medium: body.medium as Medium,
+    },
+    body.content
+  );
+
+  const response: ChapterDocumentEmbedResponse = result;
+  res.json(response);
 });
 
 // Reached when a student clicks a topic in the syllabus panel. Checks the

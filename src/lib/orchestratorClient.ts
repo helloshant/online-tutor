@@ -157,6 +157,50 @@ export async function getTopicExercises(
   return { exercises: body.exercises as ExerciseItem[] };
 }
 
+export type ChapterDocumentEmbedRequest = {
+  documentId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  content: string;
+};
+
+// Called right after the admin Chapter Notes action writes/updates the
+// chapter_documents row itself (this app never holds Voyage credentials --
+// same reasoning it never holds ANTHROPIC_API_KEY -- so the actual
+// embedding call has to happen in the orchestrator; see
+// services/orchestrator/src/chapterDocuments.ts). Not best-effort like
+// invalidateCachedAnswer below: a failed embed here means the document is
+// saved but invisible to retrieval, which the admin action surfaces back to
+// whoever just saved it rather than silently swallowing.
+export async function embedChapterDocument(
+  request: ChapterDocumentEmbedRequest
+): Promise<{ chunkCount: number; embedded: boolean }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/embed`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || typeof body.chunkCount !== "number" || typeof body.embedded !== "boolean") {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { chunkCount: body.chunkCount, embedded: body.embedded };
+}
+
 export type CacheInvalidationScope = {
   boardId: string;
   gradeId: string;

@@ -9,8 +9,16 @@ export function buildTutorSystemPrompt(params: {
   topics: SyllabusTopic[];
   message: string;
   hasImage?: boolean;
+  // Chunks of admin-authored chapter content retrieved by semantic
+  // similarity to `message` (see chapterRag.ts) -- mainly for English-medium
+  // literature chapters, where the syllabus topic list alone ("the poem
+  // 'Daffodils'") gives the model a title but not the actual text needed to
+  // answer a specific comprehension question accurately. Empty/omitted for
+  // the common case (no matching chapter document, or the subject has none
+  // authored yet) -- the prompt reads identically to before this feature.
+  referenceChunks?: string[];
 }): string {
-  const { subjectName, boardName, gradeName, medium, topics, message, hasImage } = params;
+  const { subjectName, boardName, gradeName, medium, topics, message, hasImage, referenceChunks } = params;
 
   // Full chapter list (cheap: titles only) always defines the scope
   // boundary. Only topics relevant to the current question get full detail,
@@ -31,6 +39,14 @@ export function buildTutorSystemPrompt(params: {
   const imageNote = hasImage
     ? "\n\nThe student has attached a screenshot or photo (e.g. of a textbook question or their own handwritten work). Read whatever text, problem, or working is shown in it and treat that as their question, even if their typed message is empty or just a short caption."
     : "";
+  // Presented as reference material to consult, not a rule to obey --
+  // unlike the syllabus chapter list (an access-control boundary), a weak
+  // or irrelevant retrieval match should just be ignored by the model
+  // rather than forced into the answer.
+  const referenceSection =
+    referenceChunks && referenceChunks.length > 0
+      ? `\n\nReference material from this subject's chapter notes, possibly relevant to the current question (use it if it actually helps answer accurately; ignore it if it doesn't apply):\n${referenceChunks.map((chunk, i) => `[${i + 1}] ${chunk}`).join("\n\n")}`
+      : "";
 
   return `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.${imageNote}
 
@@ -39,7 +55,7 @@ Hard rules, in order of priority:
 2. Only answer questions about ${subjectName}. If the student asks about a different subject, gently decline and remind them they can switch subjects using the left panel to ask about that subject instead.
 3. Keep your answers within the ${gradeName} ${boardName} ${subjectName} syllabus, which covers these chapters: ${chapterList}. You may draw on the prerequisite knowledge needed to explain them, but do not teach content from later grades, other boards, or chapters not listed here.${detailSection}
 4. If a question falls outside this syllabus (e.g. a much more advanced topic, or something from a different grade or board), say so briefly, note that it's outside the current syllabus, and offer to explain the closest syllabus-appropriate topic instead.
-5. Teach, don't just answer: explain concepts clearly with simple examples appropriate for a ${gradeName} student, and show step-by-step reasoning for problems.
+5. Teach, don't just answer: explain concepts clearly with simple examples appropriate for a ${gradeName} student, and show step-by-step reasoning for problems.${referenceSection}
 
 Keep responses focused and appropriately concise for a chat interface.`;
 }

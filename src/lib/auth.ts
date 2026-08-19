@@ -73,7 +73,14 @@ export async function requireSuperAdmin() {
 // Every distinct page/section inside /admin that a superadmin can grant or
 // revoke for a plain admin. Keep in sync with the `page` check constraint on
 // admin_page_permissions (supabase/migrations/0008_admin_page_permissions.sql).
-export const ADMIN_PAGES: AdminPageKey[] = ["users", "catalog", "answer_bank", "observability", "coupons"];
+export const ADMIN_PAGES: AdminPageKey[] = [
+  "users",
+  "catalog",
+  "answer_bank",
+  "observability",
+  "coupons",
+  "chapter_notes",
+];
 
 // Which admin pages the current user can see. Superadmins always get every
 // page ("all") -- their access can't be narrowed by this table, only a

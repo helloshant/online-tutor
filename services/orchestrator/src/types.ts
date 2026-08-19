@@ -104,6 +104,30 @@ export type TopicExercisesResponse = {
   source: "database" | "llm";
 };
 
+// Sent by the web app's admin Chapter Notes action right after it writes/
+// updates a chapter_documents row (this service never touches that table
+// directly -- see chapterDocuments.ts). scope mirrors AnswerScope minus
+// `question`/`topicId`'s optionality, since a chapter document is always
+// tied to exactly one topic, unlike an ordinary chat question.
+export type ChapterDocumentEmbedRequest = {
+  documentId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  content: string;
+};
+
+export type ChapterDocumentEmbedResponse = {
+  chunkCount: number;
+  // false only when embedding itself failed (e.g. Voyage unreachable or
+  // VOYAGE_API_KEY unset) -- the caller still keeps the chapter_documents
+  // row either way (the raw text is never lost), this just tells it
+  // whether retrieval will actually find anything for that row yet.
+  embedded: boolean;
+};
+
 export type TokenUsage = { promptTokens: number; completionTokens: number };
 
 // What an LLM provider returns -- the model field echoes back the exact

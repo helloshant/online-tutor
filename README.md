@@ -226,6 +226,18 @@ See `supabase/migrations/` for the full schema:
   `search_answer_bank`: returns several ranked `(question, answer)` matches for a chapter+topic
   query instead of the single best match for one exact question, without touching the signature
   the chat pipeline already depends on.
+- `0024_chapter_documents_rag.sql` — enables the `vector` extension (pgvector) and adds
+  `chapter_documents` (admin-authored, same lockdown as `answered_questions`) and
+  `chapter_document_chunks` (chunked + embedded, `hnsw`/cosine index) plus a `match_chapter_chunks`
+  RPC, service-role only. See "Chapter notes (semantic retrieval)" below. Worth noting for anyone
+  adding a future `security definer` RPC in this project specifically: `revoke execute ... from
+  public` alone was **not** enough to lock this function down — this Supabase project's default
+  privileges turned out to grant `EXECUTE` directly to `anon`/`authenticated` on function creation
+  (confirmed via `pg_proc.proacl`), which is a distinct grant from `PUBLIC`'s and survives a
+  `PUBLIC`-only revoke; the fix was revoking from `public, anon, authenticated` explicitly. Neither
+  `search_answer_bank` nor `search_topic_exercises` needed this (checked directly against
+  `pg_proc.proacl` too), so this may be specific to when/how this project's defaults were set up —
+  don't assume `revoke ... from public` is sufficient for a new function without checking.
 
 ### Medium-scoped syllabus storage
 
@@ -317,6 +329,78 @@ observability the same way `/v1/chat` does (`source: "database"` on a hit, `"llm
 generate-and-store), tagged with a descriptive `question` string (`topic-summary: ...` /
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
+
+### Chapter notes (semantic retrieval / RAG)
+
+The answer bank and topic summaries above both work by *matching a whole question*, which is the
+right model for MCQ/formula-style content where wording tends to overlap. Prose doesn't fit that
+shape — an English-medium literature chapter has real content (plot, characters, themes) that a
+student might ask about in any of a hundred different phrasings, and full-text search on a
+paraphrase ("why was he upset") won't match text that says "he was angry" the way keyword overlap
+does for a repeated formula. This feature adds proper semantic retrieval on top of admin-authored
+chapter content, so a chat reply can be grounded in the real text instead of the LLM's own
+(unverifiable) general knowledge of it — see the earlier "Do you have the context of the book..."
+conversation in this app's own history for exactly the failure mode this exists to avoid: this
+codebase's author has no reliable way to verify a specific textbook's content from training data
+alone, and neither does the tutor LLM at chat time without something to ground it in.
+
+- **Two tables, deliberately split** (`0024_chapter_documents_rag.sql`): `chapter_documents` holds
+  the raw admin-authored text (one row per document; a topic can have more than one — e.g. "Chapter
+  summary" and "Character notes" as separate documents) and is what `/admin/chapter-notes` actually
+  edits/deletes, same trust model as the answer bank's bulk import (real, curated content, not
+  LLM-generated). `chapter_document_chunks` is entirely derived — split into retrieval-sized pieces
+  with an embedding vector each, regenerated wholesale (delete-then-reinsert for that
+  `document_id`) on every save rather than diffed, since a chapter document is at most a few dozen
+  chunks and diffing isn't worth the complexity. Only the orchestrator's own Supabase connection
+  ever reads/writes the chunks table, same as `topic_summaries`; the web app's admin action writes
+  `chapter_documents` directly (service-role client) but always goes through the orchestrator's
+  `POST /v1/chapter-documents/embed` for the derived chunks, since that service holds the only
+  Voyage credentials in the app (same reasoning it's the only place holding `ANTHROPIC_API_KEY`).
+- **Voyage AI, not a first-party Anthropic embedding model** (`services/orchestrator/src/
+  voyageClient.ts`) — Anthropic doesn't offer one, and Voyage is Anthropic's own recommended
+  embeddings partner. `voyage-4` at its default 1024-dimension output (a deliberate middle ground:
+  `voyage-4-large` for best quality or `voyage-4-lite` for lowest cost/latency were the alternatives)
+  handles this app's English/Hindi/Bengali multilingual content in one model. No official Voyage
+  Node/TypeScript SDK exists (only Python), so this is a plain `fetch` against their HTTP API — the
+  one external call in this codebase that isn't through an SDK. Fails open at every step (missing
+  key, network error, malformed response), same philosophy as `cache.ts`/`answerBank.ts`: a document
+  save or a chat reply must never fail just because embedding did.
+- **Paragraph-based chunking** (`chapterDocuments.ts`'s `chunkText`, `TARGET_CHUNK_CHARS = 1500`) —
+  greedily merges consecutive paragraphs up to the target size rather than a fixed character
+  window, so a chunk boundary lands between thoughts instead of mid-sentence; a single paragraph
+  longer than the target (rare) is hard-split on its own. No overlap between chunks — the added
+  complexity wasn't judged worth it for how this app actually uses chunks (a handful stitched into
+  a prompt, not reconstructing the original document), unlike RAG setups that need to reassemble
+  contiguous ranges.
+- **`match_chapter_chunks`** (the RPC) filters on `board_id`/`grade_id`/`subject_id`/`medium`
+  equality (denormalized onto `chapter_document_chunks` straight from the parent topic, not derived
+  via a join at query time — same reasoning `answered_questions` stores those columns directly)
+  before/alongside the `hnsw` vector index's cosine-distance ordering, and converts pgvector's `<=>`
+  distance (0 = identical) to a `1 - distance` similarity score, so `chapterRag.ts` can apply a
+  min-similarity threshold (`MIN_SIMILARITY = 0.5`) the same way `answerBank.ts` applies
+  `MIN_RANK` to `ts_rank` — an irrelevant retrieval match is worse than none, since it can distract
+  the model into answering the excerpt instead of the actual question, rather than just being
+  useless the way a low `ts_rank` match already was.
+- **Wired into `/v1/chat`'s stage 4, not a new short-circuiting stage.** Cache/answer-bank
+  (stages 2-3) *replace* the LLM call on a hit; retrieval only ever *augments* the prompt the LLM is
+  about to see, so it runs once the pipeline has already fallen through to a real LLM call, for any
+  text student question reaching that point — including a follow-up ("explain more"), unlike the
+  fresh-question-only cache/database stages, since semantic matching doesn't need an exact repeat
+  the way an exact-key cache lookup does. Retrieved chunks are appended to `buildTutorSystemPrompt`
+  as reference material to *consult*, explicitly framed as optional ("use it if it actually helps
+  ... ignore it if it doesn't apply") rather than a rule to obey the way the syllabus chapter-list
+  boundary is — a weak match should be silently ignored by the model, not forced into the answer.
+  Skipped entirely for an image-only message (nothing to embed) and in staff mode (unrestricted, no
+  single subject's chapter notes to ground it in).
+- **`/admin/chapter-notes`** (new admin page, `chapter_notes` permission — `0024`'s migration
+  grandfathers existing plain admins into it the same way `0008`/`0019` did for earlier new pages)
+  scopes a new document the same way bulk import scopes a paste: board/grade/subject/medium driving
+  a client-fetched topic dropdown — except the topic here is *required*, not optional, since a
+  chapter document is always about exactly one chapter (unlike a book/exam-paper paste that can span
+  several). Editing an existing document doesn't let the scope change — the topic is looked up
+  fresh from the existing row server-side (not trusted from a hidden form field) rather than
+  re-submitted, so a tampered request can't silently move a document's embeddings into the wrong
+  scope, and so the edit form itself only needs a title and content field.
 
 ### Mobile navigation
 
