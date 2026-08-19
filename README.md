@@ -238,6 +238,13 @@ See `supabase/migrations/` for the full schema:
   `search_answer_bank` nor `search_topic_exercises` needed this (checked directly against
   `pg_proc.proacl` too), so this may be specific to when/how this project's defaults were set up —
   don't assume `revoke ... from public` is sufficient for a new function without checking.
+- `0025_chapter_notes_search.sql` — widens `match_chapter_chunks`'s return columns to also include
+  `document_id`, `title`, `chapter`, and `topic` (previously just `content` and `similarity`), for
+  the student-facing chapter-notes search below to label each result by where it came from. A
+  return-type change means Postgres won't allow a plain `create or replace function` here (`42P13:
+  cannot change return type of existing function`) — needs an explicit `drop function` first, which
+  (unlike `create or replace`) does *not* preserve the previous grants, so the `revoke`/`grant` pair
+  from `0024` has to be reapplied after recreating it.
 
 ### Medium-scoped syllabus storage
 
@@ -401,6 +408,27 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   fresh from the existing row server-side (not trusted from a hidden form field) rather than
   re-submitted, so a tampered request can't silently move a document's embeddings into the wrong
   scope, and so the edit form itself only needs a title and content field.
+- **Student-facing search** (Practice panel's "Search chapter notes" section, `GET
+  /api/chapter-notes/search` → `POST /v1/chapter-notes/search` → `searchChapterNotes`) — direct,
+  read-only semantic search over the same chapter notes, no LLM call, same "browse what's already
+  banked" philosophy as the panel's existing topic/tag search over the answer bank just above it in
+  this file. Kept as its own independent search box rather than a third facet folded into that
+  topic/tag search: it queries an entirely different content type (long-form reference text, not
+  Q&A pairs) via an entirely different mechanism (a real embedding + vector-search round trip per
+  query, not an already-fetched list narrowed client-side), so an explicit **Search** button is used
+  rather than search-as-you-type — firing a fresh Voyage embedding call on every keystroke would be
+  slow and needlessly expensive. `resolveStudentSubjectScope` (the same helper
+  `/api/answer-bank/search` uses) resolves the board/grade/medium a student's *actual subscription*
+  entitles them to server-side — never trusted from client-supplied params — before the orchestrator
+  is called, since `chapter_document_chunks` has zero client-facing RLS policies the same as every
+  other backend-only table in this pipeline. `match_chapter_chunks`'s wider return shape (`0025`)
+  lets each result be labeled by its source chapter/topic/document title, not just shown as a bare
+  excerpt. Results get the same **"Explain further in chat"** bridge the topic/tag results have, but
+  through a separate `chapterNoteClick` state/prop all the way up through `DashboardShell` and
+  `ChatPanel` (distinct from `practiceQuestionClick`) — a chapter-note excerpt isn't a question a
+  student is stuck on, so it needed its own composed message ("Can you explain this in more
+  detail?...") rather than reusing `practiceQuestionClick`'s "I don't understand this solution..."
+  framing, which only makes sense for an actual banked Q&A pair.
 
 ### Mobile navigation
 

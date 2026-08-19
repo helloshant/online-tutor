@@ -201,6 +201,53 @@ export async function embedChapterDocument(
   return { chunkCount: body.chunkCount, embedded: body.embedded };
 }
 
+export type ChapterNotesSearchRequest = {
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  query: string;
+};
+
+export type ChapterNotesSearchResult = {
+  documentId: string;
+  title: string;
+  chapter: string;
+  topic: string;
+  content: string;
+  similarity: number;
+};
+
+// Backs /api/chapter-notes/search -- direct semantic search over
+// admin-authored chapter notes, no LLM call. Distinct from
+// getOrchestratedReply: this returns several ranked excerpts for a student
+// to browse, not one generated reply.
+export async function searchChapterNotes(
+  request: ChapterNotesSearchRequest
+): Promise<{ results: ChapterNotesSearchResult[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-notes/search`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.results)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { results: body.results as ChapterNotesSearchResult[] };
+}
+
 export type CacheInvalidationScope = {
   boardId: string;
   gradeId: string;

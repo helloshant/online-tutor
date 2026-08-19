@@ -7,6 +7,15 @@ import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 type SearchResult = { question: string; answer: string; image_urls: string[] };
 
+type ChapterNoteResult = {
+  documentId: string;
+  title: string;
+  chapter: string;
+  topic: string;
+  content: string;
+  similarity: number;
+};
+
 // A dedicated browse/search surface for the answer bank -- distinct from
 // the chat timeline's per-topic "Relevant Exercises" bubble (which is
 // LLM-backed and generates fresh exercises on a miss): this is read-only
@@ -22,6 +31,7 @@ export function PracticePanel({
   medium,
   active,
   onAskAbout,
+  onAskAboutChapterNote,
 }: {
   boardId: string;
   gradeId: string;
@@ -39,6 +49,11 @@ export function PracticePanel({
   // into it conversationally instead of hitting a dead end here -- Practice
   // itself is read-only, with no LLM call of its own.
   onAskAbout: (question: string, answer: string) => void;
+  // Same bridge, for a chapter-notes search result below -- a separate
+  // callback (not onAskAbout reused) since a chapter-note excerpt isn't a
+  // question/answer pair, so ChatPanel needs the chapter/topic/content
+  // shape to compose an appropriately-worded message instead.
+  onAskAboutChapterNote: (chapter: string, topic: string, content: string) => void;
 }) {
   const [topics, setTopics] = useState<SyllabusTopic[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(true);
@@ -72,6 +87,48 @@ export function PracticePanel({
   // render while already active -- filter changes while active are already
   // handled by the other effect below.
   const wasActiveRef = useRef(false);
+
+  // "Search chapter notes" -- a second, independent search surface (own
+  // input, own results, own loading/error state) rather than a third facet
+  // folded into the topic/tag search above: it queries a completely
+  // different content type (admin-authored chapter reference text, matched
+  // by meaning) via a completely different mechanism (semantic/vector
+  // search, a real embedding + database round trip per query), so it isn't
+  // a filter that narrows the same result list the way topic/tag do. An
+  // explicit Search button rather than search-as-you-type (unlike the tag
+  // filter, which is instant client-side substring matching over an
+  // already-fetched small list) -- firing a fresh embedding call on every
+  // keystroke would be needlessly slow and expensive.
+  const [chapterQuery, setChapterQuery] = useState("");
+  const [chapterResults, setChapterResults] = useState<ChapterNoteResult[] | null>(null);
+  const [loadingChapterResults, setLoadingChapterResults] = useState(false);
+  const [chapterError, setChapterError] = useState<string | null>(null);
+  const chapterRequestIdRef = useRef(0);
+
+  async function runChapterSearch(query: string) {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const requestId = ++chapterRequestIdRef.current;
+    setLoadingChapterResults(true);
+    setChapterError(null);
+
+    try {
+      const params = new URLSearchParams({ subjectId, q: trimmed });
+      const res = await fetch(`/api/chapter-notes/search?${params.toString()}`, { cache: "no-store" });
+      const body = await res.json().catch(() => null);
+      if (chapterRequestIdRef.current !== requestId) return; // superseded by a newer search
+      if (!res.ok || !Array.isArray(body?.results)) {
+        setChapterError(body?.error ?? "Could not search chapter notes.");
+        setChapterResults(null);
+        return;
+      }
+      setChapterResults(body.results);
+    } catch {
+      if (chapterRequestIdRef.current === requestId) setChapterError("Could not search chapter notes.");
+    } finally {
+      if (chapterRequestIdRef.current === requestId) setLoadingChapterResults(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -342,6 +399,59 @@ export function PracticePanel({
               )}
             </div>
           )}
+
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-sm font-medium">Search chapter notes</p>
+            <p className="mt-0.5 text-xs text-foreground/50">
+              Find relevant chapter content by meaning, not just exact wording -- e.g. ask about a
+              character or theme instead of quoting the textbook.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runChapterSearch(chapterQuery);
+              }}
+              className="mt-2 flex gap-2"
+            >
+              <input
+                type="text"
+                value={chapterQuery}
+                onChange={(e) => setChapterQuery(e.target.value)}
+                placeholder="e.g. why was the boy upset in this chapter?"
+                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={loadingChapterResults || !chapterQuery.trim()}
+                className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+              >
+                {loadingChapterResults ? "Searching…" : "Search"}
+              </button>
+            </form>
+            {chapterError && <p className="mt-2 text-sm text-red-600">{chapterError}</p>}
+            {chapterResults && chapterResults.length === 0 && !chapterError && (
+              <p className="mt-2 text-sm text-foreground/50">No relevant chapter notes found.</p>
+            )}
+            {chapterResults && chapterResults.length > 0 && (
+              <ol className="mt-3 space-y-3">
+                {chapterResults.map((r) => (
+                  <li key={r.documentId + r.content} className="rounded-lg bg-background p-3 text-sm">
+                    <p className="text-xs font-medium text-foreground/60">
+                      {r.chapter} — {r.topic} · {r.title}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-foreground/80">{r.content}</p>
+                    <button
+                      type="button"
+                      onClick={() => onAskAboutChapterNote(r.chapter, r.topic, r.content)}
+                      className="mt-2 text-xs font-medium text-brand hover:underline"
+                    >
+                      Explain further in chat →
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
 
           <div>
             {!selectedTopicId && !selectedTag ? (

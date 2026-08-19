@@ -62,6 +62,19 @@ export function DashboardShell({
     question: string;
     answer: string;
   } | null>(null);
+  // Same "seed a pending context, jump to Chat" shape as practiceQuestionClick
+  // above, for the Practice panel's separate "Search chapter notes" results
+  // -- kept as its own state rather than reused, since a chapter-note
+  // excerpt isn't a question/answer pair (it's admin-authored reference
+  // text a student might want explained), so it needs its own composed
+  // message framing in ChatPanel rather than the "I don't understand this
+  // solution" wording that fits an actual banked Q&A.
+  const [chapterNoteClick, setChapterNoteClick] = useState<{
+    clickId: string;
+    chapter: string;
+    topic: string;
+    content: string;
+  } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below. Desktop-only state:
@@ -100,6 +113,12 @@ export function DashboardShell({
   // context into a panel the student isn't looking at would be invisible.
   function handleAskAboutPractice(question: string, answer: string) {
     setPracticeQuestionClick({ clickId: crypto.randomUUID(), question, answer });
+    setMainTab("chat");
+  }
+
+  // Same "jump to Chat" reasoning as the two handlers above.
+  function handleAskAboutChapterNote(chapter: string, topic: string, content: string) {
+    setChapterNoteClick({ clickId: crypto.randomUUID(), chapter, topic, content });
     setMainTab("chat");
   }
 
@@ -274,6 +293,7 @@ export function DashboardShell({
                   isStaffUser={isStaffUser}
                   topicClick={topicClick}
                   practiceQuestionClick={practiceQuestionClick}
+                  chapterNoteClick={chapterNoteClick}
                 />
               </div>
               {boardId && gradeId && medium && !isStaffUser && (
@@ -286,6 +306,7 @@ export function DashboardShell({
                     medium={medium}
                     active={mainTab === "practice"}
                     onAskAbout={handleAskAboutPractice}
+                    onAskAboutChapterNote={handleAskAboutChapterNote}
                   />
                 </div>
               )}
