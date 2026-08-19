@@ -128,32 +128,6 @@ export type ChapterDocumentEmbedResponse = {
   embedded: boolean;
 };
 
-// The student-facing "Search chapter notes" feature (Practice panel) --
-// direct semantic search, no LLM call, distinct from ChatOrchestrationRequest
-// even though the scope fields are the same shape as AnswerScope minus
-// `question` -- kept as its own named type since this endpoint returns
-// several ranked chunk matches rather than a single reply/answer.
-export type ChapterNotesSearchRequest = {
-  boardId: string;
-  gradeId: string;
-  subjectId: string;
-  medium: Medium;
-  query: string;
-};
-
-export type ChapterNotesSearchResult = {
-  documentId: string;
-  title: string;
-  chapter: string;
-  topic: string;
-  content: string;
-  similarity: number;
-};
-
-export type ChapterNotesSearchResponse = {
-  results: ChapterNotesSearchResult[];
-};
-
 export type TokenUsage = { promptTokens: number; completionTokens: number };
 
 // What an LLM provider returns -- the model field echoes back the exact

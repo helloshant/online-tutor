@@ -4,7 +4,7 @@ import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerB
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
 import { embedAndStoreChapterDocument } from "./chapterDocuments.js";
-import { findRelevantChapterChunks, searchChapterNotes } from "./chapterRag.js";
+import { findRelevantChapterChunks } from "./chapterRag.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
@@ -20,8 +20,6 @@ import type {
   AnswerScope,
   ChapterDocumentEmbedRequest,
   ChapterDocumentEmbedResponse,
-  ChapterNotesSearchRequest,
-  ChapterNotesSearchResponse,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
   ImageAttachment,
@@ -444,43 +442,6 @@ app.post("/v1/chapter-documents/embed", requireSharedSecret, async (req: Request
   );
 
   const response: ChapterDocumentEmbedResponse = result;
-  res.json(response);
-});
-
-// Backs the Practice panel's student-facing "Search chapter notes" feature
-// -- direct semantic search, read-only, no LLM call, same philosophy as the
-// panel's existing topic/tag search over the answer bank. The web app
-// resolves the caller's board/grade/medium from their actual subscription
-// before calling this (see /api/chapter-notes/search), so a student can
-// never search outside what they're entitled to just by editing request
-// params -- this endpoint trusts whatever scope it's given, the same way
-// every other internal endpoint in this file does.
-app.post("/v1/chapter-notes/search", requireSharedSecret, async (req: Request, res: Response) => {
-  const body = req.body as Partial<ChapterNotesSearchRequest> | undefined;
-
-  if (
-    !body ||
-    typeof body.boardId !== "string" ||
-    !body.boardId ||
-    typeof body.gradeId !== "string" ||
-    !body.gradeId ||
-    typeof body.subjectId !== "string" ||
-    !body.subjectId ||
-    typeof body.medium !== "string" ||
-    !body.medium ||
-    typeof body.query !== "string" ||
-    !body.query.trim()
-  ) {
-    res.status(400).json({ error: "boardId, gradeId, subjectId, medium, and query are required" });
-    return;
-  }
-
-  const results = await searchChapterNotes(
-    { boardId: body.boardId, gradeId: body.gradeId, subjectId: body.subjectId, medium: body.medium as Medium },
-    body.query
-  );
-
-  const response: ChapterNotesSearchResponse = { results };
   res.json(response);
 });
 

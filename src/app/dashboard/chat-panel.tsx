@@ -61,7 +61,6 @@ export function ChatPanel({
   isStaffUser,
   topicClick,
   practiceQuestionClick,
-  chapterNoteClick,
 }: {
   subscriptionId: string | null;
   subject: SubjectSummary;
@@ -69,7 +68,6 @@ export function ChatPanel({
   isStaffUser: boolean;
   topicClick: { clickId: string; topic: SyllabusTopic } | null;
   practiceQuestionClick: { clickId: string; question: string; answer: string } | null;
-  chapterNoteClick: { clickId: string; chapter: string; topic: string; content: string } | null;
 }) {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -80,7 +78,6 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
-  const lastChapterNoteClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -211,21 +208,6 @@ export function ChatPanel({
       null
     );
   }, [practiceQuestionClick, performSend]);
-
-  // Same "send straight away" reasoning as practiceQuestionClick above, but
-  // a chapter-note excerpt isn't a solution the student is stuck on -- it's
-  // reference text they found via search, so the framing asks for more
-  // explanation/context around it rather than claiming not to understand a
-  // "solution" that was never a Q&A pair to begin with.
-  useEffect(() => {
-    if (!chapterNoteClick || chapterNoteClick.clickId === lastChapterNoteClickIdRef.current) return;
-    lastChapterNoteClickIdRef.current = chapterNoteClick.clickId;
-    const { chapter, topic, content } = chapterNoteClick;
-    void performSend(
-      `Can you explain this in more detail?\n\nFrom "${chapter} — ${topic}":\n${content}`,
-      null
-    );
-  }, [chapterNoteClick, performSend]);
 
   async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
