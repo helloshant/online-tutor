@@ -280,10 +280,7 @@ export function DashboardShell({
                 <div className={mainTab === "practice" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                   <PracticePanel
                     key={selectedSubject.id}
-                    boardId={boardId}
-                    gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={medium}
                     active={mainTab === "practice"}
                     onAskAbout={handleAskAboutPractice}
                   />

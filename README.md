@@ -670,13 +670,18 @@ provenance labels a student can search by directly, e.g. "show me exercises from
   mobile-only `Topics` tab described above — all three stay mounted and toggle via CSS display
   rather than conditional rendering, so switching tabs never discards any panel's state, e.g. an
   in-progress chat or a half-built search). The dedicated browse/search surface for the answer bank:
-  a topic dropdown, tag chips (scoped to the selected topic when there is one, via the same `tags`
-  endpoint), and results that update automatically as either filter changes — no separate submit
-  step, since these are facet filters, not a form. Unlike `SyllabusPanel`, this tab renders
-  identically on mobile and desktop, since it lives in the main content area rather than a sidebar.
-  `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected version of this)
-  was removed in favor of this single, more capable surface. Practice is deliberately read-only —
-  no LLM call happens here — so each result has an **"Explain further in chat"** button for the case
+  tag chips (via the `tags` endpoint), and results that update automatically as soon as a tag is
+  picked — no separate submit step, since this is a facet filter, not a form. Unlike `SyllabusPanel`,
+  this tab renders identically on mobile and desktop, since it lives in the main content area rather
+  than a sidebar. `SyllabusPanel`'s previous standalone tag search box (an earlier, disconnected
+  version of this) was removed in favor of this single, more capable surface. **Topic-based
+  filtering was later removed from this panel entirely** (it originally also had a topic dropdown,
+  combinable with the tag filter, backed by `topicId` on `/api/answer-bank/search`) — topic browsing
+  still exists via `SyllabusPanel`/the mobile `Topics` tab, which drop a summary bubble into the chat
+  timeline instead; that API route's own `topicId` parameter is untouched and still used by that flow
+  and by the chat bubble's own tag refinement below, this panel just no longer sends it. Practice is
+  deliberately read-only — no LLM call happens here — so each result has an **"Explain further in
+  chat"** button for the case
   where a student doesn't follow the banked solution: it switches to the Chat tab and immediately
   sends a composed message asking for a more detailed, step-by-step explanation of that specific
   question and its banked answer (`ChatPanel`'s `practiceQuestionClick` prop, carried down from
