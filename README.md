@@ -442,6 +442,18 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   generation) were deliberately not built here — they'd add a regenerate-on-failure loop (real
   latency/cost on every reference-augmented reply) beyond what's been asked for so far, and are worth
   revisiting if hallucination in practice turns out to need them.
+- **Few-shot examples, anchoring rule 6.** Three short example exchanges (partial-grounding honesty,
+  plain refusal when the material doesn't cover the question, declining a verbatim quote in favor of
+  paraphrase) are appended right after the retrieved reference material, only when there *is* any —
+  same reasoning as `referenceSection` itself: nothing to anchor, and no reason to pay the token cost,
+  on the vast majority of chat messages that have no chapter-notes match at all. Written deliberately
+  generic (no character names, titles, or story specifics — "that scene," "that poem," "Chapter 2")
+  since this prompt serves every subject and board this app has, not one dedicated book; the source
+  guardrail notes' own examples name specific "Bliss" chapters and characters, which would read as
+  bizarre and out of place on, say, a physics question. A worked example anchors a behavior rule far
+  more reliably than the rule's own prose alone — this is the one item from those notes' "few-shot
+  examples" checklist entry that was a straightforward, clearly-net-positive addition rather than a
+  judgment call, so it was added directly rather than left as a follow-up.
 
 ### Mobile navigation
 
