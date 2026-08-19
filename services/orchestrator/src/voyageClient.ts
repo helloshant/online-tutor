@@ -19,6 +19,29 @@ type VoyageInputType = "document" | "query";
 
 let warnedMissingKey = false;
 
+// Chapter-document imports call this once per document, back to back with
+// no gap (see chapterDocuments.ts) -- observed in practice: the last
+// document or two in a several-chapter import fails while the earlier ones
+// succeed, the classic signature of a request-per-minute limit (or an
+// occasional transient network blip) being tripped partway through a tight
+// sequential loop, not anything wrong with that specific document's
+// content. Retries absorb exactly that case instead of forcing a full
+// re-run of the import for one chapter.
+const MAX_ATTEMPTS = 4;
+const BASE_RETRY_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 429 (rate limited) and 5xx (Voyage's own transient failures) are worth
+// retrying; anything else (400 bad request, 401 bad key, 413 payload too
+// large, ...) will just fail the same way again, so retrying would only
+// delay surfacing a real problem.
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 // Fails open like every other optional stage in this service (cache.ts,
 // answerBank.ts) -- a missing key, a network error, or a non-200 response
 // all just mean "no embeddings this call," never a thrown error that would
@@ -41,18 +64,46 @@ export async function embed(texts: string[], inputType: VoyageInputType): Promis
     return null;
   }
 
-  try {
-    const res = await fetch(VOYAGE_EMBEDDINGS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ input: texts, model: VOYAGE_MODEL, input_type: inputType }),
-    });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(VOYAGE_EMBEDDINGS_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ input: texts, model: VOYAGE_MODEL, input_type: inputType }),
+      });
+    } catch (err) {
+      // Network-level failure (DNS, connection reset, timeout) -- always
+      // worth retrying, same reasoning as a 5xx.
+      if (attempt === MAX_ATTEMPTS) {
+        console.error("Voyage embeddings request failed:", err);
+        return null;
+      }
+      console.warn(`Voyage embeddings request failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying:`, err);
+      await sleep(BASE_RETRY_DELAY_MS * 2 ** (attempt - 1));
+      continue;
+    }
 
     if (!res.ok) {
-      console.error(`Voyage embeddings request failed with status ${res.status}: ${await res.text()}`);
+      const bodyText = await res.text();
+      if (isRetryableStatus(res.status) && attempt < MAX_ATTEMPTS) {
+        // Voyage sends Retry-After (seconds) on a 429 when it wants a
+        // specific wait -- honor it over our own backoff schedule when
+        // present, since it reflects their actual rate-limit window rather
+        // than a guess.
+        const retryAfterHeader = res.headers.get("retry-after");
+        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
+        const delayMs = Number.isFinite(retryAfterMs) ? retryAfterMs : BASE_RETRY_DELAY_MS * 2 ** (attempt - 1);
+        console.warn(
+          `Voyage embeddings request failed with status ${res.status} (attempt ${attempt}/${MAX_ATTEMPTS}), retrying in ${delayMs}ms: ${bodyText}`
+        );
+        await sleep(delayMs);
+        continue;
+      }
+      console.error(`Voyage embeddings request failed with status ${res.status}: ${bodyText}`);
       return null;
     }
 
@@ -65,8 +116,9 @@ export async function embed(texts: string[], inputType: VoyageInputType): Promis
     const embeddings = new Array<number[]>(texts.length);
     for (const entry of body.data) embeddings[entry.index] = entry.embedding;
     return embeddings;
-  } catch (err) {
-    console.error("Voyage embeddings request failed:", err);
-    return null;
   }
+
+  // Unreachable -- the loop above always returns or (on its final iteration)
+  // falls into one of the two `return null` branches instead of `continue`.
+  return null;
 }

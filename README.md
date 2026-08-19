@@ -371,6 +371,16 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   one external call in this codebase that isn't through an SDK. Fails open at every step (missing
   key, network error, malformed response), same philosophy as `cache.ts`/`answerBank.ts`: a document
   save or a chat reply must never fail just because embedding did.
+- **Retry with backoff on transient Voyage failures** (`embed`'s own retry loop, `MAX_ATTEMPTS = 4`,
+  exponential backoff starting at 1s, honoring a `Retry-After` header on a 429 over its own schedule
+  when Voyage sends one) — added after observing the actual failure pattern in production: a
+  multi-chapter bulk import calls Voyage once per chapter, back to back with no gap, and the last
+  chapter or two in the sequence would occasionally fail to embed while the earlier ones succeeded —
+  the classic signature of a requests-per-minute limit (or an occasional transient network blip)
+  being tripped partway through a tight sequential loop, not anything wrong with that specific
+  chapter's content. Only retries what's actually worth retrying — HTTP 429 and 5xx, or a
+  network-level exception — never a 4xx like a bad request or a bad key, which would just fail the
+  same way again and only delay surfacing a real problem.
 - **Paragraph-based chunking** (`chapterDocuments.ts`'s `chunkText`, `TARGET_CHUNK_CHARS = 1500`) —
   greedily merges consecutive paragraphs up to the target size rather than a fixed character
   window, so a chunk boundary lands between thoughts instead of mid-sentence; a single paragraph
