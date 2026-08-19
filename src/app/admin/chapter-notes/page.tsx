@@ -2,6 +2,7 @@ import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteChapterDocument } from "./actions";
 import { EditChapterDocumentForm } from "./edit-document-form";
+import { ImportChunksForm } from "./import-chunks-form";
 import { NewChapterDocumentForm } from "./new-document-form";
 
 // Purely for a readable preview in the list below -- the full text is what
@@ -40,6 +41,7 @@ export default async function ChapterNotesPage() {
       </p>
 
       <NewChapterDocumentForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
+      <ImportChunksForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
 
       <div className="mt-6 space-y-3">
         {(documents ?? []).length === 0 && (

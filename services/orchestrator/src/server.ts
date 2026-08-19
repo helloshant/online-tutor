@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
-import { embedAndStoreChapterDocument } from "./chapterDocuments.js";
+import { embedAndStoreChapterDocument, embedAndStorePrechunkedDocument } from "./chapterDocuments.js";
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
@@ -20,6 +20,7 @@ import type {
   AnswerScope,
   ChapterDocumentEmbedRequest,
   ChapterDocumentEmbedResponse,
+  ChapterDocumentImportChunksRequest,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
   ImageAttachment,
@@ -439,6 +440,54 @@ app.post("/v1/chapter-documents/embed", requireSharedSecret, async (req: Request
       medium: body.medium as Medium,
     },
     body.content
+  );
+
+  const response: ChapterDocumentEmbedResponse = result;
+  res.json(response);
+});
+
+// Sibling of /v1/chapter-documents/embed above, for the pre-chunked JSON
+// import path (src/app/admin/chapter-notes/import-chunks-form.tsx) --
+// `chunks` are already split along real structural boundaries by whoever
+// prepared the JSON, so this skips chunkText() entirely and embeds each
+// piece as given, preserving its own field_type/citation.
+app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<ChapterDocumentImportChunksRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.documentId !== "string" ||
+    !body.documentId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.medium !== "string" ||
+    !body.medium ||
+    !Array.isArray(body.chunks) ||
+    body.chunks.some((c) => typeof c?.content !== "string" || !c.content.trim())
+  ) {
+    res.status(400).json({
+      error:
+        "documentId, topicId, boardId, gradeId, subjectId, medium, and a non-empty chunks array (each with a content string) are required",
+    });
+    return;
+  }
+
+  const result = await embedAndStorePrechunkedDocument(
+    body.documentId,
+    {
+      topicId: body.topicId,
+      boardId: body.boardId,
+      gradeId: body.gradeId,
+      subjectId: body.subjectId,
+      medium: body.medium as Medium,
+    },
+    body.chunks
   );
 
   const response: ChapterDocumentEmbedResponse = result;

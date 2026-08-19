@@ -119,6 +119,9 @@ export type ChapterDocumentEmbedRequest = {
   content: string;
 };
 
+// Shared by both the naive paste-and-chunk endpoint above and the
+// pre-chunked import endpoint below -- both ultimately just report how many
+// chunks landed and whether embedding itself succeeded.
 export type ChapterDocumentEmbedResponse = {
   chunkCount: number;
   // false only when embedding itself failed (e.g. Voyage unreachable or
@@ -126,6 +129,21 @@ export type ChapterDocumentEmbedResponse = {
   // row either way (the raw text is never lost), this just tells it
   // whether retrieval will actually find anything for that row yet.
   embedded: boolean;
+};
+
+// Sibling of ChapterDocumentEmbedRequest for the pre-chunked JSON import
+// path (see chapterDocuments.ts's embedAndStorePrechunkedDocument) --
+// `chunks` arrive already split by whoever prepared the JSON, each with its
+// own optional fieldType/citation, so this skips chunkText() entirely
+// rather than re-splitting already-correct pieces.
+export type ChapterDocumentImportChunksRequest = {
+  documentId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  chunks: { content: string; fieldType?: string; citation?: string }[];
 };
 
 export type TokenUsage = { promptTokens: number; completionTokens: number };

@@ -238,6 +238,12 @@ See `supabase/migrations/` for the full schema:
   `search_answer_bank` nor `search_topic_exercises` needed this (checked directly against
   `pg_proc.proacl` too), so this may be specific to when/how this project's defaults were set up —
   don't assume `revoke ... from public` is sufficient for a new function without checking.
+- `0025_chapter_chunk_metadata.sql` — adds nullable `field_type` and `citation` columns to
+  `chapter_document_chunks`, populated only by the pre-chunked JSON bulk-import path (see "Chapter
+  notes" below); a chunk from the original paste-and-auto-chunk path leaves both null. Same
+  return-type-change constraint as before: `match_chapter_chunks` needed an explicit `drop function`
+  (not `create or replace`) to add the two columns to its return table, so the `revoke`/`grant`
+  lockdown pair was reapplied afterward and reverified against `pg_proc.proacl`.
 
 ### Medium-scoped syllabus storage
 
@@ -401,6 +407,41 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   fresh from the existing row server-side (not trusted from a hidden form field) rather than
   re-submitted, so a tampered request can't silently move a document's embeddings into the wrong
   scope, and so the edit form itself only needs a title and content field.
+- **Bulk import from pre-chunked JSON** (`ImportChunksForm`, `importChapterChunksJson`,
+  `chapterDocuments.ts`'s `embedAndStorePrechunkedDocument`, `POST /v1/chapter-documents/
+  import-chunks`) — a second way to populate chapter documents, alongside the single-document paste
+  form above, for content prepared *offline* with real structural boundaries already decided (one
+  chunk per chapter overview, plot summary, character list, individual vocabulary word, etc.),
+  optionally each with its own citation string — rather than one long block of text for this app's
+  own naive paragraph-based `chunkText()` to re-split. The uploaded file is a single top-level
+  `chunks` array (numeric `chapter_number`, string `chapter_title`/`text`, optional `field_type`/
+  `citation` per entry); every distinct chapter found in it becomes its own `chapter_documents` row
+  under **one** admin-selected topic scope (same reasoning the single-document form requires exactly
+  one topic), found-or-created by `(topic_id, title)` so re-uploading a corrected file updates those
+  same chapters in place rather than duplicating them. The two `field_type`/`citation` columns this
+  adds to `chapter_document_chunks` (`0025_chapter_chunk_metadata.sql`) are null for anything created
+  through the plain paste form, which every reader treats as "no extra metadata," not an error.
+  **Important asymmetry to flag to admins:** re-saving one of these chapters through the plain
+  Edit form re-chunks it with the naive splitter and silently discards its field_type/citation
+  metadata — updating a JSON-imported chapter means re-running this import with a corrected file,
+  not editing it through the other form.
+- **Chat-pipeline grounding tightened for retrieved chapter content.** `findRelevantChapterChunks`
+  now returns each chunk's `fieldType`/`citation` alongside its text, and `buildTutorSystemPrompt`
+  labels each reference chunk with its field type (e.g. `[vocabulary]`) and appends its citation
+  (`(Source: ...)`) when present, falling back to naming the chapter/topic when a chunk has none (the
+  plain-paste path). A new rule 6 in the system prompt asks the model to ground its answer in
+  provided reference material rather than filling gaps with outside knowledge when the material
+  covers the question, say plainly what it can't confirm when it only partly does, never quote long
+  passages/poem lines/dialogue verbatim from it (paraphrase instead), and name the source when it
+  relies on a specific piece. `MIN_SIMILARITY` (the retrieval-layer floor below which a match is
+  dropped before ever reaching the model) was raised from an initial `0.5` to `0.55`, matching the
+  low end of a starting-point range worth tuning against real usage rather than a value derived from
+  this app's own data. These changes were adopted from a set of general RAG grounding/guardrail
+  notes provided for this feature; the output-layer checks those notes also describe (a
+  citation-presence regex check and a verbatim-overlap check on the LLM's *reply*, both after
+  generation) were deliberately not built here — they'd add a regenerate-on-failure loop (real
+  latency/cost on every reference-augmented reply) beyond what's been asked for so far, and are worth
+  revisiting if hallucination in practice turns out to need them.
 
 ### Mobile navigation
 

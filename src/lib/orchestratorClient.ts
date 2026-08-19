@@ -201,6 +201,47 @@ export async function embedChapterDocument(
   return { chunkCount: body.chunkCount, embedded: body.embedded };
 }
 
+export type ChapterDocumentImportChunksRequest = {
+  documentId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  chunks: { content: string; fieldType?: string; citation?: string }[];
+};
+
+// Sibling of embedChapterDocument above, for the pre-chunked JSON import
+// path -- the chunks are already split along real structural boundaries by
+// whoever prepared the JSON (see src/app/admin/chapter-notes/
+// import-chunks-form.tsx), so the orchestrator embeds them as given rather
+// than re-splitting with its own naive chunker.
+export async function importChapterChunks(
+  request: ChapterDocumentImportChunksRequest
+): Promise<{ chunkCount: number; embedded: boolean }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/import-chunks`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || typeof body.chunkCount !== "number" || typeof body.embedded !== "boolean") {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { chunkCount: body.chunkCount, embedded: body.embedded };
+}
+
 export type CacheInvalidationScope = {
   boardId: string;
   gradeId: string;

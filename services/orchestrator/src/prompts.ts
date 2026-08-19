@@ -1,3 +1,4 @@
+import type { RetrievedChunk } from "./chapterRag.js";
 import { selectRelevantTopics } from "./syllabusFilter.js";
 import type { Medium, SyllabusTopic } from "./types.js";
 
@@ -16,7 +17,7 @@ export function buildTutorSystemPrompt(params: {
   // answer a specific comprehension question accurately. Empty/omitted for
   // the common case (no matching chapter document, or the subject has none
   // authored yet) -- the prompt reads identically to before this feature.
-  referenceChunks?: string[];
+  referenceChunks?: RetrievedChunk[];
 }): string {
   const { subjectName, boardName, gradeName, medium, topics, message, hasImage, referenceChunks } = params;
 
@@ -39,13 +40,27 @@ export function buildTutorSystemPrompt(params: {
   const imageNote = hasImage
     ? "\n\nThe student has attached a screenshot or photo (e.g. of a textbook question or their own handwritten work). Read whatever text, problem, or working is shown in it and treat that as their question, even if their typed message is empty or just a short caption."
     : "";
-  // Presented as reference material to consult, not a rule to obey --
-  // unlike the syllabus chapter list (an access-control boundary), a weak
-  // or irrelevant retrieval match should just be ignored by the model
-  // rather than forced into the answer.
+  // Presented as reference material to consult, not an access-control rule
+  // to obey the way the syllabus chapter list is -- a weak or irrelevant
+  // retrieval match should just be ignored by the model rather than forced
+  // into the answer (chapterRag.ts already drops anything below its own
+  // similarity floor before it ever reaches here, but a mediocre match
+  // above that floor can still be the wrong thing to lean on for a
+  // specific question). Each chunk is labeled with its field_type when the
+  // source data has one (e.g. "[vocabulary]" vs "[summary]" -- see
+  // chapterDocuments.ts's pre-chunked import path), so the model knows what
+  // kind of information it's looking at, and followed by its citation when
+  // one exists, matching the exact "(Source: ...)" phrasing rule 6 below
+  // asks it to reuse.
   const referenceSection =
     referenceChunks && referenceChunks.length > 0
-      ? `\n\nReference material from this subject's chapter notes, possibly relevant to the current question (use it if it actually helps answer accurately; ignore it if it doesn't apply):\n${referenceChunks.map((chunk, i) => `[${i + 1}] ${chunk}`).join("\n\n")}`
+      ? `\n\nReference material from this subject's chapter notes, possibly relevant to the current question:\n${referenceChunks
+          .map((chunk, i) => {
+            const label = chunk.fieldType ? `[${chunk.fieldType}] ` : "";
+            const source = chunk.citation ? `\n(Source: ${chunk.citation})` : "";
+            return `[${i + 1}] ${label}${chunk.content}${source}`;
+          })
+          .join("\n\n")}`
       : "";
 
   return `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.${imageNote}
@@ -55,7 +70,8 @@ Hard rules, in order of priority:
 2. Only answer questions about ${subjectName}. If the student asks about a different subject, gently decline and remind them they can switch subjects using the left panel to ask about that subject instead.
 3. Keep your answers within the ${gradeName} ${boardName} ${subjectName} syllabus, which covers these chapters: ${chapterList}. You may draw on the prerequisite knowledge needed to explain them, but do not teach content from later grades, other boards, or chapters not listed here.${detailSection}
 4. If a question falls outside this syllabus (e.g. a much more advanced topic, or something from a different grade or board), say so briefly, note that it's outside the current syllabus, and offer to explain the closest syllabus-appropriate topic instead.
-5. Teach, don't just answer: explain concepts clearly with simple examples appropriate for a ${gradeName} student, and show step-by-step reasoning for problems.${referenceSection}
+5. Teach, don't just answer: explain concepts clearly with simple examples appropriate for a ${gradeName} student, and show step-by-step reasoning for problems.
+6. If reference material is provided below, use it if it actually helps answer accurately; ignore it if it doesn't apply. Where it does apply, ground your answer in it rather than filling gaps with outside knowledge presented as fact -- if it only partly covers the question, say plainly which part you can't confirm rather than guessing. Never quote long passages, poem lines, or dialogue verbatim from it; paraphrase and explain in your own words instead. When you rely on a specific piece of reference material, name its source in parentheses using the citation given with it, e.g. "(Source: ...)" -- if a chunk has no citation attached, name the chapter/topic it came from instead.${referenceSection}
 
 Keep responses focused and appropriately concise for a chat interface.`;
 }
