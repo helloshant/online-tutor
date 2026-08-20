@@ -334,17 +334,32 @@ English sibling exists yet — there's nothing to switch to, and there's no safe
 English-language summary under the native topic's id without colliding with (or silently
 overwriting) the one already cached there.
 
-`ChatPanel` passes its current toggle state to `TopicSummaryMessage` as a `preferEnglish` prop, which
-forwards it to `GET /api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an
-ordinary sent chat message, an already-shown topic-summary bubble is a *live* reference card, not an
-immutable historical record — flipping the toggle re-fetches the summary of whatever bubble is
-currently on screen in place (the summary effect depends on `[topic.id, preferEnglish]`, not just
-`topic.id`), rather than only taking effect on the *next* topic clicked. This matters in practice on
-mobile especially: the toggle lives in `ChatPanel`'s header, a different screen from the Topics tab a
-click originates from, so a student has no way to *know* to toggle before clicking in the first
-place — the first click on any topic always shows the native-language summary by default, and the
-toggle is how they get the English version of that same bubble afterward, not something they set in
-advance. Already-loaded exercises don't silently re-fetch on a flip the same way (that would mean an
+`ChatPanel` passes a `preferEnglish` prop to `TopicSummaryMessage`, which forwards it to `GET
+/api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an ordinary sent chat
+message, an already-shown topic-summary bubble is a *live* reference card, not an immutable
+historical record — flipping the toggle re-fetches the summary of the currently-visible bubble in
+place (its effect depends on `[topic.id, preferEnglish]`, not just `topic.id`), rather than only
+taking effect on the *next* topic clicked. This matters in practice on mobile especially: the toggle
+lives in `ChatPanel`'s header, a different screen from the Topics tab a click originates from, so a
+student has no way to *know* to toggle before clicking in the first place — the first click on any
+topic always shows the native-language summary by default, and the toggle is how they get the
+English version of that same bubble afterward, not something they set in advance.
+
+**But `preferEnglish` isn't just `ChatPanel`'s live toggle state passed straight through** — each
+topic `TimelineEntry` carries its *own* snapshot of it, and only the **most recently shown** topic
+bubble stays synced to further toggle flips; every earlier one in that conversation keeps whatever
+language it was last displaying. Passing the live value to every bubble was the first cut at this and
+had a real cost problem: in a conversation where a student had clicked several topics over time,
+flipping the toggle once would re-fetch *all* of their summaries simultaneously (an LLM/database call
+per bubble, all at once, most of them for topics the student isn't even looking at anymore) — not
+practical once a conversation has any length to it. `ChatPanel` finds the last `kind: "topic"` entry
+in `timeline` and updates only that one's snapshot when the toggle changes (done directly in the
+render body, React's documented "adjusting state when a prop changes" pattern, guarded by comparing
+against the previous toggle value so it settles after one extra render rather than looping) — a
+student flipping the switch almost always means "show me the topic I'm looking at right now in the
+other language," not "regenerate every topic summary I've ever opened in this chat."
+
+Already-loaded exercises don't silently re-fetch on a flip the same way (that would mean an
 unprompted extra LLM/database round trip every time the toggle moves) — they're reset back to the
 "Relevant Exercises" button instead, so re-requesting them is what re-fetches in the new language.
 

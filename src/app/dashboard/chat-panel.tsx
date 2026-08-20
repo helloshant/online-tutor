@@ -22,9 +22,15 @@ interface SubjectSummary {
 // (see chat/route.ts), so this only keeps a just-sent screenshot visible in
 // the timeline for the rest of the browser session -- it's lost on reload,
 // same as the image on the server side.
+// preferEnglish on a topic entry is that *bubble's own* snapshot of the
+// language toggle, not a live read of it -- see the "sync last topic entry"
+// effect below for why: only the most-recently-shown topic bubble tracks
+// further toggle flips, everything earlier in a lengthy conversation stays
+// frozen at whatever it was last displaying, so flipping the switch never
+// re-fetches every topic summary ever opened in this conversation at once.
 type TimelineEntry =
   | { kind: "message"; message: ChatMessage; previewImageUrl?: string }
-  | { kind: "topic"; entryId: string; topic: SyllabusTopic };
+  | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
 // actual enforcement point -- this copy only decides whether to render the
@@ -88,6 +94,11 @@ export function ChatPanel({
   // and back, rather than needing an explicit reset effect here.
   const showLanguageToggle = medium !== null && medium !== "English" && subject.code === ENGLISH_SUBJECT_CODE;
   const [preferEnglish, setPreferEnglish] = useState(false);
+  // What the toggle actually means right now -- false whenever it isn't even
+  // shown, same guard the server independently re-checks (see /api/chat and
+  // /api/topics/[id]/summary), so this is never trusted on its own for
+  // anything but deciding what to render/send.
+  const effectivePreferEnglish = showLanguageToggle && preferEnglish;
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
@@ -199,14 +210,59 @@ export function ChatPanel({
 
   // A fresh clickId (even for the same topic clicked twice) drops a new
   // summary bubble at the end of the timeline, same as a message arriving.
+  // Captures the toggle's current value as this bubble's own starting
+  // point -- see the sync effect below for how it stays live afterward.
   useEffect(() => {
     if (!topicClick || topicClick.clickId === lastClickIdRef.current) return;
     lastClickIdRef.current = topicClick.clickId;
     setTimeline((prev) => [
       ...prev,
-      { kind: "topic", entryId: topicClick.clickId, topic: topicClick.topic },
+      {
+        kind: "topic",
+        entryId: topicClick.clickId,
+        topic: topicClick.topic,
+        preferEnglish: effectivePreferEnglish,
+      },
     ]);
-  }, [topicClick]);
+  }, [topicClick, effectivePreferEnglish]);
+
+  // Keeps only the *last* topic bubble in the timeline mirroring the live
+  // toggle after it changes -- a student flipping the switch mid-conversation
+  // almost always means "show me the topic I'm looking at right now in the
+  // other language," not "regenerate every topic summary I've ever opened in
+  // this chat," which is what reacting to every topic entry would do (and,
+  // in a long conversation with several topics clicked, would fire that many
+  // simultaneous LLM/database calls for one toggle click). Earlier topic
+  // bubbles keep whatever language they were last showing.
+  //
+  // Done directly in the render body (React's documented "adjusting state
+  // when a prop changes" escape hatch -- see "You Might Not Need an Effect"),
+  // not a useEffect: the state being adjusted here (timeline) isn't a
+  // side-effect synchronizing with anything external, it's local state
+  // derived from another piece of local state, and the guard below (bailing
+  // once syncedPreferEnglish already matches) keeps this to one extra
+  // render per real toggle flip rather than looping.
+  const [syncedPreferEnglish, setSyncedPreferEnglish] = useState(effectivePreferEnglish);
+  if (syncedPreferEnglish !== effectivePreferEnglish) {
+    setSyncedPreferEnglish(effectivePreferEnglish);
+    setTimeline((prev) => {
+      let lastTopicIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].kind === "topic") {
+          lastTopicIndex = i;
+          break;
+        }
+      }
+      if (lastTopicIndex === -1) return prev;
+
+      const entry = prev[lastTopicIndex];
+      if (entry.kind !== "topic" || entry.preferEnglish === effectivePreferEnglish) return prev;
+
+      const next = [...prev];
+      next[lastTopicIndex] = { ...entry, preferEnglish: effectivePreferEnglish };
+      return next;
+    });
+  }
 
   // Same fresh-id-per-click guard as topicClick above, but sends straight
   // away rather than seeding the input for the student to edit -- an
@@ -299,11 +355,7 @@ export function ChatPanel({
         )}
         {timeline.map((entry) =>
           entry.kind === "topic" ? (
-            <TopicSummaryMessage
-              key={entry.entryId}
-              topic={entry.topic}
-              preferEnglish={showLanguageToggle && preferEnglish}
-            />
+            <TopicSummaryMessage key={entry.entryId} topic={entry.topic} preferEnglish={entry.preferEnglish} />
           ) : (
             <div
               key={entry.message.id}
