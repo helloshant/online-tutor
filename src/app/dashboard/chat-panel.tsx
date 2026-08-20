@@ -26,6 +26,11 @@ type TimelineEntry =
   | { kind: "message"; message: ChatMessage; previewImageUrl?: string }
   | { kind: "topic"; entryId: string; topic: SyllabusTopic };
 
+// Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
+// actual enforcement point -- this copy only decides whether to render the
+// toggle at all, never grants anything on its own.
+const ENGLISH_SUBJECT_CODE = "ENG";
+
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 // Mirrors the server-side cap (~4.3MB decoded) so an oversized file is
 // rejected client-side with an immediate message instead of a round trip.
@@ -75,6 +80,14 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  // Only English (the subject) offers this -- every other subject's
+  // content only exists in the student's own medium, so there'd be nothing
+  // for "English" to switch to. This component remounts per subject (see
+  // dashboard-shell.tsx's `key={selectedSubject.id}` on ChatPanel), so the
+  // toggle naturally resets to "native" whenever the student switches away
+  // and back, rather than needing an explicit reset effect here.
+  const showLanguageToggle = medium !== null && medium !== "English" && subject.code === ENGLISH_SUBJECT_CODE;
+  const [preferEnglish, setPreferEnglish] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
   const lastPracticeClickIdRef = useRef<string | null>(null);
@@ -153,6 +166,10 @@ export function ChatPanel({
             subjectId: subject.id,
             message: trimmed,
             image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
+            // Harmless to send even when the toggle isn't shown/relevant --
+            // the server only honors it for English-subject, non-English-medium
+            // students (see ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts).
+            preferEnglish,
           }),
         });
         const body = await res.json();
@@ -177,7 +194,7 @@ export function ChatPanel({
         setSending(false);
       }
     },
-    [sending, subscriptionId, subject.id]
+    [sending, subscriptionId, subject.id, preferEnglish]
   );
 
   // A fresh clickId (even for the same topic clicked twice) drops a new
@@ -228,13 +245,49 @@ export function ChatPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-border bg-surface px-6 py-3">
-        <h1 className="text-sm font-semibold">{subject.name}</h1>
-        <p className="text-xs text-foreground/50">
-          {isStaffUser
-            ? "Staff access: unrestricted, not limited to any one syllabus."
-            : `Answers are limited to this subject's syllabus, in ${medium}.`}
-        </p>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3">
+        <div>
+          <h1 className="text-sm font-semibold">{subject.name}</h1>
+          <p className="text-xs text-foreground/50">
+            {isStaffUser
+              ? "Staff access: unrestricted, not limited to any one syllabus."
+              : `Answers are limited to this subject's syllabus, in ${
+                  showLanguageToggle && preferEnglish ? "English" : medium
+                }.`}
+          </p>
+        </div>
+        {showLanguageToggle && (
+          // A segmented control rather than a checkbox -- both states are
+          // equally valid choices a student picks between, not an on/off
+          // feature flag, so labeling both options directly reads clearer
+          // than a single "use English" toggle would.
+          <div
+            role="group"
+            aria-label="Response language"
+            className="flex shrink-0 rounded-full border border-border bg-background p-0.5 text-xs"
+          >
+            <button
+              type="button"
+              onClick={() => setPreferEnglish(false)}
+              aria-pressed={!preferEnglish}
+              className={`rounded-full px-2.5 py-1 font-medium transition ${
+                !preferEnglish ? "bg-brand text-white" : "text-foreground/60 hover:text-foreground"
+              }`}
+            >
+              {medium}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreferEnglish(true)}
+              aria-pressed={preferEnglish}
+              className={`rounded-full px-2.5 py-1 font-medium transition ${
+                preferEnglish ? "bg-brand text-white" : "text-foreground/60 hover:text-foreground"
+              }`}
+            >
+              English
+            </button>
+          </div>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-6 py-4">

@@ -8,7 +8,16 @@ import {
   type ImageAttachment,
   type ImageMediaType,
 } from "@/lib/orchestratorClient";
-import type { ChatMessage } from "@/lib/supabase/types";
+import type { ChatMessage, Medium } from "@/lib/supabase/types";
+
+// The one subject where "respond in the student's native medium" isn't
+// always what the student wants -- English is a language-learning subject
+// itself, so a non-English-medium student may deliberately want tutor
+// replies in English for immersion, not just their native medium. Gated to
+// this one subject code (see supabase/migrations/0003_seed_catalog.sql)
+// rather than a generic per-subject toggle, since every other subject's
+// content assumes explanations happen in the student's own language.
+const ENGLISH_SUBJECT_CODE = "ENG";
 
 const HISTORY_LIMIT = 20;
 const MAX_MESSAGE_LENGTH = 2000;
@@ -67,6 +76,11 @@ async function handleChatRequest(request: Request) {
   const body = await request.json().catch(() => null);
   const subjectId = typeof body?.subjectId === "string" ? body.subjectId : "";
   const message = typeof body?.message === "string" ? body.message.trim() : "";
+  // Only ever widens language, never narrows access -- ignored below unless
+  // the subject is actually English and the student's medium isn't already
+  // English, so a client sending this for any other subject just has no
+  // effect rather than needing its own error path.
+  const preferEnglish = body?.preferEnglish === true;
   const { image, error: imageError } = parseImageField(body?.image);
 
   if (!subjectId) {
@@ -118,7 +132,7 @@ async function handleChatRequest(request: Request) {
 
     const { data: subjectLink } = await supabase
       .from("subscription_subjects")
-      .select("subject_id, subjects(name)")
+      .select("subject_id, subjects(name, code)")
       .eq("subscription_id", subscription.id)
       .eq("subject_id", subjectId)
       .maybeSingle();
@@ -130,6 +144,16 @@ async function handleChatRequest(request: Request) {
       );
     }
 
+    const subjectRow = (subjectLink as unknown as { subjects: { name: string; code: string } | null }).subjects;
+    const subjectName = subjectRow?.name ?? "the subject";
+    // Only English-subject chat offers this toggle at all -- every other
+    // subject's syllabus/chapter content only ever exists in the student's
+    // own medium, so there'd be nothing for "English" to switch to.
+    const effectiveMedium: Medium =
+      preferEnglish && subjectRow?.code === ENGLISH_SUBJECT_CODE && subscription.medium !== "English"
+        ? "English"
+        : subscription.medium;
+
     const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
       supabase.from("boards").select("name").eq("id", subscription.board_id).single(),
       supabase.from("grades").select("name").eq("id", subscription.grade_id).single(),
@@ -139,12 +163,9 @@ async function handleChatRequest(request: Request) {
         .eq("board_id", subscription.board_id)
         .eq("grade_id", subscription.grade_id)
         .eq("subject_id", subjectId)
-        .eq("medium", subscription.medium)
+        .eq("medium", effectiveMedium)
         .order("sort_order"),
     ]);
-
-    const subjectName =
-      (subjectLink as unknown as { subjects: { name: string } | null }).subjects?.name ?? "the subject";
 
     subscriptionId = subscription.id;
     orchestrationRequest = {
@@ -156,7 +177,7 @@ async function handleChatRequest(request: Request) {
       boardName: board?.name ?? "",
       gradeId: subscription.grade_id,
       gradeName: grade?.name ?? "",
-      medium: subscription.medium,
+      medium: effectiveMedium,
       topics: topics ?? [],
       message,
       image,

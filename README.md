@@ -291,6 +291,28 @@ client-component confirm() wrapper the Users page uses for deleting a user) with
 the exact count, rather than the plain button used everywhere else. A topic with nothing attached
 skips the confirm entirely — no reason to add friction to routine cleanup that has nothing at stake.
 
+### English-subject language toggle (native medium vs. English)
+
+Every rule above assumes a student wants explanations in their own subscribed medium — true for a
+Bengali-medium student learning Mathematics, but not necessarily true for the same student learning
+*English*: English is the language being learned, so sometimes they want the tutor to reply in
+Bengali to explain it, and sometimes they deliberately want English replies for immersion practice.
+The chat header shows a two-way toggle (subscribed medium vs. English) whenever the open subject is
+English (`subjects.code = 'ENG'`) and the student's medium isn't already English — nothing to switch
+to otherwise, so the toggle is simply absent for every other subject and for English-medium students.
+
+The toggle is client-side UI state only (unpersisted, reset to native whenever the student switches
+subjects and back — `ChatPanel` remounts per subject via its `key` in `dashboard-shell.tsx`) and sends
+a `preferEnglish` boolean alongside each `/api/chat` request; the server is what actually decides
+whether to honor it, re-checking the subject code and medium itself rather than trusting the client's
+own gating. When honored, it overrides the single `medium` value threaded through the whole
+4-stage pipeline (`services/orchestrator/src/server.ts`) — the Redis cache key, the answer-bank FTS
+scope, the chapter-notes RAG retrieval scope (`match_chapter_chunks`), the syllabus topics fetched for
+the chapter-list boundary, and rule 1 of the LLM system prompt ("Respond ONLY in ...") — so toggling to
+English is a single well-understood lever rather than a parallel code path, and a Bengali student
+toggled to English automatically gets any English-medium syllabus topics or chapter notes entered for
+this subject, not just an English-language reply layered on top of Bengali-medium content.
+
 ### Topic summaries and relevant exercises
 
 Selecting a subject opens a syllabus panel (desktop only) listing every chapter and topic for that
