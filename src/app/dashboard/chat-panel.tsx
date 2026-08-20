@@ -299,7 +299,11 @@ export function ChatPanel({
         )}
         {timeline.map((entry) =>
           entry.kind === "topic" ? (
-            <TopicSummaryMessage key={entry.entryId} topic={entry.topic} />
+            <TopicSummaryMessage
+              key={entry.entryId}
+              topic={entry.topic}
+              preferEnglish={showLanguageToggle && preferEnglish}
+            />
           ) : (
             <div
               key={entry.message.id}

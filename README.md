@@ -320,6 +320,23 @@ English is a single well-understood lever rather than a parallel code path, and 
 toggled to English automatically gets any English-medium syllabus topics or chapter notes entered for
 this subject, not just an English-language reply layered on top of Bengali-medium content.
 
+**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below), but
+through a different mechanism than chat: those aren't scoped by board/grade/subject/medium the way
+chat is, they're pinned to one exact `topic_id` (`topic_summaries.topic_id` is unique; an exercise is
+tagged with the specific topic it was generated for) — so "switch this topic to English" can't just
+relabel the same row's language the way overriding chat's `medium` value can. `ChatPanel` passes its
+current toggle state to `TopicSummaryMessage` as a prop (read once, at the moment a topic is
+clicked — an already-shown summary doesn't change language retroactively just because the toggle
+moved on, same as an already-sent chat message wouldn't), which forwards it to `GET /api/topics/[id]/
+summary` and `/exercises` as `?preferEnglish=`. `resolveTopicForLanguagePreference`
+(`src/lib/topicLanguagePreference.ts`) is what actually does the work: when the toggle is on, it looks
+up the *sibling* topic — same board/grade/subject/chapter/topic text, but `medium = 'English'` (e.g.
+the English-medium row a Bengali-medium one was literally duplicated from, see "Medium-scoped
+syllabus storage" above) — and resolves the summary/exercises request to *that* topic's id instead.
+Fails open to the original (native-language) topic when no English sibling exists yet — there's
+nothing to switch to, and there's no safe way to store an English-language summary under the
+native topic's id without colliding with (or silently overwriting) the one already cached there.
+
 ### Topic summaries and relevant exercises
 
 Selecting a subject opens a syllabus panel (desktop only) listing every chapter and topic for that

@@ -10,7 +10,13 @@ type ExerciseItem = { question: string; answer: string };
 // rather than a separate panel or modal -- clicking a syllabus topic drops
 // its summary straight into the conversation so a student can immediately
 // ask the tutor a follow-up about it in the same view.
-export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
+//
+// preferEnglish is ChatPanel's language toggle, read at the moment this
+// component mounts (a fresh mount per topic click -- see dashboard-shell.tsx's
+// fresh clickId per click) rather than reacted to afterward: like an
+// already-sent chat message, an already-shown summary doesn't retroactively
+// change language just because the toggle moved on to something else.
+export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusTopic; preferEnglish: boolean }) {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
@@ -35,7 +41,7 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
 
     (async () => {
       try {
-        const res = await fetch(`/api/topics/${topic.id}/summary`);
+        const res = await fetch(`/api/topics/${topic.id}/summary?preferEnglish=${preferEnglish}`);
         const body = await res.json().catch(() => null);
         if (cancelled) return;
         if (!res.ok || !body?.summary) {
@@ -53,13 +59,16 @@ export function TopicSummaryMessage({ topic }: { topic: SyllabusTopic }) {
     return () => {
       cancelled = true;
     };
+    // preferEnglish deliberately excluded -- see the component doc comment
+    // above, this effect should only ever run once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topic.id]);
 
   async function handleLoadExercises() {
     setLoadingExercises(true);
     setExercisesError(null);
     try {
-      const res = await fetch(`/api/topics/${topic.id}/exercises`);
+      const res = await fetch(`/api/topics/${topic.id}/exercises?preferEnglish=${preferEnglish}`);
       const body = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(body?.exercises)) {
         setExercisesError(body?.error ?? "Could not load exercises.");

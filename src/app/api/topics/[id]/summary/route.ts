@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicSummary } from "@/lib/orchestratorClient";
+import { resolveTopicForLanguagePreference } from "@/lib/topicLanguagePreference";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
 // client as an empty/non-JSON body. Same pattern as /api/chat.
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    return await handleGetSummary(await params);
+    return await handleGetSummary(request, await params);
   } catch (err) {
     console.error("Unexpected error in GET /api/topics/[id]/summary:", err);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 }
 
-async function handleGetSummary({ id: topicId }: { id: string }) {
+async function handleGetSummary(request: Request, { id: topicId }: { id: string }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -23,6 +24,11 @@ async function handleGetSummary({ id: topicId }: { id: string }) {
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  // Mirrors ChatPanel's own toggle -- see resolveTopicForLanguagePreference
+  // for why a topic click needs to resolve to a possibly-different topic
+  // row, not just override a `medium` value the way /api/chat does.
+  const preferEnglish = new URL(request.url).searchParams.get("preferEnglish") === "true";
 
   // syllabus_topics is readable by any authenticated user under RLS (same
   // policy the admin catalog and the syllabus panel itself rely on) -- no
@@ -40,18 +46,26 @@ async function handleGetSummary({ id: topicId }: { id: string }) {
   const [{ data: board }, { data: grade }, { data: subject }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
-    supabase.from("subjects").select("name").eq("id", topicRow.subject_id).single(),
+    supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
   ]);
+
+  const { topicId: effectiveTopicId, medium: effectiveMedium } = await resolveTopicForLanguagePreference(
+    supabase,
+    topicId,
+    topicRow,
+    subject?.code ?? "",
+    preferEnglish
+  );
 
   try {
     const { summary } = await getTopicSummary({
       userId: user.id,
-      topicId,
+      topicId: effectiveTopicId,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: topicRow.medium,
+      medium: effectiveMedium,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
     });
