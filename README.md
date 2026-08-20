@@ -267,6 +267,30 @@ automatically) — close to how these documents are already structured in the of
 it's parsed into individual rows in one submit, appended after whatever's already stored. Re-pasting
 the same lines is safe; duplicates are silently skipped rather than erroring or duplicating rows.
 
+**A student sees a completely empty syllabus panel whenever their subscribed medium has zero
+`syllabus_topics` rows for that board/grade/subject** — this reads exactly like a bug (the panel
+genuinely does render "nothing") but is almost always a data gap, not one: syllabus content has to
+be entered separately per medium (see above), so a subject entered under, say, English medium is
+invisible to a Bengali-medium subscriber of the *same* board/grade/subject until someone pastes or
+adds it under Bengali medium too — confirmed via a real case where a WBBSE Grade 9 English subject
+had topics only under English medium while the only subscribed student for that board/grade was on
+Bengali medium. Whether the Bengali-medium content should be identical to the English-medium one or
+genuinely different is a per-subject judgment call (a literature subject taught *about* English is
+plausibly the same chapter list either way; a subject taught *in* the local language typically isn't
+— see the Mathematics example above) — not something to assume either way without asking.
+
+**Removing a syllabus topic cascades (`ON DELETE CASCADE`) to every chapter document attached to it
+via `topic_id`, and their embedded chunks along with them** (`0024_chapter_documents_rag.sql`) —
+correct referential integrity, but silent: nothing in the original flow warned an admin that editing
+the syllabus (e.g. replacing one generic topic with several specific ones) would quietly delete
+already-imported Chapter Notes content tied to the topic being removed. `/admin/catalog` now counts
+attached chapter documents per topic (a service-role read, since `chapter_documents` has zero
+client-facing RLS policies same as `answered_questions`) and shows a `📎 N` badge next to any topic
+that has some; removing one of those routes through `ConfirmSubmitButton` (the same reusable
+client-component confirm() wrapper the Users page uses for deleting a user) with a message naming
+the exact count, rather than the plain button used everywhere else. A topic with nothing attached
+skips the confirm entirely — no reason to add friction to routine cleanup that has nothing at stake.
+
 ### Topic summaries and relevant exercises
 
 Selecting a subject opens a syllabus panel (desktop only) listing every chapter and topic for that

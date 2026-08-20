@@ -1,4 +1,6 @@
 import { requireAdminPage } from "@/lib/auth";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Medium } from "@/lib/supabase/types";
 import {
@@ -47,6 +49,24 @@ export default async function AdminCatalogPage({
             .order("sort_order")
         ).data
       : [];
+
+  // Removing a syllabus topic cascades (ON DELETE CASCADE) to any chapter
+  // documents attached to it via topic_id, and their embedded chunks along
+  // with them (0024_chapter_documents_rag.sql) -- silently, with no warning
+  // anywhere else in this flow. chapter_documents has zero client-facing RLS
+  // policies (same backend-only posture as answered_questions), so this
+  // needs the service-role client the rest of this page doesn't otherwise
+  // use. Counted per-topic here so the Remove button below can warn with a
+  // real number instead of a generic "are you sure."
+  const topicIds = (topics ?? []).map((t) => t.id);
+  const chapterDocCountByTopic = new Map<string, number>();
+  if (topicIds.length > 0) {
+    const admin = createAdminClient();
+    const { data: docRows } = await admin.from("chapter_documents").select("id, topic_id").in("topic_id", topicIds);
+    for (const row of docRows ?? []) {
+      chapterDocCountByTopic.set(row.topic_id, (chapterDocCountByTopic.get(row.topic_id) ?? 0) + 1);
+    }
+  }
 
   return (
     <div className="space-y-10">
@@ -380,6 +400,14 @@ export default async function AdminCatalogPage({
                       </td>
                       <td className="p-0">
                         <div className="flex items-start gap-2 px-3 py-2">
+                          {(chapterDocCountByTopic.get(t.id) ?? 0) > 0 && (
+                            <span
+                              title={`${chapterDocCountByTopic.get(t.id)} chapter document(s) attached -- removing this topic deletes them too`}
+                              className="shrink-0 rounded-full bg-brand/10 px-2 py-1 text-xs font-medium text-brand"
+                            >
+                              📎 {chapterDocCountByTopic.get(t.id)}
+                            </span>
+                          )}
                           <button
                             type="submit"
                             form={`syllabus-topic-${t.id}`}
@@ -388,9 +416,29 @@ export default async function AdminCatalogPage({
                             Save
                           </button>
                           <form action={removeSyllabusTopic.bind(null, t.id)}>
-                            <button className="shrink-0 text-xs text-red-600 hover:underline">
-                              Remove
-                            </button>
+                            {(() => {
+                              const attachedDocs = chapterDocCountByTopic.get(t.id) ?? 0;
+                              // Only worth a confirm dialog when there's
+                              // actually something at stake -- removing a
+                              // topic with no chapter documents attached is
+                              // exactly as safe as it looks, no need to add
+                              // friction to routine cleanup.
+                              if (attachedDocs === 0) {
+                                return (
+                                  <button className="shrink-0 text-xs text-red-600 hover:underline">
+                                    Remove
+                                  </button>
+                                );
+                              }
+                              return (
+                                <ConfirmSubmitButton
+                                  confirmMessage={`Deleting "${t.chapter} — ${t.topic}" will also permanently delete ${attachedDocs} chapter document${attachedDocs === 1 ? "" : "s"} attached to it (used for chat retrieval grounding) -- this can't be undone. Delete anyway?`}
+                                  className="shrink-0 text-xs text-red-600 hover:underline"
+                                >
+                                  Remove
+                                </ConfirmSubmitButton>
+                              );
+                            })()}
                           </form>
                         </div>
                       </td>
