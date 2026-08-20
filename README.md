@@ -337,20 +337,40 @@ bank for the next student who asks the same thing without the toggle on. RAG ret
 real `medium`, so the model still grounds its (English) reply in whatever native-medium chapter notes
 actually exist, rather than searching for English-medium notes that may not.
 
-**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below) via the
-identical `responseLanguage` pattern — `topicId`/`medium` stay this topic's own real values always,
-`responseLanguage` only changes the language instruction in `buildTopicSummaryPrompt`/
-`buildExerciseGenerationPrompt`. `/v1/topic-summary` and `/v1/topic-exercises` in
-`services/orchestrator/src/server.ts` skip their RAG/cache/database stages *and* the write-back
-(`upsertTopicSummary`/`recordAnswer`) whenever `responseLanguage` differs from the topic's medium, for
-the same reason as chat's cache — every one of those stores holds exactly one native-language row per
-topic, and there's no safe way to write an English-requested answer into it without corrupting what
-native-language students are served. An earlier version instead tried to redirect the request to a
-*sibling* topic row (same board/grade/subject/chapter/topic text, `medium = 'English'`) when one
-happened to exist — replaced because it only worked for topics an admin had manually duplicated into
-English, which most never are; the current approach works for every topic unconditionally, generating
-fresh via the LLM each time the toggle is used on content with no native English version, at the cost
-of no caching for that case.
+**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below), but
+through a two-step resolution `/api/topics/[id]/summary` and `/exercises` run before ever calling the
+orchestrator — this is the one place the toggle is still allowed to swap which topic's data gets
+read, unlike chat, because a single topic's RAG/cache/database lookup has none of the syllabus-gate
+blast radius that made swapping `medium` wholesale wrong for chat (see above):
+
+1. **Sibling topic exists** (`findSiblingTopic` in `src/lib/topicLanguagePreference.ts`: same
+   board/grade/subject/chapter/topic text, `medium = 'English'` — e.g. the English-medium row a
+   Bengali-medium one was literally duplicated from). Its `topicId` and `medium` are used in place of
+   the clicked topic's own — from the orchestrator's point of view this is now an entirely ordinary
+   *native*-language request (medium already equals what was asked for), so the full chapter-notes
+   RAG → cache → database → LLM(+admin-review) pipeline runs exactly as documented in "Topic summary
+   review" below, just scoped to the sibling's own id. A student toggling to English genuinely gets
+   whatever curated/cached/approved English content already exists for that topic, not just an
+   English-language reply layered over Bengali-medium material.
+2. **No sibling exists** (the common case — most topics are never manually duplicated into a second
+   medium). The original `topicId`/`medium` are kept, and a separate `responseLanguage` field
+   overrides only the language instruction in `buildTopicSummaryPrompt`/
+   `buildExerciseGenerationPrompt`. `/v1/topic-summary` and `/v1/topic-exercises` in
+   `services/orchestrator/src/server.ts` skip their RAG/cache/database stages *and* the write-back
+   (`upsertTopicSummary`/`recordAnswer`) whenever `responseLanguage` differs from the topic's medium —
+   every one of those stores holds exactly one native-language row per topic, and there's no safe way
+   to write an English-requested answer into it without corrupting what native-language students are
+   served — so this case always generates fresh via the LLM, uncached.
+
+**A genuine data trap this surfaced**: `getStoredChapterSummary` (RAG stage 1, see "Topic summary
+review" below) has no language validation of its own — it returns whatever text is attached to a
+topic's `chapter_documents` row exactly as stored, trusting that an admin only ever pastes content in
+the medium the topic itself declares. Content pasted or imported in the *wrong* language for a topic
+(e.g. English prose saved under a Bengali-medium topic row) is therefore served as-is to a
+native-medium request with no way for the code to detect the mismatch — this is a data-entry error to
+fix at the source (move the content to the correct-medium topic, or a sibling created for it), not
+something a query can validate away, since there's no reliable way to detect a chunk's actual written
+language from the text alone.
 
 `ChatPanel` passes a `preferEnglish` prop to `TopicSummaryMessage`, which forwards it to `GET
 /api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an ordinary sent chat

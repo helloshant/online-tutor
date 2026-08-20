@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicExercises } from "@/lib/orchestratorClient";
+import { findSiblingTopic } from "@/lib/topicLanguagePreference";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
@@ -46,28 +47,43 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
   ]);
 
-  // See the matching comment in /api/topics/[id]/summary/route.ts --
-  // medium (and topicId) always stays this topic's own real medium;
-  // responseLanguage only changes what language a freshly-generated
-  // exercise set is written in, and the orchestrator skips both the
-  // answer-bank search and the write-back whenever it's set (see
-  // /v1/topic-exercises in server.ts).
-  const responseLanguage: Medium =
-    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English"
-      ? "English"
-      : topicRow.medium;
+  const wantsEnglish =
+    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English";
+
+  // See the matching comment in /api/topics/[id]/summary/route.ts -- when a
+  // sibling topic (same chapter/topic text, medium = 'English') exists, its
+  // own answered_questions/topic_id-tagged exercises are genuinely in
+  // English, so the full database -> LLM(+write-back) pipeline runs against
+  // *that* topic's id (board/grade stay the same -- only medium and topicId
+  // change, since a sibling only ever differs by medium). Otherwise the
+  // original topicId/medium are kept and responseLanguage overrides just
+  // the generated language, with the orchestrator skipping the answer-bank
+  // search and write-back entirely (see /v1/topic-exercises in server.ts).
+  let effectiveTopicId = topicId;
+  let effectiveMedium = topicRow.medium;
+  let responseLanguage: Medium | undefined;
+
+  if (wantsEnglish) {
+    const sibling = await findSiblingTopic(supabase, topicRow, "English");
+    if (sibling) {
+      effectiveTopicId = sibling.id;
+      effectiveMedium = "English";
+    } else {
+      responseLanguage = "English";
+    }
+  }
 
   try {
     const { exercises } = await getTopicExercises({
       userId: user.id,
-      topicId,
+      topicId: effectiveTopicId,
       boardId: topicRow.board_id,
       gradeId: topicRow.grade_id,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: topicRow.medium,
+      medium: effectiveMedium,
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,

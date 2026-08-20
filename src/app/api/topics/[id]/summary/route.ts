@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicSummary } from "@/lib/orchestratorClient";
+import { findSiblingTopic } from "@/lib/topicLanguagePreference";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
@@ -49,27 +50,47 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
   ]);
 
-  // Deliberately does NOT resolve to a different topic row the way an
-  // earlier version of this route did -- that only worked when an admin
-  // had happened to duplicate this exact topic into English, which most
-  // topics never have. medium (and therefore topicId) always stays this
-  // topic's own real medium; responseLanguage is the only thing the toggle
-  // changes, and only the orchestrator's LLM-generation path (never
-  // RAG/cache/database) honors it -- see /v1/topic-summary in server.ts.
-  const responseLanguage: Medium =
-    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English"
-      ? "English"
-      : topicRow.medium;
+  const wantsEnglish =
+    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English";
+
+  // Two different ways the toggle can be honored, tried in order:
+  //   1. A sibling topic (same chapter/topic text, medium = 'English')
+  //      exists -- its own chapter_documents/topic_summaries/
+  //      answered_questions are genuinely in English, so the full RAG ->
+  //      cache -> database -> LLM pipeline runs against *that* topic's id,
+  //      exactly like any ordinary native-language request. No separate
+  //      responseLanguage override is needed here: medium already equals
+  //      what was asked for once resolved to the sibling.
+  //   2. No sibling exists -- there is nothing in English to look up, so
+  //      the original topicId/medium are kept and `responseLanguage`
+  //      overrides just the reply language; the orchestrator skips
+  //      RAG/cache/database entirely and always generates fresh via the
+  //      LLM without persisting (see /v1/topic-summary in server.ts) --
+  //      there's no topic row in English to attach a cached/stored
+  //      summary to.
+  let effectiveTopicId = topicId;
+  let effectiveMedium = topicRow.medium;
+  let responseLanguage: Medium | undefined;
+
+  if (wantsEnglish) {
+    const sibling = await findSiblingTopic(supabase, topicRow, "English");
+    if (sibling) {
+      effectiveTopicId = sibling.id;
+      effectiveMedium = "English";
+    } else {
+      responseLanguage = "English";
+    }
+  }
 
   try {
     const { summary } = await getTopicSummary({
       userId: user.id,
-      topicId,
+      topicId: effectiveTopicId,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: topicRow.medium,
+      medium: effectiveMedium,
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
