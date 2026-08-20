@@ -10,17 +10,19 @@ const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
 const initialState: ImportChapterChunksState = {};
 
 type CatalogItem = { id: string; name: string };
-type TopicOption = { id: string; chapter: string; topic: string };
 
 // Bulk counterpart to NewChapterDocumentForm, for content prepared offline
 // as pre-chunked JSON (chunks already split along real structural
 // boundaries, each optionally carrying its own field_type/citation) rather
 // than typed/pasted as one block of text for this app's own naive
-// paragraph-based chunker to re-split. Every chapter in the uploaded file
-// shares one admin-selected topic scope, same reasoning the single-document
-// form requires a topic up front -- the file's own chapter_number/
-// chapter_title fields distinguish chapters within that one topic, they
-// don't each need a separate topic.
+// paragraph-based chunker to re-split. Scoped to a whole *book* (a
+// syllabus_topics "chapter" grouping, e.g. "Prose and Poetry" -- which
+// commonly holds several distinct topics, one per story/poem), not one
+// specific topic: the file's own chapter_title per chunk is matched against
+// the existing topics under that book (a new topic is created if a title
+// doesn't match one already there), so a single import can span every
+// story in the book without the admin picking one topic at a time. See
+// importChapterChunksJson in ./actions.ts for the matching logic.
 export function ImportChunksForm({
   boards,
   grades,
@@ -36,8 +38,11 @@ export function ImportChunksForm({
   const [gradeId, setGradeId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [medium, setMedium] = useState<Medium | "">("");
-  const [topicId, setTopicId] = useState("");
-  const [topics, setTopics] = useState<TopicOption[]>([]);
+  const [book, setBook] = useState("");
+  // Existing "chapter" (book) names for this scope, offered as suggestions
+  // -- a free-text input, not a <select>, since the very first import for a
+  // brand-new book has nothing to pick from yet and still needs to work.
+  const [bookOptions, setBookOptions] = useState<string[]>([]);
   const hasFullScope = Boolean(boardId && gradeId && subjectId && medium);
 
   useEffect(() => {
@@ -48,13 +53,13 @@ export function ImportChunksForm({
       const supabase = createClient();
       const { data } = await supabase
         .from("syllabus_topics")
-        .select("id, chapter, topic")
+        .select("chapter")
         .eq("board_id", boardId)
         .eq("grade_id", gradeId)
         .eq("subject_id", subjectId)
         .eq("medium", medium)
         .order("sort_order");
-      if (!cancelled) setTopics(data ?? []);
+      if (!cancelled) setBookOptions(Array.from(new Set((data ?? []).map((t) => t.chapter))));
     })();
 
     return () => {
@@ -64,7 +69,7 @@ export function ImportChunksForm({
 
   function handleScopeChange(setter: (value: string) => void, value: string) {
     setter(value);
-    setTopicId("");
+    setBook("");
   }
 
   return (
@@ -81,12 +86,15 @@ export function ImportChunksForm({
           string <code className="rounded bg-brand/10 px-1 py-0.5">chapter_title</code> and{" "}
           <code className="rounded bg-brand/10 px-1 py-0.5">text</code>, and optional{" "}
           <code className="rounded bg-brand/10 px-1 py-0.5">field_type</code>/
-          <code className="rounded bg-brand/10 px-1 py-0.5">citation</code>. Every distinct chapter in
-          the file becomes its own chapter document under the one topic scope selected below --
-          re-uploading a corrected file updates those same chapters rather than duplicating them.
-          Chunks are embedded exactly as given, not re-split, so their field-type/citation metadata is
-          preserved (unlike editing a chapter through the plain text form above, which re-chunks
-          generically -- to update one of these chapters, re-run this import instead).
+          <code className="rounded bg-brand/10 px-1 py-0.5">citation</code>. Scoped to a whole{" "}
+          <b>book</b> (e.g. &ldquo;Prose and Poetry&rdquo;), not one chapter at a time -- each distinct{" "}
+          <code className="rounded bg-brand/10 px-1 py-0.5">chapter_title</code> in the file is matched
+          against the syllabus topics already entered under that book (a new topic is added
+          automatically if none matches), and becomes its own chapter document there. Re-uploading a
+          corrected file updates those same chapters rather than duplicating them. Chunks are embedded
+          exactly as given, not re-split, so their field-type/citation metadata is preserved (unlike
+          editing a chapter through the plain text form above, which re-chunks generically -- to
+          update one of these chapters, re-run this import instead).
         </p>
         <div className="flex flex-wrap gap-2">
           <select
@@ -145,23 +153,22 @@ export function ImportChunksForm({
               </option>
             ))}
           </select>
-          <select
-            name="topicId"
-            value={topicId}
-            onChange={(e) => setTopicId(e.target.value)}
-            disabled={!hasFullScope || topics.length === 0}
+          <input
+            name="chapter"
+            value={book}
+            onChange={(e) => setBook(e.target.value)}
+            disabled={!hasFullScope}
             required
-            title={!hasFullScope ? "Select a board, grade, subject, and medium to choose a topic" : undefined}
-            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
-          >
-            <option value="">Topic (chapter)</option>
-            {hasFullScope &&
-              topics.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.chapter} — {t.topic}
-                </option>
-              ))}
-          </select>
+            list="chapter-notes-book-options"
+            placeholder="Book (e.g. Prose and Poetry)"
+            title={!hasFullScope ? "Select a board, grade, subject, and medium first" : undefined}
+            className="min-w-[16rem] rounded-lg border border-border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
+          />
+          <datalist id="chapter-notes-book-options">
+            {bookOptions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
         </div>
         <input
           key={state?.success ? "file-cleared" : "file"}
@@ -183,7 +190,12 @@ export function ImportChunksForm({
             <p className="text-sm text-green-600">
               Imported {state.success.chaptersImported} chapter
               {state.success.chaptersImported === 1 ? "" : "s"} ({state.success.chunksImported} chunk
-              {state.success.chunksImported === 1 ? "" : "s"} total).
+              {state.success.chunksImported === 1 ? "" : "s"} total)
+              {state.success.topicsCreated > 0 &&
+                `, adding ${state.success.topicsCreated} new syllabus topic${
+                  state.success.topicsCreated === 1 ? "" : "s"
+                } to this book`}
+              .
             </p>
             {state.success.embedFailures.length > 0 && (
               <p className="text-sm text-amber-600">

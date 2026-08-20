@@ -166,6 +166,12 @@ export interface ImportChapterChunksState {
   success?: {
     chaptersImported: number;
     chunksImported: number;
+    // How many of chaptersImported required creating a brand-new
+    // syllabus_topics row (no existing topic under this book matched that
+    // chapter_title) -- surfaced so an admin notices when a typo/rename in
+    // the file silently adds a near-duplicate topic instead of updating
+    // the one they meant.
+    topicsCreated: number;
     // Chapter titles whose embedding call failed (Voyage unreachable,
     // VOYAGE_API_KEY unset, etc.) -- that chapter's document row and raw
     // text are still saved, it just won't be retrievable in chat until
@@ -176,13 +182,20 @@ export interface ImportChapterChunksState {
 
 // Bulk counterpart to saveChapterDocument above, for content prepared
 // offline as pre-chunked JSON rather than typed/pasted as one block of
-// text. One admin-selected topic scope applies to every chapter in the
-// file (same reasoning the single-document form requires a topic: a
-// chapter document is always about exactly one syllabus topic) -- each
-// distinct chapter_number/chapter_title pair in the JSON becomes its own
-// chapter_documents row under that topic, found-or-created by (topic_id,
-// title) so re-uploading a corrected file updates existing chapters
-// in place instead of duplicating them.
+// text. Scoped to a whole *book* -- a syllabus_topics "chapter" grouping
+// (e.g. "Prose and Poetry"), which commonly holds several distinct topics,
+// one per story/poem -- rather than one topic picked up front: a book's
+// worth of chapters shouldn't have to be imported one topic at a time when
+// the file already carries a chapter_title per chunk. Each distinct
+// chapter_number/chapter_title in the JSON is matched (case-insensitively,
+// trimmed) against the syllabus_topics rows already under this book; a
+// title with no match gets a brand-new topic row created for it
+// (sort_order continuing this board/grade/subject/medium's existing
+// sequence -- see bulkAddSyllabusTopics in admin/catalog/actions.ts for the
+// same pattern). Each chapter's chapter_documents row is then found-or-
+// created by (topic_id, title) exactly as before, so re-uploading a
+// corrected file updates existing chapters in place instead of duplicating
+// them.
 //
 // Important asymmetry with the single-document Edit form: re-saving one of
 // these chapters through that plain text form would run it through the
@@ -196,8 +209,16 @@ export async function importChapterChunksJson(
   const session = await requireAdminPage("chapter_notes");
   const supabase = createAdminClient();
 
-  const topicId = (formData.get("topicId") as string | null) ?? "";
-  if (!topicId) return { error: "Board, grade, subject, medium, and topic are all required." };
+  const boardId = (formData.get("boardId") as string | null) ?? "";
+  const gradeId = (formData.get("gradeId") as string | null) ?? "";
+  const subjectId = (formData.get("subjectId") as string | null) ?? "";
+  const rawMedium = (formData.get("medium") as string | null) ?? "";
+  const book = ((formData.get("chapter") as string | null) ?? "").trim();
+  const VALID_MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
+  if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(rawMedium as Medium) || !book) {
+    return { error: "Board, grade, subject, medium, and book are all required." };
+  }
+  const medium = rawMedium as Medium;
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -221,17 +242,6 @@ export async function importChapterChunksJson(
     };
   }
 
-  const { data: topic, error: topicError } = await supabase
-    .from("syllabus_topics")
-    .select("board_id, grade_id, subject_id, medium")
-    .eq("id", topicId)
-    .single();
-  if (topicError || !topic) {
-    console.error("Failed to look up topic scope for chapter chunk import:", topicError);
-    return { error: "Could not look up that topic's board/grade/subject scope." };
-  }
-  const medium = topic.medium as Medium;
-
   // Preserves the JSON's own array order as each chapter's chunk_index --
   // not re-sorted by chapter_number, so a file that interleaves chapters
   // still gets each chapter's own pieces numbered 0, 1, 2... in the order
@@ -243,11 +253,58 @@ export async function importChapterChunksJson(
     else byChapter.set(chunk.chapter_number, { title: chunk.chapter_title, pieces: [chunk] });
   }
 
+  // Existing topics under this exact book, keyed by trimmed/lowercased
+  // topic text -- a chapter_title matching one of these (however it was
+  // capitalized in the file) reuses that topic rather than creating a
+  // near-duplicate.
+  const { data: existingTopics, error: topicsError } = await supabase
+    .from("syllabus_topics")
+    .select("id, topic, sort_order")
+    .eq("board_id", boardId)
+    .eq("grade_id", gradeId)
+    .eq("subject_id", subjectId)
+    .eq("medium", medium)
+    .eq("chapter", book)
+    .order("sort_order");
+  if (topicsError) {
+    console.error("Failed to look up existing topics for chapter chunk import:", topicsError);
+    return { error: "Could not look up this book's existing topics. Please try again." };
+  }
+
+  const topicIdByTitle = new Map((existingTopics ?? []).map((t) => [t.topic.trim().toLowerCase(), t.id]));
+  let nextSortOrder = (existingTopics ?? []).reduce((max, t) => Math.max(max, t.sort_order), 0) + 1;
+
   let chunksImported = 0;
+  let topicsCreated = 0;
   const embedFailures: string[] = [];
 
   for (const { title, pieces } of byChapter.values()) {
     const content = pieces.map((p) => p.text).join("\n\n");
+
+    let topicId = topicIdByTitle.get(title.trim().toLowerCase());
+    if (!topicId) {
+      const { data: createdTopic, error: createTopicError } = await supabase
+        .from("syllabus_topics")
+        .insert({
+          board_id: boardId,
+          grade_id: gradeId,
+          subject_id: subjectId,
+          medium,
+          chapter: book,
+          topic: title,
+          sort_order: nextSortOrder++,
+        })
+        .select("id")
+        .single();
+      if (createTopicError || !createdTopic) {
+        console.error(`Failed to create syllabus topic for "${title}":`, createTopicError);
+        embedFailures.push(title);
+        continue;
+      }
+      topicId = createdTopic.id;
+      topicIdByTitle.set(title.trim().toLowerCase(), topicId);
+      topicsCreated++;
+    }
 
     const { data: existingDoc } = await supabase
       .from("chapter_documents")
@@ -286,10 +343,10 @@ export async function importChapterChunksJson(
       const result = await importChapterChunks({
         documentId,
         topicId,
-        boardId: topic.board_id,
-        gradeId: topic.grade_id,
-        subjectId: topic.subject_id,
-        medium,
+        boardId,
+        gradeId,
+        subjectId,
+        medium: medium as Medium,
         chunks: pieces.map((p) => ({ content: p.text, fieldType: p.field_type, citation: p.citation })),
       });
       if (!result.embedded) embedFailures.push(title);
@@ -301,7 +358,8 @@ export async function importChapterChunksJson(
   }
 
   revalidatePath("/admin/chapter-notes");
+  revalidatePath("/admin/catalog");
   return {
-    success: { chaptersImported: byChapter.size, chunksImported, embedFailures },
+    success: { chaptersImported: byChapter.size, chunksImported, topicsCreated, embedFailures },
   };
 }

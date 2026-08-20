@@ -523,16 +523,25 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   optionally each with its own citation string — rather than one long block of text for this app's
   own naive paragraph-based `chunkText()` to re-split. The uploaded file is a single top-level
   `chunks` array (numeric `chapter_number`, string `chapter_title`/`text`, optional `field_type`/
-  `citation` per entry); every distinct chapter found in it becomes its own `chapter_documents` row
-  under **one** admin-selected topic scope (same reasoning the single-document form requires exactly
-  one topic), found-or-created by `(topic_id, title)` so re-uploading a corrected file updates those
-  same chapters in place rather than duplicating them. The two `field_type`/`citation` columns this
-  adds to `chapter_document_chunks` (`0025_chapter_chunk_metadata.sql`) are null for anything created
-  through the plain paste form, which every reader treats as "no extra metadata," not an error.
-  **Important asymmetry to flag to admins:** re-saving one of these chapters through the plain
-  Edit form re-chunks it with the naive splitter and silently discards its field_type/citation
-  metadata — updating a JSON-imported chapter means re-running this import with a corrected file,
-  not editing it through the other form.
+  `citation` per entry). **Scoped to a whole book, not one topic** — board/grade/subject/medium plus
+  a free-text "book" field (a `syllabus_topics.chapter` value, e.g. `"Prose and Poetry"`, offered via
+  a `<datalist>` of names already used in that scope but not restricted to them, since the very
+  first import for a brand-new book has nothing to suggest yet). Each distinct `chapter_title` found
+  in the file is matched (trimmed, case-insensitive) against the `topic` values already entered
+  under that book; a title with no match gets a brand-new `syllabus_topics` row created for it on the
+  spot (`sort_order` continuing that board/grade/subject/medium's existing sequence, same pattern
+  `bulkAddSyllabusTopics` in `/admin/catalog` uses) rather than requiring the admin to pre-create
+  every topic by hand first. Each chapter's `chapter_documents` row is then found-or-created by
+  `(topic_id, title)` under its own matched/created topic — not one topic shared by the whole file —
+  so re-uploading a corrected file updates those same chapters in place rather than duplicating them,
+  **and** so a student clicking one specific topic in the syllabus panel gets that topic's own chapter
+  notes, not the whole book's content concatenated under whichever topic happened to be picked. The
+  two `field_type`/`citation` columns this adds to `chapter_document_chunks`
+  (`0025_chapter_chunk_metadata.sql`) are null for anything created through the plain paste form,
+  which every reader treats as "no extra metadata," not an error. **Important asymmetry to flag to
+  admins:** re-saving one of these chapters through the plain Edit form re-chunks it with the naive
+  splitter and silently discards its field_type/citation metadata — updating a JSON-imported chapter
+  means re-running this import with a corrected file, not editing it through the other form.
 - **Chat-pipeline grounding tightened for retrieved chapter content.** `findRelevantChapterChunks`
   now returns each chunk's `fieldType`/`citation` alongside its text, and `buildTutorSystemPrompt`
   labels each reference chunk with its field type (e.g. `[vocabulary]`) and appends its citation
