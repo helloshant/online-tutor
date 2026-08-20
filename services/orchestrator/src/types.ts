@@ -25,7 +25,16 @@ export type ChatOrchestrationRequest =
       boardName: string;
       gradeId: string;
       gradeName: string;
+      // The student's real subscribed medium -- drives topic scope, the
+      // syllabus gate, RAG retrieval, and the cache key. Never the language
+      // toggle's value; see responseLanguage below and server.ts's own
+      // comment for why conflating the two broke on a story that only
+      // exists in one medium.
       medium: Medium;
+      // Defaults to `medium` when omitted (a caller that predates this
+      // field, or staff mode has no equivalent) -- only ever changes the
+      // system prompt's language instruction, nothing about scope.
+      responseLanguage?: Medium;
       topics: SyllabusTopic[];
       message: string;
       image?: ImageAttachment | null;
@@ -79,6 +88,8 @@ export type TopicSummaryRequest = {
   boardName: string;
   gradeName: string;
   medium: Medium;
+  // See ChatOrchestrationRequest's own comment -- defaults to `medium`.
+  responseLanguage?: Medium;
   chapter: string;
   topic: string;
 };
@@ -98,6 +109,8 @@ export type TopicExercisesRequest = {
   boardName: string;
   gradeName: string;
   medium: Medium;
+  // See ChatOrchestrationRequest's own comment -- defaults to `medium`.
+  responseLanguage?: Medium;
   chapter: string;
   topic: string;
 };

@@ -25,7 +25,21 @@ export type ChatOrchestrationRequest =
       boardName: string;
       gradeId: string;
       gradeName: string;
+      // The student's real subscribed medium -- always drives topic scope,
+      // the syllabus gate, RAG retrieval, and the cache key. Deliberately
+      // never overridden by the language toggle (see responseLanguage
+      // below and /api/chat/route.ts's own comment on why): a story that
+      // only exists in this medium must still be recognized as in-scope
+      // even when the student wants the reply in a different language.
       medium: Medium;
+      // What language the model should actually reply in -- equal to
+      // `medium` except when the English-subject toggle is on, in which
+      // case it's "English" regardless of whether any English-medium
+      // syllabus content exists. Never affects scope/grounding/caching,
+      // only the system prompt's language instruction (see
+      // buildTutorSystemPrompt) -- see server.ts's /v1/chat handler for
+      // why a mismatch here also skips the cache/answer-bank stages.
+      responseLanguage: Medium;
       topics: { chapter: string; topic: string }[];
       message: string;
       image?: ImageAttachment | null;
@@ -87,6 +101,8 @@ export type TopicSummaryRequest = {
   boardName: string;
   gradeName: string;
   medium: Medium;
+  // See ChatOrchestrationRequest's own comment -- defaults to `medium`.
+  responseLanguage?: Medium;
   chapter: string;
   topic: string;
 };
@@ -125,6 +141,8 @@ export type TopicExercisesRequest = {
   boardName: string;
   gradeName: string;
   medium: Medium;
+  // See ChatOrchestrationRequest's own comment -- defaults to `medium`.
+  responseLanguage?: Medium;
   chapter: string;
   topic: string;
 };

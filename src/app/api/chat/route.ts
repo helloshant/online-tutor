@@ -149,7 +149,22 @@ async function handleChatRequest(request: Request) {
     // Only English-subject chat offers this toggle at all -- every other
     // subject's syllabus/chapter content only ever exists in the student's
     // own medium, so there'd be nothing for "English" to switch to.
-    const effectiveMedium: Medium =
+    //
+    // Deliberately does NOT change `medium` below (topics scope, syllabus
+    // gate, RAG retrieval, cache key) the way an earlier version of this
+    // toggle did -- that swapped the entire request's medium, which quietly
+    // broke the moment a story/topic existed in only one medium (the
+    // common case: an admin authors or imports a chapter in whichever
+    // language they have source material for, not necessarily both). A
+    // Bengali-medium student asking about a Bengali-only story with the
+    // toggle on would get scoped against the *English*-medium topic list,
+    // which has no idea that story exists -- the syllabus gate would then
+    // (correctly, from its own narrowed point of view) reject an
+    // on-syllabus question as off-topic. responseLanguage instead only
+    // changes what language the model is told to reply in; `medium`
+    // everywhere else stays the student's real subscribed medium, so
+    // scope/grounding is always evaluated against what actually exists.
+    const responseLanguage: Medium =
       preferEnglish && subjectRow?.code === ENGLISH_SUBJECT_CODE && subscription.medium !== "English"
         ? "English"
         : subscription.medium;
@@ -163,7 +178,7 @@ async function handleChatRequest(request: Request) {
         .eq("board_id", subscription.board_id)
         .eq("grade_id", subscription.grade_id)
         .eq("subject_id", subjectId)
-        .eq("medium", effectiveMedium)
+        .eq("medium", subscription.medium)
         .order("sort_order"),
     ]);
 
@@ -177,7 +192,8 @@ async function handleChatRequest(request: Request) {
       boardName: board?.name ?? "",
       gradeId: subscription.grade_id,
       gradeName: grade?.name ?? "",
-      medium: effectiveMedium,
+      medium: subscription.medium,
+      responseLanguage,
       topics: topics ?? [],
       message,
       image,

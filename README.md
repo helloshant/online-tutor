@@ -312,27 +312,45 @@ The toggle is client-side UI state only (unpersisted, reset to native whenever t
 subjects and back — `ChatPanel` remounts per subject via its `key` in `dashboard-shell.tsx`) and sends
 a `preferEnglish` boolean alongside each `/api/chat` request; the server is what actually decides
 whether to honor it, re-checking the subject code and medium itself rather than trusting the client's
-own gating. When honored, it overrides the single `medium` value threaded through the whole
-4-stage pipeline (`services/orchestrator/src/server.ts`) — the Redis cache key, the answer-bank FTS
-scope, the chapter-notes RAG retrieval scope (`match_chapter_chunks`), the syllabus topics fetched for
-the chapter-list boundary, and rule 1 of the LLM system prompt ("Respond ONLY in ...") — so toggling to
-English is a single well-understood lever rather than a parallel code path, and a Bengali student
-toggled to English automatically gets any English-medium syllabus topics or chapter notes entered for
-this subject, not just an English-language reply layered on top of Bengali-medium content.
+own gating.
 
-**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below), but
-through a different mechanism than chat: those aren't scoped by board/grade/subject/medium the way
-chat is, they're pinned to one exact `topic_id` (`topic_summaries.topic_id` is unique; an exercise is
-tagged with the specific topic it was generated for) — so "switch this topic to English" can't just
-relabel the same row's language the way overriding chat's `medium` value can.
-`resolveTopicForLanguagePreference` (`src/lib/topicLanguagePreference.ts`) is what actually does the
-work: when the toggle is on, it looks up the *sibling* topic — same board/grade/subject/chapter/topic
-text, but `medium = 'English'` (e.g. the English-medium row a Bengali-medium one was literally
-duplicated from, see "Medium-scoped syllabus storage" above) — and resolves the summary/exercises
-request to *that* topic's id instead. Fails open to the original (native-language) topic when no
-English sibling exists yet — there's nothing to switch to, and there's no safe way to store an
-English-language summary under the native topic's id without colliding with (or silently
-overwriting) the one already cached there.
+**What the toggle does *not* do, after a real bug fix: it never changes `medium` itself.** An earlier
+version overrode the single `medium` value threaded through the whole pipeline — cache key,
+answer-bank scope, RAG retrieval scope, and the syllabus topics fetched for both the chapter-list
+boundary *and* the syllabus gate. That broke the moment a story/topic existed in only one medium (the
+ordinary case — an admin authors or imports a chapter in whatever language they have source material
+for, not necessarily both): a Bengali-medium student asking about a Bengali-only story with the
+toggle on would have the whole request re-scoped to the *English*-medium topic list, which has no
+idea that story exists — `isQuestionInSyllabus` (the stage-1 gate, see `syllabusGate.ts`) would then,
+correctly from its own now-wrong point of view, reject a genuinely on-syllabus question as off-topic.
+
+`medium` now always stays the student's real subscribed medium everywhere — topics query, syllabus
+gate, RAG retrieval, cache key — so scope is always evaluated against what actually exists. A separate
+`responseLanguage` field (defaults to `medium`, differs only when the toggle is on) is the *only*
+thing that changes: it's threaded through to rule 1 of the system prompt ("Respond ONLY in
+`${responseLanguage}`...") and nothing else. Since the cache and answer bank are keyed on `medium`
+alone, a response in a language other than the true medium is never read from or written back to
+either — `scope` (the object gating both) is set to `null` whenever `responseLanguage !== medium`, the
+same mechanism already used to skip caching for a follow-up or an image-bearing question — so an
+English-requested reply is always freshly generated and never pollutes the Bengali-medium cache/answer
+bank for the next student who asks the same thing without the toggle on. RAG retrieval keeps using the
+real `medium`, so the model still grounds its (English) reply in whatever native-medium chapter notes
+actually exist, rather than searching for English-medium notes that may not.
+
+**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below) via the
+identical `responseLanguage` pattern — `topicId`/`medium` stay this topic's own real values always,
+`responseLanguage` only changes the language instruction in `buildTopicSummaryPrompt`/
+`buildExerciseGenerationPrompt`. `/v1/topic-summary` and `/v1/topic-exercises` in
+`services/orchestrator/src/server.ts` skip their RAG/cache/database stages *and* the write-back
+(`upsertTopicSummary`/`recordAnswer`) whenever `responseLanguage` differs from the topic's medium, for
+the same reason as chat's cache — every one of those stores holds exactly one native-language row per
+topic, and there's no safe way to write an English-requested answer into it without corrupting what
+native-language students are served. An earlier version instead tried to redirect the request to a
+*sibling* topic row (same board/grade/subject/chapter/topic text, `medium = 'English'`) when one
+happened to exist — replaced because it only worked for topics an admin had manually duplicated into
+English, which most never are; the current approach works for every topic unconditionally, generating
+fresh via the LLM each time the toggle is used on content with no native English version, at the cost
+of no caching for that case.
 
 `ChatPanel` passes a `preferEnglish` prop to `TopicSummaryMessage`, which forwards it to `GET
 /api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an ordinary sent chat

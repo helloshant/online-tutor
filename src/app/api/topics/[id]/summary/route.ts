@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicSummary } from "@/lib/orchestratorClient";
-import { resolveTopicForLanguagePreference } from "@/lib/topicLanguagePreference";
+import type { Medium } from "@/lib/supabase/types";
+
+// Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
+const ENGLISH_SUBJECT_CODE = "ENG";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -25,9 +28,6 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  // Mirrors ChatPanel's own toggle -- see resolveTopicForLanguagePreference
-  // for why a topic click needs to resolve to a possibly-different topic
-  // row, not just override a `medium` value the way /api/chat does.
   const preferEnglish = new URL(request.url).searchParams.get("preferEnglish") === "true";
 
   // syllabus_topics is readable by any authenticated user under RLS (same
@@ -49,23 +49,28 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
   ]);
 
-  const { topicId: effectiveTopicId, medium: effectiveMedium } = await resolveTopicForLanguagePreference(
-    supabase,
-    topicId,
-    topicRow,
-    subject?.code ?? "",
-    preferEnglish
-  );
+  // Deliberately does NOT resolve to a different topic row the way an
+  // earlier version of this route did -- that only worked when an admin
+  // had happened to duplicate this exact topic into English, which most
+  // topics never have. medium (and therefore topicId) always stays this
+  // topic's own real medium; responseLanguage is the only thing the toggle
+  // changes, and only the orchestrator's LLM-generation path (never
+  // RAG/cache/database) honors it -- see /v1/topic-summary in server.ts.
+  const responseLanguage: Medium =
+    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English"
+      ? "English"
+      : topicRow.medium;
 
   try {
     const { summary } = await getTopicSummary({
       userId: user.id,
-      topicId: effectiveTopicId,
+      topicId,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: effectiveMedium,
+      medium: topicRow.medium,
+      responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
     });

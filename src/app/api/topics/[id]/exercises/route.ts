@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicExercises } from "@/lib/orchestratorClient";
-import { resolveTopicForLanguagePreference } from "@/lib/topicLanguagePreference";
+import type { Medium } from "@/lib/supabase/types";
+
+// Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
+const ENGLISH_SUBJECT_CODE = "ENG";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -25,10 +28,6 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  // See resolveTopicForLanguagePreference (same helper /api/topics/[id]/
-  // summary uses) -- an exercise search is tagged by topic_id the same way
-  // a summary is keyed by it, so "English" here means resolving to the
-  // sibling English-medium topic, not just relabeling this one.
   const preferEnglish = new URL(request.url).searchParams.get("preferEnglish") === "true";
 
   const { data: topicRow } = await supabase
@@ -47,25 +46,29 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
   ]);
 
-  const { topicId: effectiveTopicId, medium: effectiveMedium } = await resolveTopicForLanguagePreference(
-    supabase,
-    topicId,
-    topicRow,
-    subject?.code ?? "",
-    preferEnglish
-  );
+  // See the matching comment in /api/topics/[id]/summary/route.ts --
+  // medium (and topicId) always stays this topic's own real medium;
+  // responseLanguage only changes what language a freshly-generated
+  // exercise set is written in, and the orchestrator skips both the
+  // answer-bank search and the write-back whenever it's set (see
+  // /v1/topic-exercises in server.ts).
+  const responseLanguage: Medium =
+    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English"
+      ? "English"
+      : topicRow.medium;
 
   try {
     const { exercises } = await getTopicExercises({
       userId: user.id,
-      topicId: effectiveTopicId,
+      topicId,
       boardId: topicRow.board_id,
       gradeId: topicRow.grade_id,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: effectiveMedium,
+      medium: topicRow.medium,
+      responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
     });
