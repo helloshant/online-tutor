@@ -86,6 +86,11 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  // Id of the assistant message currently being regenerated in a different
+  // language (see the toggle-driven effect below) -- distinct from
+  // `sending`, which is only for a brand-new message the student is
+  // actively typing/submitting.
+  const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
   // Only English (the subject) offers this -- every other subject's
   // content only exists in the student's own medium, so there'd be nothing
   // for "English" to switch to. This component remounts per subject (see
@@ -207,6 +212,80 @@ export function ChatPanel({
     },
     [sending, subscriptionId, subject.id, preferEnglish]
   );
+
+  // Re-answers an already-shown assistant reply in a new language and
+  // overwrites it in place (server-side: an UPDATE of that same row, not a
+  // new insert -- see regenerateMessageId in /api/chat/route.ts), rather
+  // than appending a fresh message pair. Only ever called on the *last*
+  // exchange in the timeline (see the effect below), mirroring exactly how
+  // a topic bubble that's still the last entry stays live to the toggle --
+  // a student flipping the switch right after getting a reply means "show
+  // me that answer in the other language," the same expectation the topic
+  // case already sets.
+  const regenerateLastReply = useCallback(
+    async (assistantMessageId: string, questionText: string, nextPreferEnglish: boolean) => {
+      setRegeneratingMessageId(assistantMessageId);
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjectId: subject.id,
+            message: questionText,
+            regenerateMessageId: assistantMessageId,
+            preferEnglish: nextPreferEnglish,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok || !body.assistantMessage) {
+          throw new Error(body.error ?? "Could not translate the last reply.");
+        }
+        setTimeline((prev) =>
+          prev.map((entry) =>
+            entry.kind === "message" && entry.message.id === assistantMessageId
+              ? { ...entry, message: body.assistantMessage as ChatMessage }
+              : entry
+          )
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not translate the last reply.");
+      } finally {
+        setRegeneratingMessageId(null);
+      }
+    },
+    [subject.id]
+  );
+
+  // Fires regenerateLastReply above exactly when the toggle changes *and*
+  // the last thing in the timeline is an assistant reply -- the ordinary-
+  // chat counterpart to the topic-bubble sync a bit further down. Genuinely
+  // asynchronous (a network call), so this has to be a useEffect rather
+  // than the render-body pattern the topic-bubble sync uses; the ref guard
+  // plays the same role `syncedPreferEnglish` does there, firing only once
+  // per real toggle flip rather than on every unrelated timeline update.
+  // Skipped for an image-based question -- the image itself was never
+  // persisted, so there is nothing to re-ask with; the previewImageUrl
+  // check only catches this within the same browser session (it's not
+  // restored on reload), which is the best that's available here.
+  const regeneratedPreferEnglishRef = useRef(effectivePreferEnglish);
+  useEffect(() => {
+    if (regeneratedPreferEnglishRef.current === effectivePreferEnglish) return;
+    regeneratedPreferEnglishRef.current = effectivePreferEnglish;
+
+    const lastEntry = timeline[timeline.length - 1];
+    if (!lastEntry || lastEntry.kind !== "message" || lastEntry.message.role !== "assistant") return;
+    const pairedUser = timeline[timeline.length - 2];
+    if (!pairedUser || pairedUser.kind !== "message" || pairedUser.message.role !== "user") return;
+    if (pairedUser.previewImageUrl || pairedUser.message.content === "[Image]") return;
+
+    const assistantMessageId = lastEntry.message.id;
+    const questionText = pairedUser.message.content;
+    // Deferred a tick rather than calling regenerateLastReply directly --
+    // it sets regeneratingMessageId synchronously before its first await,
+    // which the effects linter (correctly) won't allow running straight
+    // off this effect's own synchronous body.
+    void Promise.resolve().then(() => regenerateLastReply(assistantMessageId, questionText, effectivePreferEnglish));
+  }, [effectivePreferEnglish, timeline, regenerateLastReply]);
 
   // A fresh clickId (even for the same topic clicked twice) drops a new
   // summary bubble at the end of the timeline, same as a message arriving.
@@ -376,7 +455,11 @@ export function ChatPanel({
                     className="mb-2 max-h-48 rounded-lg border border-white/20"
                   />
                 )}
-                {entry.message.content !== "[Image]" && <MathText text={entry.message.content} />}
+                {entry.message.id === regeneratingMessageId ? (
+                  <span className="text-foreground/40">Translating…</span>
+                ) : (
+                  entry.message.content !== "[Image]" && <MathText text={entry.message.content} />
+                )}
               </div>
             </div>
           )

@@ -81,6 +81,16 @@ async function handleChatRequest(request: Request) {
   // English, so a client sending this for any other subject just has no
   // effect rather than needing its own error path.
   const preferEnglish = body?.preferEnglish === true;
+  // Set when the toggle is flipped while the *last* exchange in the chat is
+  // still on screen (see chat-panel.tsx's "regenerate last reply" effect) --
+  // re-answers the same question with the new language preference and
+  // overwrites this existing assistant row in place, rather than inserting
+  // a new pair, so the conversation doesn't grow and a reload shows the
+  // same (regenerated) reply the student is currently looking at. Ownership
+  // (this user, this subject/subscription, role='assistant') is verified
+  // below rather than trusted from the client, same reasoning as every
+  // other id a client passes into a mutating endpoint.
+  const regenerateMessageId = typeof body?.regenerateMessageId === "string" ? body.regenerateMessageId : "";
   const { image, error: imageError } = parseImageField(body?.image);
 
   if (!subjectId) {
@@ -201,6 +211,33 @@ async function handleChatRequest(request: Request) {
     };
   }
 
+  // When regenerating, the history the model should see is exactly what it
+  // saw the *first* time this exchange was answered -- everything strictly
+  // before it, not including the question/reply pair being redone. Looking
+  // this row up now (rather than trusting a client-supplied timestamp) also
+  // doubles as the ownership check: a regenerateMessageId for a message
+  // that doesn't belong to this user/subject/subscription, or isn't an
+  // assistant row, is rejected outright rather than silently regenerating
+  // nothing or someone else's conversation.
+  let regenerateCutoff: string | null = null;
+  if (regenerateMessageId) {
+    let targetQuery = supabase
+      .from("chat_messages")
+      .select("id, created_at")
+      .eq("id", regenerateMessageId)
+      .eq("user_id", user.id)
+      .eq("subject_id", subjectId)
+      .eq("role", "assistant");
+    targetQuery = subscriptionId
+      ? targetQuery.eq("subscription_id", subscriptionId)
+      : targetQuery.is("subscription_id", null);
+    const { data: target } = await targetQuery.maybeSingle();
+    if (!target) {
+      return NextResponse.json({ error: "That message can't be regenerated." }, { status: 404 });
+    }
+    regenerateCutoff = target.created_at;
+  }
+
   let historyQuery = supabase
     .from("chat_messages")
     .select("role, content")
@@ -209,6 +246,7 @@ async function handleChatRequest(request: Request) {
   historyQuery = subscriptionId
     ? historyQuery.eq("subscription_id", subscriptionId)
     : historyQuery.is("subscription_id", null);
+  if (regenerateCutoff) historyQuery = historyQuery.lt("created_at", regenerateCutoff);
   const { data: history } = await historyQuery.order("created_at", { ascending: false }).limit(HISTORY_LIMIT);
 
   orchestrationRequest.history = (history ?? [])
@@ -231,6 +269,28 @@ async function handleChatRequest(request: Request) {
   // client-side inserts on chat_messages (see migration 0002), so this is
   // the only path a conversation turn can be persisted through.
   const admin = createAdminClient();
+
+  if (regenerateMessageId) {
+    // Overwrite the existing assistant row in place -- the paired user
+    // question is untouched (it's still the same question, just answered
+    // again in a different language), and nothing new is inserted, so the
+    // conversation's length/order is unaffected and a reload shows exactly
+    // this regenerated reply rather than the one it replaced.
+    const { data: updated, error: updateError } = await admin
+      .from("chat_messages")
+      .update({ content: assistantText })
+      .eq("id", regenerateMessageId)
+      .select("*")
+      .single();
+
+    if (updateError || !updated) {
+      console.error("Failed to persist regenerated chat_messages row:", updateError);
+      return NextResponse.json({ error: "Could not save the conversation" }, { status: 500 });
+    }
+
+    return NextResponse.json({ assistantMessage: updated as ChatMessage });
+  }
+
   const { data: inserted, error: insertError } = await admin
     .from("chat_messages")
     .insert([

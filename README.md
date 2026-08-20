@@ -387,6 +387,23 @@ Already-loaded exercises don't silently re-fetch on a flip the same way (that wo
 unprompted extra LLM/database round trip every time the toggle moves) — they're reset back to the
 "Relevant Exercises" button instead, so re-requesting them is what re-fetches in the new language.
 
+**The same "stays live only while it's the last thing in the timeline" behavior extends to an
+ordinary chat reply, not just a topic bubble.** If a student asks a question, gets an answer, and
+*then* flips the toggle without sending anything else, that reply re-answers in place too — a
+`useEffect` (genuinely a side effect, a network call, unlike the topic-bubble sync's render-body
+adjustment) checks whether the timeline's last entry is an assistant message and, if so, calls
+`regenerateLastReply`, which POSTs to `/api/chat` with a `regenerateMessageId` alongside the same
+question text and the new `preferEnglish`. The server (`/api/chat/route.ts`) treats this specially:
+it verifies the target row is actually this user's own assistant message for this subject/
+subscription (never trusting the id alone), rebuilds `history` as everything strictly *before* that
+exchange (not including the question/reply pair being redone, so the model sees exactly what it saw
+the first time), and **updates that row's `content` in place** rather than inserting a new pair — so
+the conversation doesn't grow and a page reload shows the regenerated reply, not the one it replaced.
+Skipped for a question that came with an image attached (the image itself is never persisted, so
+there's nothing to re-ask the model with) — detected via the client-only `previewImageUrl` on that
+timeline entry, which only catches this within the same browser session since it isn't restored on
+reload.
+
 ### Topic summaries and relevant exercises
 
 Selecting a subject opens a syllabus panel (desktop only) listing every chapter and topic for that
