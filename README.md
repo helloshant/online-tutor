@@ -244,6 +244,13 @@ See `supabase/migrations/` for the full schema:
   return-type-change constraint as before: `match_chapter_chunks` needed an explicit `drop function`
   (not `create or replace`) to add the two columns to its return table, so the `revoke`/`grant`
   lockdown pair was reapplied afterward and reverified against `pg_proc.proacl`.
+- `0026_topic_summary_review.sql` — adds an admin-review gate to `topic_summaries`:
+  `validation_status` (`pending_review`/`approved`/`rejected`, defaulting existing rows to
+  `approved` so this doesn't retroactively hide already-live content) and `updated_at`, plus
+  admin-only select/update/delete RLS policies (the table previously had zero client-facing
+  policies at all). Also extends `chat_events`'s `source` check constraint with `chapter_notes`,
+  and registers the new `topic_summaries` admin page permission with the usual grandfathering. See
+  "Topic summary review" below.
 
 ### Medium-scoped syllabus storage
 
@@ -340,10 +347,10 @@ anything happened. It shows two things, both LLM-backed and unlike the syllabus 
 generated rather than hand-entered:
 
 - **Summary.** `GET /api/topics/[id]/summary` resolves the topic's board/grade/subject names
-  server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks
-  `topic_summaries` for an existing row before calling the LLM. A summary is generated once per
-  topic and reused by every student who clicks it after that — the bubble never regenerates one
-  that already exists.
+  server-side, then proxies to the orchestrator's `/v1/topic-summary`, which checks four sources in
+  order before ever calling the LLM: admin-authored chapter notes, the Redis cache, the
+  `topic_summaries` database, and only then generates fresh — see "Topic summary review" below for
+  the full lookup order and why an LLM-generated summary needs admin approval before it's reused.
 - **Relevant Exercises**, a separate button shown once the summary loads. `GET
   /api/topics/[id]/exercises` proxies to `/v1/topic-exercises`, which searches the existing answer
   bank (`search_topic_exercises` — see the migration list above) for an exact `topic_id` match. A
@@ -381,6 +388,51 @@ observability the same way `/v1/chat` does (`source: "database"` on a hit, `"llm
 generate-and-store), tagged with a descriptive `question` string (`topic-summary: ...` /
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
+
+### Topic summary review
+
+`/v1/topic-summary` checks four sources, in order, before ever calling the LLM — each a fallback
+for the one before it:
+
+1. **Chapter notes (RAG).** If an admin has authored or imported chapter content for this exact
+   topic (`chapter_documents`, the same store chat grounding reads from — see "Chapter notes"
+   below), that content *is* the summary. `getStoredChapterSummary` looks it up by a plain
+   `topic_id` equality match, not a semantic search — the topic is already known exactly (the
+   student clicked it), so there's nothing to search for, and this skips spending a Voyage
+   embedding call on every single topic click. Already curated by a human, so it's shown as-is with
+   no review gate and never touches the LLM.
+2. **Cache (Redis).** A summary generated earlier and already admin-approved — see step 3 for why a
+   pending or rejected summary never reaches the cache.
+3. **Database (`topic_summaries`).** A summary generated earlier. Only a row with
+   `validation_status = 'approved'` counts as a hit here and gets promoted into the cache — a
+   `pending_review` row is still *returned to this one request* (no reason to regenerate identical
+   content, or leave the student with nothing, while it awaits review) but is deliberately kept out
+   of the cache and not treated as a hit for a *later* lookup, mirroring exactly how the answer bank
+   keeps a `pending_review` answer out of both `search_answer_bank` and the Redis cache until an
+   admin confirms it. A `rejected` row is treated as a miss and falls through to step 4, so a
+   rejected topic self-heals on the next click instead of staying empty until someone notices.
+4. **LLM.** Generates fresh and upserts into `topic_summaries` as `pending_review` — unlike
+   answer-bank entries, there's no auto-approve heuristic here (see
+   `0026_topic_summary_review.sql`): a single summary per topic is reused by *every* student who
+   opens it, so it's worth a human's confirmation every time, not just when the LLM's own output
+   looks shaky the way a one-off chat answer does. Returned to this request but, same as a pending
+   database hit, not cached.
+
+**`/admin/topic-summaries`** is the review queue this backs — pending-review by default, with
+Approved/Rejected/All filters. Approve promotes a row so it starts serving from cache/database on
+the next click; Reject demotes it (and evicts any Redis entry — `POST
+/v1/topic-summary-cache/invalidate`, mirroring the existing `/v1/cache/invalidate` used by the
+answer bank's own reject/delete) so the topic regenerates instead of continuing to serve rejected
+text; Delete removes the row outright. `topic_summaries` previously had RLS enabled with zero
+policies at all (only the orchestrator's service-role connection ever touched it) — `0026` added
+admin-only select/update/delete policies, but this page still reads/writes through the service-role
+client for consistency with every sibling admin page, and there's still no insert policy, since a
+row only ever originates from the orchestrator's LLM-generation path.
+
+A `chapter_notes` chat-event source (`chat_events`'s `source` check constraint, extended by
+`0026_topic_summary_review.sql`) and a matching `ChatEventSource` addition across the web app,
+orchestrator, and observability service let step 1 hits show up distinctly in
+`/admin/observability` rather than being folded into `database`.
 
 ### Chapter notes (semantic retrieval / RAG)
 

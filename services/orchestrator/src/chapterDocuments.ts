@@ -174,3 +174,41 @@ export async function embedAndStorePrechunkedDocument(
 ): Promise<{ chunkCount: number; embedded: boolean }> {
   return replaceChunks(documentId, scope, pieces);
 }
+
+// Read side for the topic-summary pipeline's first stage (server.ts's
+// /v1/topic-summary, checked before cache/database/LLM): if an admin has
+// already authored or imported chapter content for this exact topic, that
+// is the summary -- curated, already vouched for, and needs no further
+// review the way an LLM-generated one does. Deliberately a plain equality
+// lookup on chapter_documents.topic_id, not a semantic search against
+// chapter_document_chunks the way chat grounding (chapterRag.ts) works:
+// the topic is already known exactly (the student clicked it), so there's
+// nothing to search for, and this avoids spending a Voyage embedding call
+// on every single topic click.
+//
+// A topic can have more than one document (e.g. "Chapter summary" and
+// "Character notes" as separate admin-authored documents, see
+// 0024_chapter_documents_rag.sql's own comment) -- all of them are joined
+// together under their own titles rather than guessing which one is "the"
+// summary, since field_type/citation (0025_chapter_chunk_metadata.sql) are
+// chunk-level metadata an admin sets freely with no fixed vocabulary, not
+// a reliable signal to filter documents by.
+export async function getStoredChapterSummary(topicId: string): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("chapter_documents")
+    .select("title, content")
+    .eq("topic_id", topicId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to look up chapter documents for topic summary:", error);
+    return null;
+  }
+  if (!data || data.length === 0) return null;
+  if (data.length === 1) return data[0].content;
+
+  return data.map((doc) => `**${doc.title}**\n\n${doc.content}`).join("\n\n---\n\n");
+}

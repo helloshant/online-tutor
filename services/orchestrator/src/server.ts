@@ -2,8 +2,19 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
-import { deleteCachedAnswer, getCachedAnswer, setCachedAnswer } from "./cache.js";
-import { embedAndStoreChapterDocument, embedAndStorePrechunkedDocument } from "./chapterDocuments.js";
+import {
+  deleteCachedAnswer,
+  deleteCachedTopicSummary,
+  getCachedAnswer,
+  getCachedTopicSummary,
+  setCachedAnswer,
+  setCachedTopicSummary,
+} from "./cache.js";
+import {
+  embedAndStoreChapterDocument,
+  embedAndStorePrechunkedDocument,
+  getStoredChapterSummary,
+} from "./chapterDocuments.js";
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
@@ -15,7 +26,7 @@ import {
   buildTutorSystemPrompt,
 } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
-import { getStoredTopicSummary, storeTopicSummary } from "./topicSummary.js";
+import { getStoredTopicSummary, upsertTopicSummary } from "./topicSummary.js";
 import type {
   AnswerScope,
   ChapterDocumentEmbedRequest,
@@ -494,10 +505,31 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
   res.json(response);
 });
 
-// Reached when a student clicks a topic in the syllabus panel. Checks the
-// durable store first (one summary per topic, reused by every student who
-// clicks that same topic); only calls the LLM on a miss, and stores the
-// result so the next click of this topic -- by anyone -- is a database hit.
+// Reached when a student clicks a topic in the syllabus panel. Four stages,
+// each a fallback for the one before it:
+//
+//   1. Chapter notes (RAG): admin-authored/imported content for this exact
+//      topic (chapter_documents, the same store chat grounding reads from)
+//      -- already curated by a human, so it's shown as-is with no review
+//      gate and without ever touching the LLM.
+//   2. Cache (Redis): a summary generated earlier and already
+//      admin-approved -- see stage 3's caching rule below for why a
+//      pending_review summary never reaches here.
+//   3. Database (topic_summaries): a summary generated earlier. Only an
+//      'approved' row counts as a hit here -- a 'pending_review' row is
+//      still returned to *this* request (no reason to regenerate identical
+//      content, or leave the student with nothing, while it awaits review)
+//      but is deliberately not cached and not treated as a hit for a
+//      *later* lookup, mirroring exactly how the answer bank keeps a
+//      pending_review answer out of both search_answer_bank and the Redis
+//      cache until an admin confirms it (see server.ts's /v1/chat stage 4).
+//      A 'rejected' row is treated as a miss -- falls through to stage 4 --
+//      so the topic self-heals on the next click rather than staying dead
+//      until someone notices and manually clears it.
+//   4. LLM: generates fresh, upserts into topic_summaries as
+//      'pending_review' (never auto-approved, unlike answer-bank entries --
+//      see 0026_topic_summary_review.sql), and is returned to this request
+//      but not cached, for the same reason as stage 3's pending case.
 app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Response) => {
   const startedAt = Date.now();
   const body = req.body as Partial<TopicSummaryRequest> | undefined;
@@ -524,18 +556,39 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     return;
   }
 
-  const existing = await getStoredTopicSummary(body.topicId);
-  if (existing) {
+  function respond(summary: string, source: TopicSummaryResponse["source"]) {
     void recordChatEvent({
-      userId: body.userId,
+      userId: body!.userId!,
       mode: "student",
-      subjectId: body.subjectId,
-      question: `topic-summary: ${body.chapter} / ${body.topic}`,
-      source: "database",
+      subjectId: body!.subjectId!,
+      question: `topic-summary: ${body!.chapter} / ${body!.topic}`,
+      source,
       latencyMs: Date.now() - startedAt,
     });
-    const response: TopicSummaryResponse = { summary: existing, source: "database" };
+    const response: TopicSummaryResponse = { summary, source };
     res.json(response);
+  }
+
+  const fromChapterNotes = await getStoredChapterSummary(body.topicId);
+  if (fromChapterNotes) {
+    respond(fromChapterNotes, "chapter_notes");
+    return;
+  }
+
+  const cached = await getCachedTopicSummary(body.topicId);
+  if (cached) {
+    respond(cached, "cache");
+    return;
+  }
+
+  const stored = await getStoredTopicSummary(body.topicId);
+  if (stored && stored.status !== "rejected") {
+    if (stored.status === "approved") {
+      // Cache missed but the database had an approved summary -- populate
+      // cache so the next click of this topic is an L1 hit.
+      void setCachedTopicSummary(body.topicId, stored.summary);
+    }
+    respond(stored.summary, "database");
     return;
   }
 
@@ -555,7 +608,7 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
       maxTokens: SUMMARY_MAX_TOKENS,
     });
 
-    await storeTopicSummary(body.topicId, text);
+    await upsertTopicSummary(body.topicId, text);
 
     void recordChatEvent({
       userId: body.userId,
@@ -576,6 +629,21 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     console.error("Topic summary generation failed:", err);
     res.status(502).json({ error: "Could not generate a summary right now. Please try again shortly." });
   }
+});
+
+// Called by the web app's admin topic-summaries review page when a summary
+// is rejected or deleted, so a demoted/removed summary stops being served
+// from cache right away instead of surviving until its TTL runs out. Mirrors
+// /v1/cache/invalidate above exactly, just against the topic-summary cache
+// namespace (see cache.ts).
+app.post("/v1/topic-summary-cache/invalidate", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as { topicId?: string } | undefined;
+  if (!body || typeof body.topicId !== "string" || !body.topicId) {
+    res.status(400).json({ error: "topicId is required" });
+    return;
+  }
+  await deleteCachedTopicSummary(body.topicId);
+  res.json({ ok: true });
 });
 
 // Reached when a student clicks "Relevant Exercises" under a topic summary.

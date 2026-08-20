@@ -172,7 +172,10 @@ export type AnsweredQuestion = {
 };
 
 export type ChatEventMode = "student" | "staff";
-export type ChatEventSource = "cache" | "database" | "llm" | "rejected";
+// "chapter_notes" is a topic-summary served straight from admin-authored
+// chapter content -- see services/orchestrator/src/server.ts's
+// /v1/topic-summary handler.
+export type ChatEventSource = "cache" | "database" | "llm" | "rejected" | "chapter_notes";
 
 // Written only by the observability service (service-role key) -- see
 // supabase/migrations/0007_chat_events.sql. The admin panel reads this
@@ -205,7 +208,8 @@ export type AdminPageKey =
   | "answer_bank"
   | "observability"
   | "coupons"
-  | "chapter_notes";
+  | "chapter_notes"
+  | "topic_summaries";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -237,6 +241,25 @@ export type ChapterDocument = {
   content: string;
   created_by: string | null;
   created_at: string;
+};
+
+export type TopicSummaryValidationStatus = "pending_review" | "approved" | "rejected";
+
+// One LLM-generated summary per syllabus topic (topic_id is unique) --
+// see supabase/migrations/0013_topic_summaries_and_exercise_search.sql and
+// 0026_topic_summary_review.sql. RLS previously had zero client-facing
+// policies at all (only the orchestrator's own service-role connection
+// touched this table); 0026 added admin-only select/update/delete policies
+// so /admin/topic-summaries can review pending summaries through the
+// ordinary session -- there's still no insert policy, since a row only
+// ever originates from the orchestrator's LLM-generation path.
+export type TopicSummary = {
+  id: string;
+  topic_id: string;
+  summary: string;
+  validation_status: TopicSummaryValidationStatus;
+  created_at: string;
+  updated_at: string;
 };
 
 export interface Database {
@@ -348,6 +371,14 @@ export interface Database {
         Insert: Partial<AdminPagePermission>;
         Update: Partial<AdminPagePermission>;
         Relationships: [];
+      };
+      topic_summaries: {
+        Row: TopicSummary;
+        Insert: Partial<TopicSummary>;
+        Update: Partial<TopicSummary>;
+        Relationships: [
+          { foreignKeyName: "topic_summaries_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+        ];
       };
       chapter_documents: {
         Row: ChapterDocument;

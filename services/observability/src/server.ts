@@ -63,7 +63,7 @@ app.post("/v1/events", requireSharedSecret, async (req: Request, res: Response) 
     typeof body.question !== "string" ||
     !body.question ||
     !body.source ||
-    !["cache", "database", "llm", "rejected"].includes(body.source)
+    !["cache", "database", "llm", "rejected", "chapter_notes"].includes(body.source)
   ) {
     res.status(400).json({
       error: "userId, mode, subjectId, question, and a valid source are required",

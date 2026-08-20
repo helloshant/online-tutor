@@ -79,3 +79,47 @@ export async function deleteCachedAnswer(scope: AnswerScope): Promise<void> {
     console.error("Redis DEL failed:", err);
   }
 }
+
+// Same cache, a separate key namespace: topic summaries are looked up by
+// topic_id alone (one summary per topic, see topic_summaries' unique
+// constraint), not by a question string, so this doesn't reuse cacheKey()
+// above. Only ever populated with an *approved* summary (see server.ts's
+// /v1/topic-summary handler) -- a pending_review one is deliberately kept
+// out of here, same reasoning as answer-bank's cache-only-on-auto_approve.
+function topicSummaryCacheKey(topicId: string): string {
+  return `tutorops:topic-summary:${topicId}`;
+}
+
+export async function getCachedTopicSummary(topicId: string): Promise<string | null> {
+  const c = await getClient();
+  if (!c) return null;
+  try {
+    return await c.getEx(topicSummaryCacheKey(topicId), { EX: CACHE_TTL_SECONDS });
+  } catch (err) {
+    console.error("Redis GETEX (topic summary) failed:", err);
+    return null;
+  }
+}
+
+export async function setCachedTopicSummary(topicId: string, summary: string): Promise<void> {
+  const c = await getClient();
+  if (!c) return;
+  try {
+    await c.set(topicSummaryCacheKey(topicId), summary, { EX: CACHE_TTL_SECONDS });
+  } catch (err) {
+    console.error("Redis SET (topic summary) failed:", err);
+  }
+}
+
+// Used when an admin rejects or deletes a topic summary, mirroring
+// deleteCachedAnswer above -- a demoted summary must stop being served from
+// cache right away, not survive until its TTL runs out.
+export async function deleteCachedTopicSummary(topicId: string): Promise<void> {
+  const c = await getClient();
+  if (!c) return;
+  try {
+    await c.del(topicSummaryCacheKey(topicId));
+  } catch (err) {
+    console.error("Redis DEL (topic summary) failed:", err);
+  }
+}

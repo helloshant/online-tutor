@@ -41,7 +41,12 @@ export type ChatOrchestrationRequest =
       history: ChatTurn[];
     };
 
-export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected";
+// "chapter_notes" only ever appears on a topic-summary event (this union is
+// shared with recordChatEvent's payload, see observabilityClient.ts) -- an
+// ordinary chat reply never has admin-authored chapter content as its
+// *whole* answer the way a topic summary can, only as retrieved context
+// augmenting an LLM call (see chapterRag.ts), which still reports as "llm".
+export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected" | "chapter_notes";
 
 export type ChatOrchestrationResponse = {
   reply: string;
@@ -80,7 +85,7 @@ export type TopicSummaryRequest = {
 
 export type TopicSummaryResponse = {
   summary: string;
-  source: "database" | "llm";
+  source: "chapter_notes" | "cache" | "database" | "llm";
 };
 
 export type TopicExercisesRequest = {

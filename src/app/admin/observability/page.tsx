@@ -33,6 +33,7 @@ export default async function ObservabilityPage() {
     { count: databaseHitCount },
     { count: cacheHitCount },
     { count: rejectedCount },
+    { count: chapterNotesHitCount },
   ] = await Promise.all([
     admin.auth.admin.listUsers({ perPage: 1000 }),
     admin.from("profiles").select("*"),
@@ -44,6 +45,12 @@ export default async function ObservabilityPage() {
     admin.from("chat_events").select("*", { count: "exact", head: true }).eq("source", "database"),
     admin.from("chat_events").select("*", { count: "exact", head: true }).eq("source", "cache"),
     admin.from("chat_events").select("*", { count: "exact", head: true }).eq("source", "rejected"),
+    // Topic summaries served straight from admin-authored chapter notes --
+    // see services/orchestrator/src/server.ts's /v1/topic-summary handler.
+    // No LLM call and not really a "database hit" in the cache/answer-bank
+    // sense either, so it gets its own count rather than being folded into
+    // databaseHitCount.
+    admin.from("chat_events").select("*", { count: "exact", head: true }).eq("source", "chapter_notes"),
   ]);
 
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
@@ -116,7 +123,7 @@ export default async function ObservabilityPage() {
         <StatCard
           label="Database hits"
           value={(databaseHitCount ?? 0).toLocaleString()}
-          sub="served without an LLM call"
+          sub={`${(chapterNotesHitCount ?? 0).toLocaleString()} more from chapter notes`}
         />
         <StatCard
           label="Cache hits"

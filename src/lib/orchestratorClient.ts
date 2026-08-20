@@ -275,3 +275,26 @@ export async function invalidateCachedAnswer(scope: CacheInvalidationScope): Pro
     console.error("Cache invalidation request failed:", err);
   }
 }
+
+// Same best-effort reasoning as invalidateCachedAnswer above, for the
+// topic-summary cache namespace instead -- called after an admin rejects or
+// deletes a topic summary in /admin/topic-summaries.
+export async function invalidateCachedTopicSummary(topicId: string): Promise<void> {
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+  try {
+    const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-summary-cache/invalidate`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+      },
+      body: JSON.stringify({ topicId }),
+    });
+    if (!res.ok) {
+      console.error(`Topic-summary cache invalidation request failed with status ${res.status}`);
+    }
+  } catch (err) {
+    console.error("Topic-summary cache invalidation request failed:", err);
+  }
+}

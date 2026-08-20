@@ -1,17 +1,28 @@
 // Durable store for one generated summary per syllabus topic (see
-// supabase/migrations/0013_topic_summaries_and_exercise_search.sql). Like
-// cache.ts and answerBank.ts, fails open -- a missing Supabase connection or
-// a query error just means the summary can't be looked up/saved, not that
-// the request fails; the caller falls through to generating one fresh.
+// supabase/migrations/0013_topic_summaries_and_exercise_search.sql,
+// extended by 0026_topic_summary_review.sql with an admin-review gate).
+// Like cache.ts and answerBank.ts, fails open -- a missing Supabase
+// connection or a query error just means the summary can't be looked
+// up/saved, not that the request fails; the caller falls through to
+// generating one fresh.
 import { getSupabaseClient } from "./supabaseClient.js";
 
-export async function getStoredTopicSummary(topicId: string): Promise<string | null> {
+export type TopicSummaryValidationStatus = "pending_review" | "approved" | "rejected";
+
+export type StoredTopicSummary = { summary: string; status: TopicSummaryValidationStatus };
+
+// Returns the row regardless of status -- callers decide what a
+// non-'approved' row means for them (server.ts's /v1/topic-summary only
+// treats 'approved' as a servable database hit, but still needs to see a
+// 'pending_review' row to avoid re-generating on every click while one
+// awaits admin review; see that handler for the full reasoning).
+export async function getStoredTopicSummary(topicId: string): Promise<StoredTopicSummary | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("topic_summaries")
-    .select("summary")
+    .select("summary, validation_status")
     .eq("topic_id", topicId)
     .maybeSingle();
 
@@ -19,14 +30,27 @@ export async function getStoredTopicSummary(topicId: string): Promise<string | n
     console.error("Failed to look up topic summary:", error);
     return null;
   }
-  return data?.summary ?? null;
+  if (!data) return null;
+  return { summary: data.summary, status: data.validation_status as TopicSummaryValidationStatus };
 }
 
-export async function storeTopicSummary(topicId: string, summary: string): Promise<void> {
+// Every freshly LLM-generated summary lands here as 'pending_review',
+// never immediately servable -- see 0026_topic_summary_review.sql's
+// comment on why there's no auto-approve heuristic the way answer-bank
+// entries have one. Upserts on topic_id (unique) rather than a plain
+// insert: a topic can be regenerated more than once before an admin gets
+// to it (e.g. after a rejection, or simply another click before review),
+// and there is only ever one summary row per topic.
+export async function upsertTopicSummary(topicId: string, summary: string): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  const { error } = await supabase.from("topic_summaries").insert({ topic_id: topicId, summary });
+  const { error } = await supabase
+    .from("topic_summaries")
+    .upsert(
+      { topic_id: topicId, summary, validation_status: "pending_review", updated_at: new Date().toISOString() },
+      { onConflict: "topic_id" }
+    );
   if (error) {
     console.error("Failed to store topic summary:", error);
   }
