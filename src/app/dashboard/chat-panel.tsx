@@ -226,14 +226,20 @@ export function ChatPanel({
     ]);
   }, [topicClick, effectivePreferEnglish]);
 
-  // Keeps only the *last* topic bubble in the timeline mirroring the live
-  // toggle after it changes -- a student flipping the switch mid-conversation
-  // almost always means "show me the topic I'm looking at right now in the
-  // other language," not "regenerate every topic summary I've ever opened in
-  // this chat," which is what reacting to every topic entry would do (and,
-  // in a long conversation with several topics clicked, would fire that many
-  // simultaneous LLM/database calls for one toggle click). Earlier topic
-  // bubbles keep whatever language they were last showing.
+  // Keeps a topic bubble mirroring the live toggle after it changes, but
+  // only when it's still the very last thing in the timeline -- a student
+  // flipping the switch right after clicking a topic almost always means
+  // "show me the topic I'm looking at right now in the other language."
+  // The instant they send an ordinary chat message (or click a different
+  // topic), that bubble is no longer what they're looking at -- it becomes
+  // history, same as every earlier topic bubble, and stops reacting to
+  // further flips. This must check the timeline's actual last entry, not
+  // just the last *topic-kind* entry: an earlier version scanned past any
+  // chat messages sent after the topic click to find that older bubble and
+  // kept updating it -- flipping the toggle after asking a follow-up
+  // question changed a summary the student had already moved on from,
+  // while the message they'd actually just sent (and its reply) stayed
+  // untouched, which is backwards from what "the latest thing" means here.
   //
   // Done directly in the render body (React's documented "adjusting state
   // when a prop changes" escape hatch -- see "You Might Not Need an Effect"),
@@ -246,20 +252,12 @@ export function ChatPanel({
   if (syncedPreferEnglish !== effectivePreferEnglish) {
     setSyncedPreferEnglish(effectivePreferEnglish);
     setTimeline((prev) => {
-      let lastTopicIndex = -1;
-      for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].kind === "topic") {
-          lastTopicIndex = i;
-          break;
-        }
-      }
-      if (lastTopicIndex === -1) return prev;
-
-      const entry = prev[lastTopicIndex];
-      if (entry.kind !== "topic" || entry.preferEnglish === effectivePreferEnglish) return prev;
+      if (prev.length === 0) return prev;
+      const lastEntry = prev[prev.length - 1];
+      if (lastEntry.kind !== "topic" || lastEntry.preferEnglish === effectivePreferEnglish) return prev;
 
       const next = [...prev];
-      next[lastTopicIndex] = { ...entry, preferEnglish: effectivePreferEnglish };
+      next[prev.length - 1] = { ...lastEntry, preferEnglish: effectivePreferEnglish };
       return next;
     });
   }
