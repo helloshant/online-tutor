@@ -324,18 +324,29 @@ this subject, not just an English-language reply layered on top of Bengali-mediu
 through a different mechanism than chat: those aren't scoped by board/grade/subject/medium the way
 chat is, they're pinned to one exact `topic_id` (`topic_summaries.topic_id` is unique; an exercise is
 tagged with the specific topic it was generated for) — so "switch this topic to English" can't just
-relabel the same row's language the way overriding chat's `medium` value can. `ChatPanel` passes its
-current toggle state to `TopicSummaryMessage` as a prop (read once, at the moment a topic is
-clicked — an already-shown summary doesn't change language retroactively just because the toggle
-moved on, same as an already-sent chat message wouldn't), which forwards it to `GET /api/topics/[id]/
-summary` and `/exercises` as `?preferEnglish=`. `resolveTopicForLanguagePreference`
-(`src/lib/topicLanguagePreference.ts`) is what actually does the work: when the toggle is on, it looks
-up the *sibling* topic — same board/grade/subject/chapter/topic text, but `medium = 'English'` (e.g.
-the English-medium row a Bengali-medium one was literally duplicated from, see "Medium-scoped
-syllabus storage" above) — and resolves the summary/exercises request to *that* topic's id instead.
-Fails open to the original (native-language) topic when no English sibling exists yet — there's
-nothing to switch to, and there's no safe way to store an English-language summary under the
-native topic's id without colliding with (or silently overwriting) the one already cached there.
+relabel the same row's language the way overriding chat's `medium` value can.
+`resolveTopicForLanguagePreference` (`src/lib/topicLanguagePreference.ts`) is what actually does the
+work: when the toggle is on, it looks up the *sibling* topic — same board/grade/subject/chapter/topic
+text, but `medium = 'English'` (e.g. the English-medium row a Bengali-medium one was literally
+duplicated from, see "Medium-scoped syllabus storage" above) — and resolves the summary/exercises
+request to *that* topic's id instead. Fails open to the original (native-language) topic when no
+English sibling exists yet — there's nothing to switch to, and there's no safe way to store an
+English-language summary under the native topic's id without colliding with (or silently
+overwriting) the one already cached there.
+
+`ChatPanel` passes its current toggle state to `TopicSummaryMessage` as a `preferEnglish` prop, which
+forwards it to `GET /api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an
+ordinary sent chat message, an already-shown topic-summary bubble is a *live* reference card, not an
+immutable historical record — flipping the toggle re-fetches the summary of whatever bubble is
+currently on screen in place (the summary effect depends on `[topic.id, preferEnglish]`, not just
+`topic.id`), rather than only taking effect on the *next* topic clicked. This matters in practice on
+mobile especially: the toggle lives in `ChatPanel`'s header, a different screen from the Topics tab a
+click originates from, so a student has no way to *know* to toggle before clicking in the first
+place — the first click on any topic always shows the native-language summary by default, and the
+toggle is how they get the English version of that same bubble afterward, not something they set in
+advance. Already-loaded exercises don't silently re-fetch on a flip the same way (that would mean an
+unprompted extra LLM/database round trip every time the toggle moves) — they're reset back to the
+"Relevant Exercises" button instead, so re-requesting them is what re-fetches in the new language.
 
 ### Topic summaries and relevant exercises
 

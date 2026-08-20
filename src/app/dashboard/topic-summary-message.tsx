@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
@@ -11,11 +11,13 @@ type ExerciseItem = { question: string; answer: string };
 // its summary straight into the conversation so a student can immediately
 // ask the tutor a follow-up about it in the same view.
 //
-// preferEnglish is ChatPanel's language toggle, read at the moment this
-// component mounts (a fresh mount per topic click -- see dashboard-shell.tsx's
-// fresh clickId per click) rather than reacted to afterward: like an
-// already-sent chat message, an already-shown summary doesn't retroactively
-// change language just because the toggle moved on to something else.
+// preferEnglish is ChatPanel's language toggle. Unlike an ordinary sent chat
+// message (an immutable historical record), this bubble is a live reference
+// card for one topic -- flipping the toggle re-fetches the summary in place
+// rather than only affecting the *next* topic clicked, since on mobile the
+// toggle isn't even visible from the Topics tab a click originates from
+// (it's up in ChatPanel's header, a different screen), and re-clicking an
+// already-selected sidebar item to "try again" isn't a discoverable action.
 export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusTopic; preferEnglish: boolean }) {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -40,6 +42,11 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
     let cancelled = false;
 
     (async () => {
+      // Re-runs on a preferEnglish flip too (see the component doc comment
+      // above) -- reset to the loading state rather than leaving the
+      // previous language's text on screen while the new one comes in.
+      setLoadingSummary(true);
+      setSummaryError(null);
       try {
         const res = await fetch(`/api/topics/${topic.id}/summary?preferEnglish=${preferEnglish}`);
         const body = await res.json().catch(() => null);
@@ -59,10 +66,26 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
     return () => {
       cancelled = true;
     };
-    // preferEnglish deliberately excluded -- see the component doc comment
-    // above, this effect should only ever run once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topic.id]);
+  }, [topic.id, preferEnglish]);
+
+  // A language flip after exercises were already shown invalidates them --
+  // reset to the "Relevant Exercises" button rather than silently
+  // re-fetching in the background, consistent with exercises being an
+  // explicit-action feature (unlike the summary above, which always loads
+  // on its own). Skips the very first render (mount) since there's nothing
+  // to invalidate yet -- exercises start out null already.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    setExercises(null);
+    setExercisesError(null);
+    setTopicTags([]);
+    setActiveTagFilter(null);
+    setFilteredExercises(null);
+  }, [preferEnglish]);
 
   async function handleLoadExercises() {
     setLoadingExercises(true);
