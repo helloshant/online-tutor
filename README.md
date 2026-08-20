@@ -251,6 +251,12 @@ See `supabase/migrations/` for the full schema:
   policies at all). Also extends `chat_events`'s `source` check constraint with `chapter_notes`,
   and registers the new `topic_summaries` admin page permission with the usual grandfathering. See
   "Topic summary review" below.
+- `0027_topic_summary_language.sql` — adds a `language` column to `topic_summaries` (backfilled from
+  each row's own topic's `medium`, since every pre-existing summary was generated in the topic's own
+  medium) and replaces the `unique (topic_id)` constraint with `unique (topic_id, language)`, so a
+  topic can hold more than one independently-reviewed summary — its own medium's, and a
+  native-language translation of it. See "English-subject language toggle" and "Topic summary review"
+  below.
 
 ### Medium-scoped syllabus storage
 
@@ -298,6 +304,25 @@ client-component confirm() wrapper the Users page uses for deleting a user) with
 the exact count, rather than the plain button used everywhere else. A topic with nothing attached
 skips the confirm entirely — no reason to add friction to routine cleanup that has nothing at stake.
 
+**One deliberate exception to "scoped to the student's own subscribed medium": the English subject's
+syllabus is always fetched as `medium = 'English'`, for every student, regardless of what medium the
+rest of their board/grade is taught in.** Every other subject's syllabus is genuinely authored
+per-medium (the Mathematics example above — real translated content, possibly a different chapter
+list entirely), but English is the one subject that teaches the English language itself: its
+chapters/poems/prose are inherently written in English, so a Bengali-medium student's English
+subject reads the same single canonical syllabus an English-medium student would, not a separate
+Bengali-tagged duplicate. `syllabusMediumFor` (`dashboard-shell.tsx`) computes this content medium
+for `SyllabusPanel`/`TopicList`, and the identical `contentMedium` computation in
+`/api/chat/route.ts` does the same for the chat pipeline's own topics query/syllabus gate/RAG scope
+— both keyed off `subjects.code === 'ENG'`, mirrored constants in each file. This is deliberately
+independent of `ChatPanel`'s own `medium` prop (left as the raw subscription medium — see the toggle
+section below): one decides *what's in scope to ask about*, the other decides *what language the
+reply reads in*, and for English specifically those are no longer always the same value. A pre-existing
+Bengali-tagged duplicate of an English-subject topic (created before this policy existed, e.g. during
+this app's own development) becomes unreachable through the syllabus panel once this is live — see
+"Topic summary review" below for how a *language*, as opposed to a *content-scope*, difference is
+still served.
+
 ### English-subject language toggle (native medium vs. English)
 
 Every rule above assumes a student wants explanations in their own subscribed medium — true for a
@@ -337,40 +362,41 @@ bank for the next student who asks the same thing without the toggle on. RAG ret
 real `medium`, so the model still grounds its (English) reply in whatever native-medium chapter notes
 actually exist, rather than searching for English-medium notes that may not.
 
-**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below), but
-through a two-step resolution `/api/topics/[id]/summary` and `/exercises` run before ever calling the
-orchestrator — this is the one place the toggle is still allowed to swap which topic's data gets
-read, unlike chat, because a single topic's RAG/cache/database lookup has none of the syllabus-gate
-blast radius that made swapping `medium` wholesale wrong for chat (see above):
+**The toggle also applies to a syllabus topic's Summary and Relevant Exercises** (see below), resolved
+in `/api/topics/[id]/summary` and `/exercises` the same way as chat: `medium` always stays the
+clicked topic's own real content medium (`topicRow.medium` — for the English subject that's
+unconditionally `'English'` now, see "Medium-scoped syllabus storage" above, so there's no longer a
+separate "sibling" English-medium topic to redirect to). `responseLanguage` independently decides
+what language the summary/exercises text is generated/served in: it defaults to the student's own
+subscribed medium and only becomes the topic's own medium when the toggle is switched on (or when the
+student's native medium already *is* that topic's medium, e.g. an English-medium student — nothing to
+toggle to there). This is the mirror image of the toggle's *default* for chat: chat defaults to the
+student's native medium and the toggle turns it *up* to English; here the topic's medium is already
+always English for this subject, so the toggle instead turns it *down* to the student's native medium
+by default and *off* (back to English) when switched on.
 
-1. **Sibling topic exists** (`findSiblingTopic` in `src/lib/topicLanguagePreference.ts`: same
-   board/grade/subject/chapter/topic text, `medium = 'English'` — e.g. the English-medium row a
-   Bengali-medium one was literally duplicated from). Its `topicId` and `medium` are used in place of
-   the clicked topic's own — from the orchestrator's point of view this is now an entirely ordinary
-   *native*-language request (medium already equals what was asked for), so the full chapter-notes
-   RAG → cache → database → LLM(+admin-review) pipeline runs exactly as documented in "Topic summary
-   review" below, just scoped to the sibling's own id. A student toggling to English genuinely gets
-   whatever curated/cached/approved English content already exists for that topic, not just an
-   English-language reply layered over Bengali-medium material.
-2. **No sibling exists** (the common case — most topics are never manually duplicated into a second
-   medium). The original `topicId`/`medium` are kept, and a separate `responseLanguage` field
-   overrides only the language instruction in `buildTopicSummaryPrompt`/
-   `buildExerciseGenerationPrompt`. `/v1/topic-summary` and `/v1/topic-exercises` in
-   `services/orchestrator/src/server.ts` skip their RAG/cache/database stages *and* the write-back
-   (`upsertTopicSummary`/`recordAnswer`) whenever `responseLanguage` differs from the topic's medium —
-   every one of those stores holds exactly one native-language row per topic, and there's no safe way
-   to write an English-requested answer into it without corrupting what native-language students are
-   served — so this case always generates fresh via the LLM, uncached.
+Unlike the chat pipeline, **every one of stages 2-4 below is genuinely re-run per language, not
+skipped** — `topic_summaries` has a `language` column (`0027_topic_summary_language.sql`, one row per
+`(topic_id, language)` rather than one row per topic) and the Redis cache key includes it too
+(`topicSummaryCacheKey(topicId, language)`), so a topic's own-medium summary and a native-language
+translation of it are independently generated, cached, stored, and admin-reviewed — matching the same
+RAG → cache → database → LLM(+approval) pipeline for *every* language a topic is ever requested in, not
+just its own. `/v1/topic-exercises` reuses the existing `answered_questions` table for this with no
+schema change at all — its `medium` column was already a free-form scoping dimension, not derived
+from the topic's own medium, so keying the exercises `scope.medium` on `responseLanguage` (instead of
+`medium`) is enough on its own; see "Topic summary review" below for the summary side's full lookup
+order. Only stage 1 (chapter notes/RAG) stays tied to the topic's own medium — `chapter_documents` has
+no language dimension of its own (an admin writes one document per topic, in that topic's real
+medium), so a native-language request skips straight to stage 2 rather than checking RAG at all.
 
-**A genuine data trap this surfaced**: `getStoredChapterSummary` (RAG stage 1, see "Topic summary
-review" below) has no language validation of its own — it returns whatever text is attached to a
-topic's `chapter_documents` row exactly as stored, trusting that an admin only ever pastes content in
-the medium the topic itself declares. Content pasted or imported in the *wrong* language for a topic
-(e.g. English prose saved under a Bengali-medium topic row) is therefore served as-is to a
-native-medium request with no way for the code to detect the mismatch — this is a data-entry error to
-fix at the source (move the content to the correct-medium topic, or a sibling created for it), not
-something a query can validate away, since there's no reliable way to detect a chunk's actual written
-language from the text alone.
+**A genuine data trap this surfaced, still true today**: `getStoredChapterSummary` (RAG stage 1, see
+"Topic summary review" below) has no language validation of its own — it returns whatever text is
+attached to a topic's `chapter_documents` row exactly as stored, trusting that an admin only ever
+pastes content in the medium the topic itself declares. Content pasted or imported in the *wrong*
+language for a topic (e.g. English prose saved under a Bengali-medium topic row) is therefore served
+as-is with no way for the code to detect the mismatch — this is a data-entry error to fix at the
+source, not something a query can validate away, since there's no reliable way to detect a chunk's
+actual written language from the text alone.
 
 `ChatPanel` passes a `preferEnglish` prop to `TopicSummaryMessage`, which forwards it to `GET
 /api/topics/[id]/summary` and `/exercises` as `?preferEnglish=`. Unlike an ordinary sent chat
@@ -496,42 +522,53 @@ observability dashboard.
 ### Topic summary review
 
 `/v1/topic-summary` checks four sources, in order, before ever calling the LLM — each a fallback
-for the one before it:
+for the one before it. Stages 2-4 are keyed on `(topicId, responseLanguage)`, not `topicId` alone
+(`0027_topic_summary_language.sql`) — see the toggle section above for why a topic can now have more
+than one independently-reviewed summary, one per language it's ever been requested in:
 
-1. **Chapter notes (RAG).** If an admin has authored or imported chapter content for this exact
-   topic (`chapter_documents`, the same store chat grounding reads from — see "Chapter notes"
-   below), that content *is* the summary. `getStoredChapterSummary` looks it up by a plain
+1. **Chapter notes (RAG).** Only consulted when `responseLanguage` equals the topic's own medium —
+   `chapter_documents` has no language dimension of its own (see the toggle section above), so this
+   store only ever holds content in the topic's real medium. If an admin has authored or imported
+   chapter content for this exact topic (the same store chat grounding reads from — see "Chapter
+   notes" below), that content *is* the summary. `getStoredChapterSummary` looks it up by a plain
    `topic_id` equality match, not a semantic search — the topic is already known exactly (the
    student clicked it), so there's nothing to search for, and this skips spending a Voyage
    embedding call on every single topic click. Already curated by a human, so it's shown as-is with
    no review gate and never touches the LLM.
-2. **Cache (Redis).** A summary generated earlier and already admin-approved — see step 3 for why a
-   pending or rejected summary never reaches the cache.
-3. **Database (`topic_summaries`).** A summary generated earlier. Only a row with
-   `validation_status = 'approved'` counts as a hit here and gets promoted into the cache — a
-   `pending_review` row is still *returned to this one request* (no reason to regenerate identical
-   content, or leave the student with nothing, while it awaits review) but is deliberately kept out
-   of the cache and not treated as a hit for a *later* lookup, mirroring exactly how the answer bank
-   keeps a `pending_review` answer out of both `search_answer_bank` and the Redis cache until an
-   admin confirms it. A `rejected` row is treated as a miss and falls through to step 4, so a
-   rejected topic self-heals on the next click instead of staying empty until someone notices.
-4. **LLM.** Generates fresh and upserts into `topic_summaries` as `pending_review` — unlike
-   answer-bank entries, there's no auto-approve heuristic here (see
-   `0026_topic_summary_review.sql`): a single summary per topic is reused by *every* student who
-   opens it, so it's worth a human's confirmation every time, not just when the LLM's own output
+2. **Cache (Redis).** A summary generated earlier for this exact `(topicId, responseLanguage)` pair
+   and already admin-approved — see step 3 for why a pending or rejected summary never reaches the
+   cache.
+3. **Database (`topic_summaries`).** A summary generated earlier for this `(topicId,
+   responseLanguage)` pair. Only a row with `validation_status = 'approved'` counts as a hit here and
+   gets promoted into the cache — a `pending_review` row is still *returned to this one request* (no
+   reason to regenerate identical content, or leave the student with nothing, while it awaits review)
+   but is deliberately kept out of the cache and not treated as a hit for a *later* lookup, mirroring
+   exactly how the answer bank keeps a `pending_review` answer out of both `search_answer_bank` and
+   the Redis cache until an admin confirms it. A `rejected` row is treated as a miss and falls through
+   to step 4, so a rejected topic self-heals on the next click instead of staying empty until someone
+   notices.
+4. **LLM.** Generates fresh and upserts into `topic_summaries` (keyed on this `responseLanguage`) as
+   `pending_review` — unlike answer-bank entries, there's no auto-approve heuristic here (see
+   `0026_topic_summary_review.sql`): a summary is reused by *every* student who opens that topic in
+   that language, so it's worth a human's confirmation every time, not just when the LLM's own output
    looks shaky the way a one-off chat answer does. Returned to this request but, same as a pending
-   database hit, not cached.
+   database hit, not cached. Unlike an earlier version of this feature, this write-back now happens
+   for *every* language, not only the topic's own medium — a native-language translation is exactly
+   as reviewable/cacheable as the topic's own-medium summary, not a disposable one-off.
 
 **`/admin/topic-summaries`** is the review queue this backs — pending-review by default, with
-Approved/Rejected/All filters. Approve promotes a row so it starts serving from cache/database on
-the next click; Reject demotes it (and evicts any Redis entry — `POST
+Approved/Rejected/All filters. Each row shows its own `language`, distinct from the topic's `medium`
+in the meta line whenever they differ (e.g. English-subject content summarized in Bengali). Approve
+promotes a row so it starts serving from cache/database on the next click of that topic *in that
+language*; Reject demotes it (and evicts the matching `(topicId, language)` Redis entry — `POST
 /v1/topic-summary-cache/invalidate`, mirroring the existing `/v1/cache/invalidate` used by the
-answer bank's own reject/delete) so the topic regenerates instead of continuing to serve rejected
-text; Delete removes the row outright. `topic_summaries` previously had RLS enabled with zero
-policies at all (only the orchestrator's service-role connection ever touched it) — `0026` added
-admin-only select/update/delete policies, but this page still reads/writes through the service-role
-client for consistency with every sibling admin page, and there's still no insert policy, since a
-row only ever originates from the orchestrator's LLM-generation path.
+answer bank's own reject/delete) so that topic+language regenerates instead of continuing to serve
+rejected text — rejecting a topic's English row leaves its Bengali row (or vice versa) untouched;
+Delete removes the row outright. `topic_summaries` previously had RLS enabled with zero policies at
+all (only the orchestrator's service-role connection ever touched it) — `0026` added admin-only
+select/update/delete policies, but this page still reads/writes through the service-role client for
+consistency with every sibling admin page, and there's still no insert policy, since a row only ever
+originates from the orchestrator's LLM-generation path.
 
 A `chapter_notes` chat-event source (`chat_events`'s `source` check constraint, extended by
 `0026_topic_summary_review.sql`) and a matching `ChatEventSource` addition across the web app,

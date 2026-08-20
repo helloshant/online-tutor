@@ -208,10 +208,15 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     return;
   }
 
-  // Defaults to the real medium (the ordinary case) -- only differs when
-  // the web app's English-subject toggle is on. Deliberately never
-  // substituted for `medium` itself anywhere below (topics/gate/RAG/cache
-  // all stay keyed on the real medium) -- see types.ts's own comment.
+  // Defaults to `medium` (the ordinary case, true for every subject but
+  // English) -- only differs when the web app's English-subject toggle is
+  // on, or when `medium` itself is the English subject's always-English
+  // content scope while the student's own default reply language is their
+  // native medium (see the web app's contentMedium/syllabusMediumFor).
+  // `medium` drives topics/gate/RAG scope below -- what's actually in
+  // scope to ask about -- and is never substituted for responseLanguage;
+  // responseLanguage only ever decides what language the reply is written
+  // in (see types.ts's own comment).
   const responseLanguage: Medium = studentBody.responseLanguage ?? studentBody.medium;
 
   // Stage 1: syllabus scope gate. Only judged on the opening message of a
@@ -231,7 +236,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       boardId: studentBody.boardId,
       gradeId: studentBody.gradeId,
       subjectId: studentBody.subjectId,
-      medium: studentBody.medium,
+      medium: responseLanguage,
       question: studentBody.message.trim() || "[Image question]",
       source: "rejected",
       latencyMs: Date.now() - startedAt,
@@ -248,22 +253,27 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
   // An image-bearing question is excluded the same way: the lookup key is
   // the message text, which doesn't represent what's actually in the image,
   // so a text match here would be coincidental at best and wrong at worst.
-  // A responseLanguage override is excluded too: both the cache key and the
-  // answer bank are keyed on `medium` alone, so a cached/banked entry is
-  // always in the *real* medium -- serving one when the student actually
-  // asked for a different reply language would silently ignore the toggle,
-  // and writing an English-requested answer into a Bengali-medium cache
-  // entry would then wrongly serve English to the next Bengali-medium
-  // student who asks the same thing without the toggle on. All three cases
-  // go straight to the LLM and are never written back into cache/db.
+  //
+  // The scope's own `medium` is deliberately `responseLanguage`, not
+  // `studentBody.medium` -- the cached/banked *text* is a function of what
+  // language it was written in, not what content-scope it was asked
+  // against, and for the English subject those two are no longer always
+  // the same value (medium is always "English" there; responseLanguage
+  // defaults to the student's own native medium and only becomes
+  // "English" when the toggle is on). Keying on responseLanguage means a
+  // Bengali-medium and an English-medium student's identical question
+  // about the English subject correctly share a cache entry when both get
+  // a Bengali/English answer respectively -- and, for every other subject,
+  // responseLanguage always equals medium anyway (no toggle exists), so
+  // this is a no-op there.
   const isFreshQuestion = history.length === 0;
   const scope: AnswerScope | null =
-    isFreshQuestion && !image && responseLanguage === studentBody.medium
+    isFreshQuestion && !image
       ? {
           boardId: studentBody.boardId,
           gradeId: studentBody.gradeId,
           subjectId: studentBody.subjectId,
-          medium: studentBody.medium,
+          medium: responseLanguage,
           question: studentBody.message,
         }
       : null;
@@ -376,7 +386,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       boardId: studentBody.boardId,
       gradeId: studentBody.gradeId,
       subjectId: studentBody.subjectId,
-      medium: studentBody.medium,
+      medium: responseLanguage,
       question: studentBody.message.trim() || "[Image question]",
       source: "llm",
       provider: getActiveLlmProvider(),
@@ -524,39 +534,43 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
 //   1. Chapter notes (RAG): admin-authored/imported content for this exact
 //      topic (chapter_documents, the same store chat grounding reads from)
 //      -- already curated by a human, so it's shown as-is with no review
-//      gate and without ever touching the LLM.
-//   2. Cache (Redis): a summary generated earlier and already
-//      admin-approved -- see stage 3's caching rule below for why a
-//      pending_review summary never reaches here.
-//   3. Database (topic_summaries): a summary generated earlier. Only an
-//      'approved' row counts as a hit here -- a 'pending_review' row is
-//      still returned to *this* request (no reason to regenerate identical
-//      content, or leave the student with nothing, while it awaits review)
-//      but is deliberately not cached and not treated as a hit for a
-//      *later* lookup, mirroring exactly how the answer bank keeps a
-//      pending_review answer out of both search_answer_bank and the Redis
-//      cache until an admin confirms it (see server.ts's /v1/chat stage 4).
-//      A 'rejected' row is treated as a miss -- falls through to stage 4 --
-//      so the topic self-heals on the next click rather than staying dead
-//      until someone notices and manually clears it.
-//   4. LLM: generates fresh, upserts into topic_summaries as
-//      'pending_review' (never auto-approved, unlike answer-bank entries --
-//      see 0026_topic_summary_review.sql), and is returned to this request
-//      but not cached, for the same reason as stage 3's pending case.
+//      gate and without ever touching the LLM. This store has no language
+//      dimension of its own (an admin writes one document per topic, in
+//      that topic's real medium -- see chapterDocuments.ts), so it's only
+//      ever consulted when responseLanguage matches the topic's own medium;
+//      a native-language request skips straight to stage 2.
+//   2. Cache (Redis): a summary generated earlier for this exact
+//      (topicId, responseLanguage) pair and already admin-approved -- see
+//      stage 3's caching rule below for why a pending_review summary never
+//      reaches here.
+//   3. Database (topic_summaries): a summary generated earlier for this
+//      (topicId, responseLanguage) pair (see 0027_topic_summary_language.sql
+//      -- one row per topic *per language*, not one row per topic, so a
+//      topic's own-medium summary and a native-language translation of it
+//      are independently stored and reviewed). Only an 'approved' row
+//      counts as a hit here -- a 'pending_review' row is still returned to
+//      *this* request (no reason to regenerate identical content, or leave
+//      the student with nothing, while it awaits review) but is
+//      deliberately not cached and not treated as a hit for a *later*
+//      lookup, mirroring exactly how the answer bank keeps a pending_review
+//      answer out of both search_answer_bank and the Redis cache until an
+//      admin confirms it (see server.ts's /v1/chat stage 4). A 'rejected'
+//      row is treated as a miss -- falls through to stage 4 -- so the topic
+//      self-heals on the next click rather than staying dead until someone
+//      notices and manually clears it.
+//   4. LLM: generates fresh, upserts into topic_summaries (keyed on this
+//      responseLanguage) as 'pending_review' (never auto-approved, unlike
+//      answer-bank entries -- see 0026_topic_summary_review.sql), and is
+//      returned to this request but not cached, for the same reason as
+//      stage 3's pending case.
 //
-// All of stages 1-3 (and stage 4's persistence) are skipped whenever
-// responseLanguage differs from the topic's own medium -- everything
-// stored under this topicId (chapter notes, cache, topic_summaries) is in
-// the topic's *real* medium, so a mismatch would mean either silently
-// ignoring the requested language (serving the wrong-language content) or
-// writing an English-requested summary into the one topic_summaries row
-// this topic has, corrupting it for every native-language reader. This is
-// deliberately simpler than an earlier version that tried to redirect to a
-// separate "sibling" English-medium topic row: that only worked when an
-// admin had happened to duplicate this exact topic into English, which
-// most topics never have -- generating fresh every time (no caching) works
-// for every topic unconditionally, at the cost of an LLM call each time
-// the toggle is used on a topic with no native English content of its own.
+// Every language a topic is ever requested in -- its own real medium (the
+// common case for every subject except English, and for an English-medium
+// student) or a native-language translation of it (a Bengali-medium
+// student's default view of the English subject, see dashboard-shell.tsx's
+// syllabusMediumFor) -- gets the same full stage 2-4 treatment; only stage
+// 1's RAG lookup stays tied to the topic's own medium, since that's the one
+// store with nothing to key a second language off.
 app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Response) => {
   const startedAt = Date.now();
   const body = req.body as Partial<TopicSummaryRequest> | undefined;
@@ -606,23 +620,23 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
       respond(fromChapterNotes, "chapter_notes");
       return;
     }
+  }
 
-    const cached = await getCachedTopicSummary(body.topicId);
-    if (cached) {
-      respond(cached, "cache");
-      return;
-    }
+  const cached = await getCachedTopicSummary(body.topicId, responseLanguage);
+  if (cached) {
+    respond(cached, "cache");
+    return;
+  }
 
-    const stored = await getStoredTopicSummary(body.topicId);
-    if (stored && stored.status !== "rejected") {
-      if (stored.status === "approved") {
-        // Cache missed but the database had an approved summary -- populate
-        // cache so the next click of this topic is an L1 hit.
-        void setCachedTopicSummary(body.topicId, stored.summary);
-      }
-      respond(stored.summary, "database");
-      return;
+  const stored = await getStoredTopicSummary(body.topicId, responseLanguage);
+  if (stored && stored.status !== "rejected") {
+    if (stored.status === "approved") {
+      // Cache missed but the database had an approved summary -- populate
+      // cache so the next click of this topic+language is an L1 hit.
+      void setCachedTopicSummary(body.topicId, responseLanguage, stored.summary);
     }
+    respond(stored.summary, "database");
+    return;
   }
 
   try {
@@ -642,9 +656,7 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
       maxTokens: SUMMARY_MAX_TOKENS,
     });
 
-    if (isNativeLanguage) {
-      await upsertTopicSummary(body.topicId, text);
-    }
+    await upsertTopicSummary(body.topicId, responseLanguage, text);
 
     void recordChatEvent({
       userId: body.userId,
@@ -673,12 +685,18 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
 // /v1/cache/invalidate above exactly, just against the topic-summary cache
 // namespace (see cache.ts).
 app.post("/v1/topic-summary-cache/invalidate", requireSharedSecret, async (req: Request, res: Response) => {
-  const body = req.body as { topicId?: string } | undefined;
-  if (!body || typeof body.topicId !== "string" || !body.topicId) {
-    res.status(400).json({ error: "topicId is required" });
+  const body = req.body as { topicId?: string; language?: string } | undefined;
+  if (
+    !body ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.language !== "string" ||
+    !body.language
+  ) {
+    res.status(400).json({ error: "topicId and language are required" });
     return;
   }
-  await deleteCachedTopicSummary(body.topicId);
+  await deleteCachedTopicSummary(body.topicId, body.language as Medium);
   res.json({ ok: true });
 });
 
@@ -719,42 +737,43 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
 
   const medium = body.medium as Medium;
   const responseLanguage: Medium = (body.responseLanguage as Medium | undefined) ?? medium;
-  const isNativeLanguage = responseLanguage === medium;
 
+  // The scope's own `medium` is deliberately `responseLanguage`, not
+  // `medium` -- exactly the same reasoning as the /v1/chat and
+  // /v1/topic-summary scopes: the banked *text* is a function of what
+  // language it's written in, not what content-scope it was asked against.
+  // Keying on responseLanguage means every language a topic's exercises are
+  // ever requested in (the topic's own real medium, or a native-language
+  // translation of it) gets its own independently searchable/bankable slice
+  // of answered_questions, tagged to this exact topicId -- no schema change
+  // needed, since answered_questions.medium was already a free-form scoping
+  // dimension, not derived from the topic's own medium.
   const scope = {
     boardId: body.boardId,
     gradeId: body.gradeId,
     subjectId: body.subjectId,
-    medium,
+    medium: responseLanguage,
   };
 
-  // Skipped entirely when a language override is in play -- everything
-  // banked under this scope's medium is in the *real* medium (same
-  // reasoning as /v1/topic-summary above), so a mismatch would mean either
-  // serving the wrong-language exercises or, worse, writing
-  // English-requested ones into the Bengali-medium answer bank below where
-  // a native-language student could stumble onto them later.
-  if (isNativeLanguage) {
-    const found = await findRelevantExercises(scope, body.topicId);
-    if (found.length > 0) {
-      void recordChatEvent({
-        userId: body.userId,
-        mode: "student",
-        boardId: scope.boardId,
-        gradeId: scope.gradeId,
-        subjectId: scope.subjectId,
-        medium: scope.medium,
-        question: `topic-exercises: ${body.chapter} / ${body.topic}`,
-        source: "database",
-        latencyMs: Date.now() - startedAt,
-      });
-      const response: TopicExercisesResponse = {
-        exercises: found.map(({ question, answer }) => ({ question, answer })),
-        source: "database",
-      };
-      res.json(response);
-      return;
-    }
+  const found = await findRelevantExercises(scope, body.topicId);
+  if (found.length > 0) {
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `topic-exercises: ${body.chapter} / ${body.topic}`,
+      source: "database",
+      latencyMs: Date.now() - startedAt,
+    });
+    const response: TopicExercisesResponse = {
+      exercises: found.map(({ question, answer }) => ({ question, answer })),
+      source: "database",
+    };
+    res.json(response);
+    return;
   }
 
   try {
@@ -784,8 +803,6 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       const validation = validateAnswerForStorage(exercise.answer);
       if (!validation.store) continue;
       stored.push(exercise);
-
-      if (!isNativeLanguage) continue;
 
       // The topic-level search above (findRelevantExercises) only tells us
       // this exact topic has nothing banked yet -- a specific generated

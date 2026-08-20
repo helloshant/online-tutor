@@ -15,6 +15,28 @@ interface SubjectSummary {
   code: string;
 }
 
+// The English subject teaches the English language itself, so its syllabus
+// (chapters, poems, prose) is inherently written in English regardless of
+// which medium the rest of a student's board/grade is taught in -- unlike
+// every other subject, where the syllabus is authored per-medium because
+// the *content itself* is translated (see "Medium-scoped syllabus storage"
+// in the README). A Bengali-medium student's English subject therefore
+// reads the same single English-medium syllabus an English-medium student
+// would, not a separate Bengali-tagged copy -- there is only ever one
+// canonical syllabus per board/grade for this one subject. Mirrors
+// ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts.
+const ENGLISH_SUBJECT_CODE = "ENG";
+
+// The medium a subject's syllabus/topics should actually be fetched under
+// -- almost always the student's own subscribed medium, except for English
+// (see the constant above). `medium` can be null here (staff mode), but
+// every call site below only reaches this once `medium` is already known
+// non-null (guarded by `!isStaffUser && medium` in JSX), so the cast is
+// safe in context, not a blind assertion.
+function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
+  return subject.code === ENGLISH_SUBJECT_CODE ? "English" : medium;
+}
+
 // "subjects" only exists as a destination below lg -- desktop switches
 // subjects via the always-visible sidebar instead, independent of this tab
 // state entirely. Same for "topics": desktop already has SyllabusPanel as a
@@ -188,7 +210,7 @@ export function DashboardShell({
             boardId={boardId}
             gradeId={gradeId}
             subjectId={selectedSubject.id}
-            medium={medium}
+            medium={syllabusMediumFor(selectedSubject, medium)}
             selectedTopicId={topicClick?.topic.id ?? null}
             onSelectTopic={handleSelectTopic}
           />
@@ -259,7 +281,7 @@ export function DashboardShell({
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={medium}
+                    medium={syllabusMediumFor(selectedSubject, medium)}
                     selectedTopicId={topicClick?.topic.id ?? null}
                     onSelectTopic={handleSelectTopic}
                   />

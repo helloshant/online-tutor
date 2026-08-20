@@ -4,7 +4,7 @@
 // database/LLM stages instead of erroring the whole request.
 import { createHash } from "node:crypto";
 import { createClient, type RedisClientType } from "redis";
-import type { AnswerScope } from "./types.js";
+import type { AnswerScope, Medium } from "./types.js";
 
 const REDIS_URL = process.env.REDIS_URL;
 const CACHE_TTL_SECONDS = Number(process.env.CACHE_TTL_SECONDS) || 60 * 60 * 24 * 7; // 7 days
@@ -81,31 +81,32 @@ export async function deleteCachedAnswer(scope: AnswerScope): Promise<void> {
 }
 
 // Same cache, a separate key namespace: topic summaries are looked up by
-// topic_id alone (one summary per topic, see topic_summaries' unique
-// constraint), not by a question string, so this doesn't reuse cacheKey()
-// above. Only ever populated with an *approved* summary (see server.ts's
-// /v1/topic-summary handler) -- a pending_review one is deliberately kept
-// out of here, same reasoning as answer-bank's cache-only-on-auto_approve.
-function topicSummaryCacheKey(topicId: string): string {
-  return `tutorops:topic-summary:${topicId}`;
+// (topic_id, language) (see topic_summaries' unique constraint,
+// 0027_topic_summary_language.sql), not by a question string, so this
+// doesn't reuse cacheKey() above. Only ever populated with an *approved*
+// summary (see server.ts's /v1/topic-summary handler) -- a pending_review
+// one is deliberately kept out of here, same reasoning as answer-bank's
+// cache-only-on-auto_approve.
+function topicSummaryCacheKey(topicId: string, language: Medium): string {
+  return `tutorops:topic-summary:${topicId}:${language}`;
 }
 
-export async function getCachedTopicSummary(topicId: string): Promise<string | null> {
+export async function getCachedTopicSummary(topicId: string, language: Medium): Promise<string | null> {
   const c = await getClient();
   if (!c) return null;
   try {
-    return await c.getEx(topicSummaryCacheKey(topicId), { EX: CACHE_TTL_SECONDS });
+    return await c.getEx(topicSummaryCacheKey(topicId, language), { EX: CACHE_TTL_SECONDS });
   } catch (err) {
     console.error("Redis GETEX (topic summary) failed:", err);
     return null;
   }
 }
 
-export async function setCachedTopicSummary(topicId: string, summary: string): Promise<void> {
+export async function setCachedTopicSummary(topicId: string, language: Medium, summary: string): Promise<void> {
   const c = await getClient();
   if (!c) return;
   try {
-    await c.set(topicSummaryCacheKey(topicId), summary, { EX: CACHE_TTL_SECONDS });
+    await c.set(topicSummaryCacheKey(topicId, language), summary, { EX: CACHE_TTL_SECONDS });
   } catch (err) {
     console.error("Redis SET (topic summary) failed:", err);
   }
@@ -114,11 +115,11 @@ export async function setCachedTopicSummary(topicId: string, summary: string): P
 // Used when an admin rejects or deletes a topic summary, mirroring
 // deleteCachedAnswer above -- a demoted summary must stop being served from
 // cache right away, not survive until its TTL runs out.
-export async function deleteCachedTopicSummary(topicId: string): Promise<void> {
+export async function deleteCachedTopicSummary(topicId: string, language: Medium): Promise<void> {
   const c = await getClient();
   if (!c) return;
   try {
-    await c.del(topicSummaryCacheKey(topicId));
+    await c.del(topicSummaryCacheKey(topicId, language));
   } catch (err) {
     console.error("Redis DEL (topic summary) failed:", err);
   }

@@ -25,9 +25,18 @@ const STATUS_STYLES: Record<TopicSummaryValidationStatus, string> = {
 // shape below is inferred from the actual foreign keys, not fully expressed
 // by this file's hand-maintained Database["public"]["Tables"] types, hence
 // the cast below (same pattern the dashboard's own subject joins use).
+//
+// `language` (0027_topic_summary_language.sql) is this row's own column,
+// distinct from `syllabus_topics.medium` below -- the topic's medium is
+// what content-scope the summary was written *about* (always "English" for
+// the English subject now), while language is what language the summary
+// *text* is written in. The two match for every other subject and for an
+// English-medium student's own English-subject rows, but diverge for a
+// native-medium student's translated row.
 type TopicSummaryRow = {
   id: string;
   topic_id: string;
+  language: string;
   summary: string;
   validation_status: TopicSummaryValidationStatus;
   updated_at: string;
@@ -59,7 +68,7 @@ export default async function TopicSummariesPage({
   const supabase = createAdminClient();
   let query = supabase
     .from("topic_summaries")
-    .select("id, topic_id, summary, validation_status, updated_at, syllabus_topics(chapter, topic, medium, boards(name), grades(name), subjects(name))")
+    .select("id, topic_id, language, summary, validation_status, updated_at, syllabus_topics(chapter, topic, medium, boards(name), grades(name), subjects(name))")
     .order("updated_at", { ascending: false })
     .limit(200);
   if (activeStatus !== "all") query = query.eq("validation_status", activeStatus);
@@ -108,7 +117,10 @@ export default async function TopicSummariesPage({
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="text-xs text-foreground/50">
-                    {t ? `${t.boards?.name ?? "—"} · ${t.grades?.name ?? "—"} · ${t.subjects?.name ?? "—"} · ${t.medium}` : "—"}
+                    {t
+                      ? `${t.boards?.name ?? "—"} · ${t.grades?.name ?? "—"} · ${t.subjects?.name ?? "—"} · ${t.medium}` +
+                        (row.language !== t.medium ? ` content, summarized in ${row.language}` : "")
+                      : "—"}
                   </p>
                   <p className="text-sm font-semibold">{t ? `${t.chapter} — ${t.topic}` : "(topic removed)"}</p>
                 </div>
@@ -136,13 +148,13 @@ export default async function TopicSummariesPage({
                     </form>
                   )}
                   {row.validation_status !== "rejected" && (
-                    <form action={rejectTopicSummary.bind(null, row.id, row.topic_id)}>
+                    <form action={rejectTopicSummary.bind(null, row.id, row.topic_id, row.language)}>
                       <button className="rounded-lg border border-red-600 px-3 py-1.5 font-medium text-red-700 hover:bg-red-50">
                         Reject
                       </button>
                     </form>
                   )}
-                  <form action={deleteTopicSummary.bind(null, row.id, row.topic_id)}>
+                  <form action={deleteTopicSummary.bind(null, row.id, row.topic_id, row.language)}>
                     <ConfirmSubmitButton
                       confirmMessage="Delete this summary entirely? The next student to open this topic will trigger a fresh one."
                       className="rounded-lg border border-border px-3 py-1.5 font-medium text-foreground/60 hover:bg-brand/5"

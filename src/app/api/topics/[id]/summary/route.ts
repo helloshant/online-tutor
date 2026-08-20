@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicSummary } from "@/lib/orchestratorClient";
-import { findSiblingTopic } from "@/lib/topicLanguagePreference";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
@@ -44,53 +43,40 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }] = await Promise.all([
+  const [{ data: board }, { data: grade }, { data: subject }, { data: subscription }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
+    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
   ]);
 
-  const wantsEnglish =
-    preferEnglish && subject?.code === ENGLISH_SUBJECT_CODE && topicRow.medium !== "English";
+  const isEnglishSubject = subject?.code === ENGLISH_SUBJECT_CODE;
+  const topicMedium = topicRow.medium as Medium;
+  const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
 
-  // Two different ways the toggle can be honored, tried in order:
-  //   1. A sibling topic (same chapter/topic text, medium = 'English')
-  //      exists -- its own chapter_documents/topic_summaries/
-  //      answered_questions are genuinely in English, so the full RAG ->
-  //      cache -> database -> LLM pipeline runs against *that* topic's id,
-  //      exactly like any ordinary native-language request. No separate
-  //      responseLanguage override is needed here: medium already equals
-  //      what was asked for once resolved to the sibling.
-  //   2. No sibling exists -- there is nothing in English to look up, so
-  //      the original topicId/medium are kept and `responseLanguage`
-  //      overrides just the reply language; the orchestrator skips
-  //      RAG/cache/database entirely and always generates fresh via the
-  //      LLM without persisting (see /v1/topic-summary in server.ts) --
-  //      there's no topic row in English to attach a cached/stored
-  //      summary to.
-  let effectiveTopicId = topicId;
-  let effectiveMedium = topicRow.medium;
-  let responseLanguage: Medium | undefined;
-
-  if (wantsEnglish) {
-    const sibling = await findSiblingTopic(supabase, topicRow, "English");
-    if (sibling) {
-      effectiveTopicId = sibling.id;
-      effectiveMedium = "English";
-    } else {
-      responseLanguage = "English";
-    }
-  }
+  // See the matching comment in /api/chat/route.ts -- medium always stays
+  // this topic's own real content medium (topicMedium; for the English
+  // subject that's unconditionally "English" now, see dashboard-shell.tsx's
+  // syllabusMediumFor -- there is no separate "sibling" English-medium
+  // topic to redirect to any more, since English-subject topics only ever
+  // exist in that one medium). responseLanguage independently decides what
+  // language the summary/exercises text is generated/served in: it defaults
+  // to the student's own native medium and only becomes the topic's own
+  // medium when the toggle is switched on (or when the student's native
+  // medium already IS that topic's medium, e.g. an English-medium student
+  // asking about the English subject -- nothing to toggle to there).
+  const responseLanguage: Medium =
+    isEnglishSubject && !preferEnglish && nativeMedium !== topicMedium ? nativeMedium : topicMedium;
 
   try {
     const { summary } = await getTopicSummary({
       userId: user.id,
-      topicId: effectiveTopicId,
+      topicId,
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
       gradeName: grade?.name ?? "",
-      medium: effectiveMedium,
+      medium: topicMedium,
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,

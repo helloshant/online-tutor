@@ -156,28 +156,32 @@ async function handleChatRequest(request: Request) {
 
     const subjectRow = (subjectLink as unknown as { subjects: { name: string; code: string } | null }).subjects;
     const subjectName = subjectRow?.name ?? "the subject";
+    const isEnglishSubject = subjectRow?.code === ENGLISH_SUBJECT_CODE;
+
+    // English is the one subject where the syllabus itself is always in
+    // English, regardless of what medium the rest of the student's board/
+    // grade is taught in -- it teaches the English language, so its
+    // chapters/poems/prose are inherently written in English, the same
+    // single syllabus an English-medium student would see (see
+    // "Medium-scoped syllabus storage" in the README, and
+    // dashboard-shell.tsx's identical syllabusMediumFor). Every other
+    // subject's syllabus stays scoped to the student's own subscribed
+    // medium, since that content genuinely is authored per-medium.
+    const contentMedium: Medium = isEnglishSubject ? "English" : subscription.medium;
+
     // Only English-subject chat offers this toggle at all -- every other
     // subject's syllabus/chapter content only ever exists in the student's
     // own medium, so there'd be nothing for "English" to switch to.
-    //
-    // Deliberately does NOT change `medium` below (topics scope, syllabus
-    // gate, RAG retrieval, cache key) the way an earlier version of this
-    // toggle did -- that swapped the entire request's medium, which quietly
-    // broke the moment a story/topic existed in only one medium (the
-    // common case: an admin authors or imports a chapter in whichever
-    // language they have source material for, not necessarily both). A
-    // Bengali-medium student asking about a Bengali-only story with the
-    // toggle on would get scoped against the *English*-medium topic list,
-    // which has no idea that story exists -- the syllabus gate would then
-    // (correctly, from its own narrowed point of view) reject an
-    // on-syllabus question as off-topic. responseLanguage instead only
-    // changes what language the model is told to reply in; `medium`
-    // everywhere else stays the student's real subscribed medium, so
-    // scope/grounding is always evaluated against what actually exists.
+    // Deliberately independent of contentMedium above: contentMedium
+    // decides which syllabus/RAG/cache scope a question is answered
+    // against (what's actually in scope to ask about), while
+    // responseLanguage only decides what language the model replies in --
+    // a Bengali-medium student's default (toggle off) is still an
+    // explanation in Bengali even though English's own syllabus content is
+    // always in English, and switching it on to "English" doesn't change
+    // what's in scope, just how the answer reads.
     const responseLanguage: Medium =
-      preferEnglish && subjectRow?.code === ENGLISH_SUBJECT_CODE && subscription.medium !== "English"
-        ? "English"
-        : subscription.medium;
+      preferEnglish && isEnglishSubject && subscription.medium !== "English" ? "English" : subscription.medium;
 
     const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
       supabase.from("boards").select("name").eq("id", subscription.board_id).single(),
@@ -188,7 +192,7 @@ async function handleChatRequest(request: Request) {
         .eq("board_id", subscription.board_id)
         .eq("grade_id", subscription.grade_id)
         .eq("subject_id", subjectId)
-        .eq("medium", subscription.medium)
+        .eq("medium", contentMedium)
         .order("sort_order"),
     ]);
 
@@ -202,7 +206,7 @@ async function handleChatRequest(request: Request) {
       boardName: board?.name ?? "",
       gradeId: subscription.grade_id,
       gradeName: grade?.name ?? "",
-      medium: subscription.medium,
+      medium: contentMedium,
       responseLanguage,
       topics: topics ?? [],
       message,
