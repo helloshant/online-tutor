@@ -50,6 +50,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Topic summaries
               </Link>
             )}
+            {canSee("broadcasts") && (
+              <Link href="/admin/broadcasts" className="text-foreground/70 hover:text-foreground">
+                Broadcasts
+              </Link>
+            )}
             {isSuperadmin && (
               <Link href="/admin/authorization" className="text-foreground/70 hover:text-foreground">
                 Authorization

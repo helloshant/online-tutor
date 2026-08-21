@@ -13,7 +13,7 @@ cache/knowledge-base pipeline in front of the LLM.
 
 ## Architecture
 
-Five containers:
+Six containers:
 
 ```
                        HTTP (internal only)     ┌──────────────────┐
@@ -41,6 +41,16 @@ Five containers:
                                 customer's browser back to web's public
                                 /api/ccavenue/callback, never talks to
                                 payment directly)
+
+  ┌───┴──────────┐   HTTP (internal only)   ┌──────────────────┐
+  │   web (3000) │──────────────────────────► broadcast (4300,  │
+  │              │   x-internal-api-key      │ Express)          │
+  └──────────────┘◄─────────────────────────└──────────────────┘
+        (only the two operations that shouldn't trust a client --
+         resolving a broadcast's audience, and scoring a submitted
+         test -- go through this service; drafting/listing/reading
+         an inbox/submitting feedback are plain CRUD `web` does
+         itself, straight against Supabase, like coupon_codes)
 ```
 
 - **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding,
@@ -127,10 +137,21 @@ Five containers:
   See "Payments (CCAvenue) and coupon codes" below for the full request/response flow, including why
   `web` still has to keep one real (public) route in this flow even though the service itself has
   no public ingress.
+- **`services/broadcast`** owns the two operations around admin broadcasts (announcements,
+  promotions, feedback requests, and real in-app tests) that shouldn't trust a client: resolving
+  which students a broadcast's board/grade/subject/medium filter actually reaches (and fanning that
+  out into `broadcast_recipients`), and auto-grading/scoring a submitted test. Deliberately smaller
+  in scope than the other three services — everything else about a broadcast (drafting a draft,
+  listing broadcasts, reading a student's inbox, submitting feedback) is plain CRUD `web` already
+  does itself directly against Supabase with its own service-role admin client, the same way
+  `coupon_codes`/`answered_questions`/`topic_summaries` already are, rather than routing every read
+  through yet another HTTP hop. See "Broadcasts (announcements, promotions, feedback, tests)" below
+  for the full design.
 
-This split means the orchestration/prompt/pipeline layer, the usage-accounting layer, and the
-payment layer can each be redeployed, scaled, or replaced (e.g. swapping in a real observability
-backend, or a different payment gateway, later) without touching the web app or each other.
+This split means the orchestration/prompt/pipeline layer, the usage-accounting layer, the payment
+layer, and the broadcast-audience/test-scoring layer can each be redeployed, scaled, or replaced
+(e.g. swapping in a real observability backend, or a different payment gateway, later) without
+touching the web app or each other.
 
 ## How it works
 
@@ -1357,6 +1378,64 @@ split as the CCAvenue flow above.
   moment can't sneak through between the two checks. The admin list shows a third status, **Expired**,
   for codes that are unused but past their `expires_at` (distinct from Used/Unused).
 
+### Broadcasts (announcements, promotions, feedback, tests)
+
+`/admin/broadcasts` lets an admin/superadmin reach a segment of registered students with one of
+four broadcast types, all sharing one `broadcasts` table (`type` column,
+`0028_broadcast_service.sql`) and one targeting model:
+
+- **Announcement** / **Promotion** — a plain title + message, read-only in the student's inbox. The
+  two types exist only to be labeled differently; delivery is identical.
+- **Feedback request** — the student can leave a 1–5 star rating and an optional free-text comment
+  (`broadcast_feedback_responses`, one row per student per broadcast). `/admin/broadcasts/[id]`
+  shows every response plus the average rating.
+- **Test** — a real in-app MCQ/short-answer quiz (`test_questions`/`test_attempts`/`test_answers`),
+  not just a link out to an external form. MCQ answers are auto-graded the instant a student
+  submits; a short-answer response is scored manually by an admin from the results page, and the
+  attempt's `total_score`/`max_possible_score`/`status` (`in_progress` → `submitted` →
+  `graded`) are re-derived from every answer row every time either side changes, rather than
+  patched incrementally, so a regrade can never leave the total out of sync with the underlying
+  answers. A *blank* short-answer response is auto-scored 0 the moment the test is submitted (there's
+  nothing for an admin to evaluate), so an attempt with only blank short answers still reaches
+  `graded` on its own — only an actually-written response needs a human. No retakes: one attempt per
+  student per test (`unique(broadcast_id, user_id)` on `test_attempts`).
+
+**Targeting** reuses the same board/grade/subject/medium shape the rest of the catalog already
+uses — each dimension left on "All" in the create form means no filter on it. `subjectId` is
+matched through `subscription_subjects` (a subscription's board/grade/medium live on the
+subscription row itself, but its subject list is a many-to-many join), everything else against the
+`subscriptions` row directly; see `services/broadcast/src/audience.ts`. A broadcast starts as a
+`draft` (reaches nobody, freely editable/deletable) and is fanned out into `broadcast_recipients` —
+one row per matching student, `read_at` set the first time they open it — only when an admin hits
+**Send**, which also **freezes membership**: a student who starts matching the filter afterward
+(e.g. subscribes later) does not retroactively see a broadcast already sent, the same way a real
+announcement wouldn't reach someone who joined after it went out.
+
+**Why this is the one feature in the app where even simple reads go through a dedicated
+microservice for *some* operations but not others**: `broadcasts`/`broadcast_recipients`/
+`broadcast_feedback_responses`/`test_questions`/`test_attempts`/`test_answers` all have RLS enabled
+with zero client-facing policies — same "backend-only table" posture as `answered_questions`/
+`chapter_documents`/`topic_summaries` — but unlike those, *nothing* here is read through the
+ordinary session-scoped client, not even by an admin page. Every admin read/write (drafting,
+listing, editing questions, viewing results) goes through `createAdminClient()` directly in a
+server action, exactly like `coupon_codes` already does; every student read/write (inbox list, mark
+as read, submit feedback, fetch/start/view a test) goes through a Next.js API route that
+authenticates the caller via their own session first, then does the actual query with the admin
+client, scoped server-side to that verified `user.id` — the same pattern `/api/answer-bank/search`
+already uses for a backend-only table's student-facing reads. Only the two operations with real
+cross-cutting logic that a client should never be trusted with — resolving who a broadcast reaches,
+and turning submitted answers into a score — cross into `services/broadcast` itself
+(`broadcastClient.ts`), which independently re-verifies the recipient/attempt server-side rather
+than trusting the check the calling API route already did, same reasoning `services/payment`
+re-derives the charge amount instead of trusting what's relayed to it.
+
+The student side lives in a new **Inbox** tab in the dashboard (`inbox-panel.tsx`) — not
+subject-scoped (a broadcast doesn't belong to any one subject the way a topic-summary bubble does),
+alongside Chat/Practice/Topics in the same tab bar/bottom nav. Fetches the inbox list once on
+mount; opening an item marks it read optimistically (the unread dot disappears immediately, the
+`POST /api/inbox/:id/read` call happens in the background) the same way `chat-panel.tsx`'s own
+optimistic message bubble does.
+
 ## Local setup
 
 You can run this either with Docker Compose (one command, all services) or by running the web app,
@@ -1398,13 +1477,14 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
-There are **four** env files — one per service:
+There are **five** env files — one per service:
 
 ```bash
 cp .env.example .env.local
 cp services/orchestrator/.env.example services/orchestrator/.env.local
 cp services/observability/.env.example services/observability/.env.local
 cp services/payment/.env.example services/payment/.env.local
+cp services/broadcast/.env.example services/broadcast/.env.local
 ```
 
 **Root `.env.local`** (the web app):
@@ -1420,6 +1500,11 @@ cp services/payment/.env.example services/payment/.env.local
 - `PAYMENT_SHARED_SECRET` — any random string; must exactly match the same variable in
   `services/payment/.env.local`. Unlike `ORCHESTRATOR_SHARED_SECRET`, this one isn't optional in
   practice — the payment service refuses to start without its own copy of it set.
+- `BROADCAST_URL` — leave as `http://broadcast:4300` for Docker Compose; use
+  `http://localhost:4300` if running the broadcast service directly with `npm run dev` instead.
+- `BROADCAST_SHARED_SECRET` — any random string; must exactly match the same variable in
+  `services/broadcast/.env.local`. Same "refuses to start without it" posture as
+  `PAYMENT_SHARED_SECRET`.
 
 **`services/orchestrator/.env.local`** (the orchestration service):
 
@@ -1469,9 +1554,17 @@ cp services/payment/.env.example services/payment/.env.local
 - `CCAVENUE_ENV` — `test` (default) uses CCAvenue's sandbox at `test.ccavenue.com`; set to
   `production` only once you're using live merchant credentials.
 
+**`services/broadcast/.env.local`** (the broadcast audience/test-scoring service):
+
+- `BROADCAST_SHARED_SECRET` — same value as above. **Required** — this service calls
+  `process.exit(1)` at startup if it's missing, same posture as `PAYMENT_SHARED_SECRET`.
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project again. Used to read/write
+  `broadcasts`/`broadcast_recipients`/`test_questions`/`test_attempts`/`test_answers`; the
+  service-role key is required since none of those tables has a client-facing RLS policy.
+
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs all five containers, including Redis):
+**Option A — Docker Compose** (builds and runs all six containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build
@@ -1487,11 +1580,12 @@ you'd hit `Uncaught Error: Missing NEXT_PUBLIC_SUPABASE_URL environment variable
 If you forget the flag, the build now fails immediately with a clear message rather than silently
 producing a broken image.
 
-Open [http://localhost:3000](http://localhost:3000). None of the orchestrator, observability, or
-payment services are published to your host — they're only reachable from other containers over the
-Compose network — so you won't see them on `localhost:4000`/`4100`/`4200`; that's intentional. To
-check one directly: `docker compose exec orchestrator wget -qO- localhost:4000/health` (swap
-`orchestrator`/`4000` for `observability`/`4100` or `payment`/`4200` for the other two).
+Open [http://localhost:3000](http://localhost:3000). None of the orchestrator, observability,
+payment, or broadcast services are published to your host — they're only reachable from other
+containers over the Compose network — so you won't see them on
+`localhost:4000`/`4100`/`4200`/`4300`; that's intentional. To check one directly: `docker compose
+exec orchestrator wget -qO- localhost:4000/health` (swap `orchestrator`/`4000` for
+`observability`/`4100`, `payment`/`4200`, or `broadcast`/`4300` for the others).
 
 The orchestrator's `/health` response includes non-secret configuration presence for its three
 optional dependencies (`answerBank`, `cache`, `observability` — each `{ configured: boolean }`,
@@ -1509,7 +1603,7 @@ If you ever change `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 (`--build`), not just restart — a plain `docker compose up` without `--build` reuses the existing
 image with the old values baked in.
 
-**Option B — four `npm run dev` processes** (no Docker), one per terminal:
+**Option B — five `npm run dev` processes** (no Docker), one per terminal:
 
 ```bash
 # terminal 1
@@ -1521,14 +1615,18 @@ cd services/observability && npm run dev
 # terminal 3
 cd services/payment && npm run dev
 
-# terminal 4 (repo root)
+# terminal 4
+cd services/broadcast && npm run dev
+
+# terminal 5 (repo root)
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL` and `PAYMENT_URL`
-in the root `.env.local` are `http://localhost:4000` and `http://localhost:4200`, and
-`OBSERVABILITY_URL` in `services/orchestrator/.env.local` is `http://localhost:4100`, for this mode
-(no Redis running this way either, unless you start one yourself — the pipeline's L1 cache is
+Open [http://localhost:3000](http://localhost:3000). Make sure `ORCHESTRATOR_URL`, `PAYMENT_URL`,
+and `BROADCAST_URL` in the root `.env.local` are `http://localhost:4000`, `http://localhost:4200`,
+and `http://localhost:4300`, and `OBSERVABILITY_URL` in `services/orchestrator/.env.local` is
+`http://localhost:4100`, for this mode (no Redis running this way either, unless you start one
+yourself — the pipeline's L1 cache is
 optional and fails open if unreachable).
 
 ### Corporate network / TLS interception

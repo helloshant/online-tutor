@@ -209,7 +209,8 @@ export type AdminPageKey =
   | "observability"
   | "coupons"
   | "chapter_notes"
-  | "topic_summaries";
+  | "topic_summaries"
+  | "broadcasts";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -260,6 +261,88 @@ export type TopicSummary = {
   validation_status: TopicSummaryValidationStatus;
   created_at: string;
   updated_at: string;
+};
+
+// See supabase/migrations/0028_broadcast_service.sql. Same "backend-only
+// table" posture as the types above -- RLS enabled, zero client-facing
+// policies. Admin pages read/write these via createAdminClient() (like
+// coupon_codes/answered_questions/topic_summaries already do); a student's
+// own inbox/feedback/test reads and writes also go through Next.js API
+// routes using the admin client, authenticated by the student's own
+// session first -- never the ordinary RLS-scoped client. Only the two
+// operations with real cross-cutting logic that shouldn't trust a client
+// (resolving who a broadcast reaches, and scoring a submitted test) go
+// through services/broadcast itself (see broadcastClient.ts).
+export type BroadcastType = "announcement" | "promotion" | "feedback" | "test";
+export type BroadcastStatus = "draft" | "sent" | "closed";
+
+export type Broadcast = {
+  id: string;
+  type: BroadcastType;
+  title: string;
+  body: string;
+  board_id: string | null;
+  grade_id: string | null;
+  subject_id: string | null;
+  medium: Medium | null;
+  status: BroadcastStatus;
+  sent_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BroadcastRecipient = {
+  id: string;
+  broadcast_id: string;
+  user_id: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type BroadcastFeedbackResponse = {
+  id: string;
+  broadcast_id: string;
+  user_id: string;
+  rating: number | null;
+  comment: string | null;
+  created_at: string;
+};
+
+export type TestQuestionType = "mcq" | "short_answer";
+
+export type TestQuestion = {
+  id: string;
+  broadcast_id: string;
+  question_type: TestQuestionType;
+  question: string;
+  options: string[] | null;
+  correct_option: number | null;
+  max_score: number;
+  sort_order: number;
+};
+
+export type TestAttemptStatus = "in_progress" | "submitted" | "graded";
+
+export type TestAttempt = {
+  id: string;
+  broadcast_id: string;
+  user_id: string;
+  status: TestAttemptStatus;
+  started_at: string;
+  submitted_at: string | null;
+  total_score: number | null;
+  max_possible_score: number | null;
+};
+
+export type TestAnswer = {
+  id: string;
+  attempt_id: string;
+  question_id: string;
+  selected_option: number | null;
+  answer_text: string | null;
+  is_correct: boolean | null;
+  score: number | null;
 };
 
 export interface Database {
@@ -386,6 +469,57 @@ export interface Database {
         Update: Partial<ChapterDocument>;
         Relationships: [
           { foreignKeyName: "chapter_documents_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+        ];
+      };
+      broadcasts: {
+        Row: Broadcast;
+        Insert: Partial<Broadcast>;
+        Update: Partial<Broadcast>;
+        Relationships: [
+          { foreignKeyName: "broadcasts_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
+          { foreignKeyName: "broadcasts_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
+          { foreignKeyName: "broadcasts_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+        ];
+      };
+      broadcast_recipients: {
+        Row: BroadcastRecipient;
+        Insert: Partial<BroadcastRecipient>;
+        Update: Partial<BroadcastRecipient>;
+        Relationships: [
+          { foreignKeyName: "broadcast_recipients_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      broadcast_feedback_responses: {
+        Row: BroadcastFeedbackResponse;
+        Insert: Partial<BroadcastFeedbackResponse>;
+        Update: Partial<BroadcastFeedbackResponse>;
+        Relationships: [
+          { foreignKeyName: "broadcast_feedback_responses_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      test_questions: {
+        Row: TestQuestion;
+        Insert: Partial<TestQuestion>;
+        Update: Partial<TestQuestion>;
+        Relationships: [
+          { foreignKeyName: "test_questions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      test_attempts: {
+        Row: TestAttempt;
+        Insert: Partial<TestAttempt>;
+        Update: Partial<TestAttempt>;
+        Relationships: [
+          { foreignKeyName: "test_attempts_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      test_answers: {
+        Row: TestAnswer;
+        Insert: Partial<TestAnswer>;
+        Update: Partial<TestAnswer>;
+        Relationships: [
+          { foreignKeyName: "test_answers_attempt_id_fkey"; columns: ["attempt_id"]; referencedRelation: "test_attempts"; referencedColumns: ["id"] },
+          { foreignKeyName: "test_answers_question_id_fkey"; columns: ["question_id"]; referencedRelation: "test_questions"; referencedColumns: ["id"] },
         ];
       };
     };

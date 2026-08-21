@@ -81,6 +81,7 @@ export const ADMIN_PAGES: AdminPageKey[] = [
   "coupons",
   "chapter_notes",
   "topic_summaries",
+  "broadcasts",
 ];
 
 // Which admin pages the current user can see. Superadmins always get every

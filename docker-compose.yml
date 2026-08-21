@@ -19,14 +19,17 @@ services:
       - .env.local
     environment:
       # Always resolve to the compose-network hostname here, regardless of
-      # whatever ORCHESTRATOR_URL/PAYMENT_URL a local (non-Docker)
-      # .env.local might have for `npm run dev`.
+      # whatever ORCHESTRATOR_URL/PAYMENT_URL/BROADCAST_URL a local
+      # (non-Docker) .env.local might have for `npm run dev`.
       ORCHESTRATOR_URL: http://orchestrator:4000
       PAYMENT_URL: http://payment:4200
+      BROADCAST_URL: http://broadcast:4300
     depends_on:
       orchestrator:
         condition: service_healthy
       payment:
+        condition: service_healthy
+      broadcast:
         condition: service_healthy
     restart: unless-stopped
 
@@ -107,6 +110,25 @@ services:
     # over the compose network.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4200/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  broadcast:
+    build:
+      context: ./services/broadcast
+      dockerfile: Dockerfile
+    env_file:
+      - ./services/broadcast/.env.local
+    environment:
+      PORT: 4300
+    # Deliberately no `ports:` mapping -- same internal-only pattern as
+    # `orchestrator`/`observability`/`payment`. Only `web` (admin actions +
+    # student-facing API routes) ever calls this service.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4300/health"]
       interval: 10s
       timeout: 3s
       retries: 5

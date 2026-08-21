@@ -6,6 +6,7 @@ import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
 import { PracticePanel } from "./practice-panel";
+import { InboxPanel } from "./inbox-panel";
 import { TopicList } from "./topic-list";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -42,7 +43,7 @@ function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
 // state entirely. Same for "topics": desktop already has SyllabusPanel as a
 // persistent sidebar, so a "Topics" destination only has meaning on mobile,
 // where it's the only way to reach topic browsing at all (see topic-list.tsx).
-type MainTab = "subjects" | "topics" | "chat" | "practice";
+type MainTab = "subjects" | "topics" | "chat" | "practice" | "inbox";
 
 export function DashboardShell({
   userName,
@@ -130,6 +131,7 @@ export function DashboardShell({
     ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
     { tab: "chat", icon: "💬", label: "Chat" },
     ...(hasSyllabusScope ? [{ tab: "practice" as const, icon: "✏️", label: "Practice" }] : []),
+    ...(!isStaffUser ? [{ tab: "inbox" as const, icon: "🔔", label: "Inbox" }] : []),
   ];
 
   return (
@@ -252,7 +254,7 @@ export function DashboardShell({
                   a Subjects tab here). */}
               {hasSyllabusScope && (
                 <div className="hidden shrink-0 gap-1 border-b border-border bg-surface px-6 pt-2 lg:flex">
-                  {(["chat", "practice"] as const).map((tab) => (
+                  {(["chat", "practice", "inbox"] as const).map((tab) => (
                     <button
                       key={tab}
                       type="button"
@@ -306,6 +308,16 @@ export function DashboardShell({
                     active={mainTab === "practice"}
                     onAskAbout={handleAskAboutPractice}
                   />
+                </div>
+              )}
+              {/* Not subject-scoped (a student's broadcasts don't belong to
+                  any one subject), but nested here anyway rather than as a
+                  sibling of the selectedSubject branch -- reachable the
+                  moment at least one subject is selected, which for a
+                  subscribed student with any subjects at all is always. */}
+              {!isStaffUser && (
+                <div className={mainTab === "inbox" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                  <InboxPanel />
                 </div>
               )}
             </>
