@@ -1260,6 +1260,16 @@ signup — visible per-user as a Source column on `/admin`.
   `ccavenue_tracking_id` is deliberately left null, so a subscription activated this way stays
   distinguishable in the data from one that was actually paid for (see "Payments (CCAvenue)" below
   for the self-service equivalent of this same escape hatch — a coupon code).
+  **"Edit subjects"** on an `active` or `pending_payment` subscription (`updateSubscriptionSubjects`)
+  lets an admin add or remove subjects after the fact — e.g. a student calling in wanting to drop or
+  pick up a subject mid-term — rather than the subject list only ever being set once at onboarding.
+  The checkbox list is scoped to what's actually offered for that subscription's own board+grade
+  (`board_grade_subjects`, the same constraint onboarding's own picker enforces, re-validated
+  server-side regardless of what the form submits); at least one subject must stay selected, same
+  requirement as onboarding. `amount_paise` is recomputed via the same subject-count price list
+  onboarding itself uses (`amountForSubjects`) — unless a coupon has already been redeemed against
+  this subscription, in which case it's left untouched rather than silently overwriting that
+  discount back to full price.
 - **Delete** — the detail page's "Danger zone" permanently deletes the auth user, which cascades
   (`on delete cascade`) to their profile, subscriptions, subscription subjects, chat history, and
   admin page permissions. Gated so an admin can't delete themselves or another staff account —

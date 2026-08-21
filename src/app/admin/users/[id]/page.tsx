@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmail,
   setAccountExpired,
   setUserRole,
+  updateSubscriptionSubjects,
   updateUserProfile,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -36,7 +37,7 @@ export default async function AdminUserDetailPage({
       admin.from("profiles").select("*").eq("id", id).single(),
       admin
         .from("subscriptions")
-        .select("*, boards(name), grades(name), subscription_subjects(subjects(name))")
+        .select("*, boards(name), grades(name), subscription_subjects(subjects(id, name))")
         .eq("user_id", id)
         .order("created_at", { ascending: false }),
       // admin.auth.admin.getUserById() doesn't reliably populate the
@@ -188,94 +189,9 @@ export default async function AdminUserDetailPage({
       </h2>
 
       <div className="mt-3 space-y-3">
-        {(subscriptions ?? []).map((sub) => {
-          const subjects = (
-            (sub as unknown as { subscription_subjects?: { subjects: { name: string } | null }[] })
-              .subscription_subjects ?? []
-          )
-            .map((s) => s.subjects?.name)
-            .filter(Boolean);
-          const board = (sub as unknown as { boards?: { name: string } | null }).boards?.name;
-          const grade = (sub as unknown as { grades?: { name: string } | null }).grades?.name;
-
-          return (
-            <div key={sub.id} className="rounded-xl border border-border bg-surface p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      sub.status === "active"
-                        ? "bg-green-100 text-green-700"
-                        : sub.status === "pending_payment"
-                          ? "bg-yellow-100 text-yellow-700"
-                          : "bg-foreground/10 text-foreground/60"
-                    }`}
-                  >
-                    {sub.status}
-                  </span>
-                  <span className="text-sm text-foreground/60">
-                    {new Date(sub.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-                {sub.status === "active" && (
-                  <form
-                    action={async () => {
-                      "use server";
-                      await cancelSubscription(sub.id, id);
-                    }}
-                  >
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                    >
-                      Cancel subscription
-                    </button>
-                  </form>
-                )}
-                {sub.status === "pending_payment" && (
-                  <form
-                    action={async () => {
-                      "use server";
-                      await activateSubscriptionWithoutPayment(sub.id, id);
-                    }}
-                  >
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-green-200 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-                    >
-                      Activate without payment
-                    </button>
-                  </form>
-                )}
-              </div>
-
-              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                <div>
-                  <dt className="text-foreground/50">Board</dt>
-                  <dd className="font-medium">{board ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-foreground/50">Grade</dt>
-                  <dd className="font-medium">{grade ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-foreground/50">Medium</dt>
-                  <dd className="font-medium">{sub.medium}</dd>
-                </div>
-                <div>
-                  <dt className="text-foreground/50">Amount</dt>
-                  <dd className="font-medium">
-                    {sub.amount_paise ? `₹${(sub.amount_paise / 100).toFixed(0)}/mo` : "—"}
-                  </dd>
-                </div>
-                <div className="col-span-2 sm:col-span-4">
-                  <dt className="text-foreground/50">Subjects</dt>
-                  <dd className="font-medium">{subjects.length ? subjects.join(", ") : "—"}</dd>
-                </div>
-              </dl>
-            </div>
-          );
-        })}
+        {(subscriptions ?? []).map((sub) => (
+          <SubscriptionCard key={sub.id} sub={sub} userId={id} />
+        ))}
 
         {(subscriptions ?? []).length === 0 && (
           <p className="rounded-xl border border-border bg-surface p-5 text-sm text-foreground/50">
@@ -304,5 +220,185 @@ export default async function AdminUserDetailPage({
         </div>
       )}
     </div>
+  );
+}
+
+// Shaped loosely rather than threading a full embedded-query type through
+// -- same pragmatic choice the dashboard's own subject joins and this
+// app's other admin pages make for their own boards(name)/grades(name)
+// embeds.
+type SubscriptionRow = {
+  id: string;
+  status: string;
+  created_at: string;
+  board_id: string;
+  grade_id: string;
+  medium: string;
+  amount_paise: number | null;
+  boards: { name: string } | null;
+  grades: { name: string } | null;
+  subscription_subjects: { subjects: { id: string; name: string } | null }[];
+};
+
+async function SubscriptionCard({ sub, userId }: { sub: unknown; userId: string }) {
+  const row = sub as SubscriptionRow;
+  const currentSubjectIds = new Set(
+    row.subscription_subjects.map((s) => s.subjects?.id).filter((v): v is string => Boolean(v))
+  );
+  const subjectNames = row.subscription_subjects.map((s) => s.subjects?.name).filter(Boolean);
+  // Editing a cancelled/expired subscription's subjects has no effect on
+  // anything the student can actually reach, so the form is hidden rather
+  // than just left enabled-but-pointless -- mirrors why Cancel/Activate
+  // above are each only shown for their one relevant status.
+  const isEditable = row.status === "active" || row.status === "pending_payment";
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              row.status === "active"
+                ? "bg-green-100 text-green-700"
+                : row.status === "pending_payment"
+                  ? "bg-yellow-100 text-yellow-700"
+                  : "bg-foreground/10 text-foreground/60"
+            }`}
+          >
+            {row.status}
+          </span>
+          <span className="text-sm text-foreground/60">{new Date(row.created_at).toLocaleDateString()}</span>
+        </div>
+        {row.status === "active" && (
+          <form
+            action={async () => {
+              "use server";
+              await cancelSubscription(row.id, userId);
+            }}
+          >
+            <button
+              type="submit"
+              className="rounded-lg border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+            >
+              Cancel subscription
+            </button>
+          </form>
+        )}
+        {row.status === "pending_payment" && (
+          <form
+            action={async () => {
+              "use server";
+              await activateSubscriptionWithoutPayment(row.id, userId);
+            }}
+          >
+            <button
+              type="submit"
+              className="rounded-lg border border-green-200 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+            >
+              Activate without payment
+            </button>
+          </form>
+        )}
+      </div>
+
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <div>
+          <dt className="text-foreground/50">Board</dt>
+          <dd className="font-medium">{row.boards?.name ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-foreground/50">Grade</dt>
+          <dd className="font-medium">{row.grades?.name ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-foreground/50">Medium</dt>
+          <dd className="font-medium">{row.medium}</dd>
+        </div>
+        <div>
+          <dt className="text-foreground/50">Amount</dt>
+          <dd className="font-medium">{row.amount_paise ? `₹${(row.amount_paise / 100).toFixed(0)}/mo` : "—"}</dd>
+        </div>
+        <div className="col-span-2 sm:col-span-4">
+          <dt className="text-foreground/50">Subjects</dt>
+          <dd className="font-medium">{subjectNames.length ? subjectNames.join(", ") : "—"}</dd>
+        </div>
+      </dl>
+
+      {isEditable && (
+        <SubjectEditor
+          subscriptionId={row.id}
+          userId={userId}
+          boardId={row.board_id}
+          gradeId={row.grade_id}
+          currentSubjectIds={currentSubjectIds}
+        />
+      )}
+    </div>
+  );
+}
+
+// Lets an admin/superadmin add or remove subjects on a subscription after
+// the fact (e.g. a student wants to drop or pick up a subject mid-term),
+// not just once at onboarding. Offered subjects are scoped to this
+// subscription's own board+grade (board_grade_subjects), same "only what's
+// actually offered" constraint onboarding's own subject picker enforces --
+// re-checked server-side in updateSubscriptionSubjects regardless, this
+// just keeps the checkbox list from ever offering something invalid in
+// the first place.
+async function SubjectEditor({
+  subscriptionId,
+  userId,
+  boardId,
+  gradeId,
+  currentSubjectIds,
+}: {
+  subscriptionId: string;
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  currentSubjectIds: Set<string>;
+}) {
+  const supabase = createAdminClient();
+  const { data: offerings } = await supabase
+    .from("board_grade_subjects")
+    .select("subjects(id, name)")
+    .eq("board_id", boardId)
+    .eq("grade_id", gradeId);
+
+  const options = ((offerings ?? []) as unknown as { subjects: { id: string; name: string } | null }[])
+    .map((o) => o.subjects)
+    .filter((s): s is { id: string; name: string } => Boolean(s))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (options.length === 0) return null;
+
+  return (
+    <details className="mt-4 rounded-lg border border-border">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/60 hover:bg-brand/5">
+        Edit subjects
+      </summary>
+      <form
+        action={updateSubscriptionSubjects.bind(null, subscriptionId, userId)}
+        className="space-y-2 border-t border-border p-3"
+      >
+        <div className="flex flex-wrap gap-2">
+          {options.map((s) => (
+            <label
+              key={s.id}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs has-[:checked]:border-brand has-[:checked]:bg-brand/5"
+            >
+              <input type="checkbox" name="subjectIds" value={s.id} defaultChecked={currentSubjectIds.has(s.id)} />
+              {s.name}
+            </label>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
+            Save subjects
+          </button>
+          <p className="text-xs text-foreground/40">At least one subject must stay selected.</p>
+        </div>
+      </form>
+    </details>
   );
 }

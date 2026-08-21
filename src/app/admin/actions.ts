@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { ADMIN_PAGES, PASSWORD_EXPIRY_DAYS, requireAdminPage, requireSuperAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { amountForSubjects } from "@/lib/pricing";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const VALID_ROLES: ProfileRole[] = ["user", "admin", "superadmin"];
@@ -66,6 +67,75 @@ export async function activateSubscriptionWithoutPayment(subscriptionId: string,
     .update({ status: "active", activated_at: new Date().toISOString() })
     .eq("id", subscriptionId)
     .eq("status", "pending_payment");
+  revalidatePath("/admin");
+  revalidatePath(`/admin/users/${userId}`);
+}
+
+// Lets an admin add/remove subjects on a subscription after the fact --
+// e.g. a student calls in wanting to drop or pick up a subject mid-term,
+// rather than only ever being able to set the list once at onboarding.
+// Only offered for a subscription that's still 'active' or
+// 'pending_payment' (the UI itself only renders the edit form for those
+// two, but this is re-checked here too, same "don't trust the UI alone"
+// posture as every other admin write) -- editing a cancelled/expired
+// subscription's subjects has no effect on anything.
+export async function updateSubscriptionSubjects(subscriptionId: string, userId: string, formData: FormData) {
+  await requireAdminPage("users");
+  const supabase = await createClient();
+
+  const requestedSubjectIds = formData.getAll("subjectIds").map(String).filter(Boolean);
+  if (requestedSubjectIds.length === 0) {
+    // A subscription always needs at least one subject -- same requirement
+    // onboarding enforces when a student first picks their subjects. Rather
+    // than surface a form error (this page's other admin forms are plain
+    // fire-and-forget actions, no useActionState wiring), just no-op: the
+    // revalidated page re-renders with the previous, still-valid selection
+    // checked.
+    return;
+  }
+
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("board_id, grade_id, status")
+    .eq("id", subscriptionId)
+    .in("status", ["active", "pending_payment"])
+    .maybeSingle();
+  if (!subscription) return;
+
+  // Same server-side guard onboarding's confirmSelection uses: don't let a
+  // tampered request attach a subject that isn't actually offered for this
+  // subscription's board/grade.
+  const { data: validOfferings } = await supabase
+    .from("board_grade_subjects")
+    .select("subject_id")
+    .eq("board_id", subscription.board_id)
+    .eq("grade_id", subscription.grade_id)
+    .in("subject_id", requestedSubjectIds);
+  const validSubjectIds = (validOfferings ?? []).map((o) => o.subject_id);
+  if (validSubjectIds.length === 0) return;
+
+  await supabase.from("subscription_subjects").delete().eq("subscription_id", subscriptionId);
+  await supabase
+    .from("subscription_subjects")
+    .insert(validSubjectIds.map((subjectId) => ({ subscription_id: subscriptionId, subject_id: subjectId })));
+
+  // Keeps amount_paise in sync with the subject-count price list, same
+  // formula onboarding itself uses -- unless a coupon has already been
+  // redeemed against this subscription, in which case overwriting it here
+  // would silently erase that discount rather than respect it.
+  const { data: redeemedCoupon } = await supabase
+    .from("coupon_codes")
+    .select("id")
+    .eq("subscription_id", subscriptionId)
+    .not("used_by", "is", null)
+    .maybeSingle();
+  if (!redeemedCoupon) {
+    await supabase
+      .from("subscriptions")
+      .update({ amount_paise: amountForSubjects(validSubjectIds.length) })
+      .eq("id", subscriptionId);
+  }
+
   revalidatePath("/admin");
   revalidatePath(`/admin/users/${userId}`);
 }
