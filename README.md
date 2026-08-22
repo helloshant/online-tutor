@@ -1476,9 +1476,13 @@ question-by-question, against the uploaded sheet.
   generated server-side only after confirming the viewer is authorized (an admin via
   `requireAdminPage`, a student via the same `broadcast_recipients` ownership check the rest of the
   student-facing broadcast routes use) — never a permanent stored URL.
-- **Submission**: a student opens the exam in their Inbox (`GET /api/broadcasts/[id]/exam` —
-  signed paper URLs, questions, their own existing submission if any), then uploads one or more
-  files as their answer sheet (`POST /api/broadcasts/[id]/exam/submit`, `multipart/form-data`,
+- **Submission**: `GET /api/broadcasts/[id]/exam` (signed paper URLs, questions, the student's own
+  existing submission if any) fires automatically the moment a student opens the exam item in
+  their Inbox — not behind a separate "Open exam" button the way an earlier version had it. That
+  extra click read as "there's no way to upload an answer sheet" to anyone who didn't notice the
+  button (a real report), so `inbox-panel.tsx`'s `ExamSection` now loads on mount, same as
+  `FeedbackForm`'s rating/comment UI already does. The student then uploads one or more files as
+  their answer sheet (`POST /api/broadcasts/[id]/exam/submit`, `multipart/form-data`,
   `exam_submissions` — one row per student, `file_paths` an array like `answered_questions.image_urls`
   already is). Re-submitting replaces the file list while still `'submitted'`; once `'graded'`, the
   route refuses further submissions the same way a graded Test attempt can't be redone.

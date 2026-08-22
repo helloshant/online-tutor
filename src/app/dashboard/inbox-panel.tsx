@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type InboxItem = {
   recipientId: string;
@@ -334,7 +334,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
   const [files, setFiles] = useState<FileList | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function loadExam() {
+  const loadExam = useCallback(async () => {
     setError(null);
     try {
       const res = await fetch(`/api/broadcasts/${broadcastId}/exam`);
@@ -344,7 +344,26 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the exam.");
     }
-  }
+  }, [broadcastId]);
+
+  // Fetched automatically as soon as this section mounts (i.e. the moment
+  // a student opens an exam item), not behind an extra "Open exam" click
+  // -- an earlier version required that click, and it read as "there's no
+  // way to upload an answer sheet" to anyone who didn't notice the button,
+  // exactly the discoverability problem the admin-side upload form had
+  // before its own fix (see createBroadcast's redirect). Matches how
+  // FeedbackForm's rating/comment UI is already visible the instant a
+  // feedback item is selected, with no gate of its own. loadExam is
+  // wrapped in useCallback (stable unless broadcastId itself changes) so
+  // this dependency is genuinely complete, not just silenced. Deferred a
+  // microtask (rather than called directly) so its setState calls don't
+  // happen synchronously within the effect body itself -- same fix
+  // chat-panel.tsx's regenerateLastReply effect uses for the
+  // react-hooks/set-state-in-effect rule, which flags a setState reachable
+  // from an effect even indirectly through a called function.
+  useEffect(() => {
+    void Promise.resolve().then(() => loadExam());
+  }, [loadExam]);
 
   async function handleSubmit() {
     if (!files || files.length === 0) {
@@ -371,14 +390,20 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
   if (!loaded) {
     return (
       <div className="mt-4">
-        <button
-          type="button"
-          onClick={loadExam}
-          className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
-        >
-          Open exam
-        </button>
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {error ? (
+          <>
+            <p className="text-sm text-red-600">{error}</p>
+            <button
+              type="button"
+              onClick={loadExam}
+              className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5"
+            >
+              Try again
+            </button>
+          </>
+        ) : (
+          <p className="text-sm text-foreground/50">Loading…</p>
+        )}
       </div>
     );
   }
