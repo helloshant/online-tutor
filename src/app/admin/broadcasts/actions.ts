@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendBroadcast as sendBroadcastRequest, gradeTestAnswer } from "@/lib/broadcastClient";
@@ -52,21 +53,34 @@ export async function createBroadcast(
   const medium = optionalField(formData, "medium");
   if (medium && !MEDIUMS.includes(medium as Medium)) return { error: "Invalid medium." };
 
-  const { error } = await supabase.from("broadcasts").insert({
-    type: type as BroadcastType,
-    title,
-    body,
-    board_id: optionalField(formData, "boardId"),
-    grade_id: optionalField(formData, "gradeId"),
-    subject_id: optionalField(formData, "subjectId"),
-    medium: medium as Medium | null,
-    status: "draft",
-    created_by: session.user.id,
-  });
-  if (error) return { error: "Could not create the broadcast. Please try again." };
+  const { data: created, error } = await supabase
+    .from("broadcasts")
+    .insert({
+      type: type as BroadcastType,
+      title,
+      body,
+      board_id: optionalField(formData, "boardId"),
+      grade_id: optionalField(formData, "gradeId"),
+      subject_id: optionalField(formData, "subjectId"),
+      medium: medium as Medium | null,
+      status: "draft",
+      created_by: session.user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !created) return { error: "Could not create the broadcast. Please try again." };
 
   revalidatePath("/admin/broadcasts");
-  return { success: true };
+  // Straight to the new draft's own page rather than back to the list --
+  // an exam draft needs its question paper uploaded and a test draft
+  // needs its questions added before Send does anything, and leaving the
+  // admin on the list page (as this used to) buried that next step behind
+  // an easy-to-miss link, which is exactly what prompted this redirect
+  // (an admin couldn't find where to attach an exam's question paper at
+  // all). redirect() throws, so nothing after this line runs -- the
+  // `success` state below is unreachable in practice, kept only as a
+  // fallback shape for SaveBroadcastState.
+  redirect(`/admin/broadcasts/${created.id}`);
 }
 
 // Only a draft can be deleted -- once sent, broadcast_recipients/responses/

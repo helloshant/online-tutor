@@ -114,11 +114,11 @@ export function NewBroadcastForm({
           {pending ? "Creating…" : "Create draft"}
         </button>
         {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+        {/* createBroadcast redirects straight to the new draft's own page
+            on success, so this never actually renders in practice -- kept
+            only as a fallback in case that redirect is ever removed. */}
         {state?.success && (
-          <p className="text-sm text-green-600">
-            Draft created below. Nothing is sent yet -- open it to review (and, for a test, add
-            questions) before sending.
-          </p>
+          <p className="text-sm text-green-600">Draft created -- redirecting…</p>
         )}
       </form>
     </details>

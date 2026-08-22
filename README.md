@@ -1461,7 +1461,13 @@ question-by-question, against the uploaded sheet.
   (`addExamQuestion` — just question text + max marks; unlike Test's `test_questions`, there's no
   `question_type`/`options`/`correct_option`, since every exam question is inherently marked by a
   human, nothing machine-answerable). **Send** stays disabled until both are present, mirroring how
-  Test's Send is disabled with zero questions.
+  Test's Send is disabled with zero questions. The "New broadcast" form itself only collects
+  type/title/body/targeting — there's no file input there for any type, exam included — so
+  `createBroadcast` redirects straight to the new draft's own `/admin/broadcasts/[id]` page on
+  success rather than back to the list, since that's the only place the paper-upload and
+  question-builder forms live; leaving the admin on the list page after creating an exam draft
+  buried that next step behind an easy-to-miss link (this is exactly what prompted the redirect —
+  an admin genuinely couldn't find where to attach a paper before it was added).
 - **Private storage, not public**: unlike `answer-bank-images` (`0017_answer_bank_image.sql`, a
   public bucket — fine for a textbook diagram meant to be shown to every student who hits that
   question), an exam paper and especially a student's own answer sheet aren't content that should
