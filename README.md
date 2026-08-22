@@ -510,7 +510,24 @@ generated rather than hand-entered:
   the chat pipeline already uses (filtering out anything that reads as hedging or a question asked
   back rather than an answer), and attempts to store the ones that pass into `answered_questions`,
   tagged with the topic's ID — so a later "relevant exercises" click on this same topic, by anyone,
-  can hit them too. `topic_id` on `answered_questions` (`0015_answer_bank_topic_id.sql`) is
+  can hit them too.
+
+  **`search_topic_exercises` reuses a banked exercise regardless of `validation_status`, excluding
+  only `'rejected'`** (`0030_topic_exercises_reuse_pending.sql`) — a real bug fixed after "every
+  click regenerates from the LLM instead of reusing the database" was reported. The lookup used to
+  require `'auto_approved'`/`'admin_approved'`, but the *generation* path already shows a
+  `'pending_review'` exercise straight to the student the moment it's created (see
+  `answerValidation.ts` — there's no review gate on what a student sees, only on whether a *chat*
+  answer gets confidently replayed to someone else). Exercise answers are often short, worked
+  solutions — they trip `MIN_LENGTH_FOR_AUTO_APPROVAL` (150 chars) far more often than an ordinary
+  chat explanation does — so a large share of generated exercises landed `'pending_review'` and,
+  under the old filter, could never be found again: the next click's lookup excluded them and
+  silently generated a fresh (differently-worded, itself likely `'pending_review'` again) batch,
+  every single time. The database-hit path is now exactly as permissive as the path that already
+  serves a freshly-generated exercise to a student — an admin explicitly rejecting one is still the
+  only thing that stops it from resurfacing.
+
+  `topic_id` on `answered_questions` (`0015_answer_bank_topic_id.sql`) is
   nullable and set only by this flow — an ordinary chat-answered question has no syllabus topic
   concept, only the board/grade/subject/medium scope `search_answer_bank` already uses — and is
   what makes this an *exact* lookup rather than the full-text ranking every other answer-bank
