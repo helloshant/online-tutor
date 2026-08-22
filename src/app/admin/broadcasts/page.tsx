@@ -11,6 +11,7 @@ const TYPE_LABELS: Record<BroadcastType, string> = {
   promotion: "Promotion",
   feedback: "Feedback request",
   test: "Test",
+  exam: "Exam",
 };
 
 const STATUS_STYLES: Record<BroadcastStatus, string> = {

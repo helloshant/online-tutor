@@ -7,7 +7,7 @@ type InboxItem = {
   readAt: string | null;
   createdAt: string;
   broadcastId: string;
-  type: "announcement" | "promotion" | "feedback" | "test";
+  type: "announcement" | "promotion" | "feedback" | "test" | "exam";
   title: string;
   body: string;
 };
@@ -17,6 +17,7 @@ const TYPE_LABELS: Record<InboxItem["type"], string> = {
   promotion: "Promotion",
   feedback: "Feedback",
   test: "Test",
+  exam: "Exam",
 };
 
 // A student's broadcast inbox -- announcements/promotions (read-only),
@@ -106,6 +107,7 @@ export function InboxPanel() {
 
             {selected.type === "feedback" && <FeedbackForm broadcastId={selected.broadcastId} />}
             {selected.type === "test" && <TestSection broadcastId={selected.broadcastId} />}
+            {selected.type === "exam" && <ExamSection broadcastId={selected.broadcastId} />}
           </div>
         )}
       </div>
@@ -303,6 +305,162 @@ function TestSection({ broadcastId }: { broadcastId: string }) {
         >
           {submitting ? "Submitting…" : "Submit test"}
         </button>
+      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+type ExamQuestion = { id: string; question: string; max_score: number; sort_order: number };
+type ExamSubmissionInfo = {
+  id: string;
+  status: "submitted" | "graded";
+  totalScore: number | null;
+  maxPossibleScore: number | null;
+  feedback: string | null;
+  submittedAt: string;
+  fileUrls: string[];
+};
+type ExamLoaded = {
+  paperUrls: string[];
+  questions: ExamQuestion[];
+  submission: ExamSubmissionInfo | null;
+  questionScores: { question_id: string; score: number }[];
+};
+
+function ExamSection({ broadcastId }: { broadcastId: string }) {
+  const [loaded, setLoaded] = useState<ExamLoaded | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<FileList | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function loadExam() {
+    setError(null);
+    try {
+      const res = await fetch(`/api/broadcasts/${broadcastId}/exam`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not load the exam.");
+      setLoaded(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load the exam.");
+    }
+  }
+
+  async function handleSubmit() {
+    if (!files || files.length === 0) {
+      setError("Choose at least one file to upload.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      for (const file of Array.from(files)) formData.append("files", file);
+      const res = await fetch(`/api/broadcasts/${broadcastId}/exam/submit`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not submit your answer sheet.");
+      setFiles(null);
+      await loadExam();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not submit your answer sheet.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!loaded) {
+    return (
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={loadExam}
+          className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+        >
+          Open exam
+        </button>
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      </div>
+    );
+  }
+
+  const { paperUrls, questions, submission, questionScores } = loaded;
+  const scoreByQuestion = new Map(questionScores.map((s) => [s.question_id, s.score]));
+  const canResubmit = !submission || submission.status !== "graded";
+
+  return (
+    <div className="mt-4 max-w-xl space-y-4">
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">Question paper</h3>
+        {paperUrls.length === 0 ? (
+          <p className="mt-1 text-sm text-foreground/50">Link expired -- reopen this exam to refresh it.</p>
+        ) : (
+          <div className="mt-1 flex flex-wrap gap-3 text-sm">
+            {paperUrls.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                Page {i + 1}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {questions.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">Questions</h3>
+          <ul className="mt-1 space-y-1 text-sm">
+            {questions.map((q, i) => (
+              <li key={q.id}>
+                {i + 1}. {q.question} <span className="text-xs text-foreground/40">({q.max_score} pt)</span>
+                {submission?.status === "graded" && (
+                  <span className="ml-2 text-xs font-medium text-brand">
+                    scored {scoreByQuestion.get(q.id) ?? 0}/{q.max_score}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {submission && (
+        <p className="rounded-lg border border-border bg-surface p-2 text-sm">
+          {submission.status === "graded"
+            ? `Score: ${submission.totalScore ?? 0}/${submission.maxPossibleScore ?? 0}`
+            : "Submitted -- awaiting grading."}
+          {submission.feedback && <span className="mt-1 block text-foreground/70">{submission.feedback}</span>}
+        </p>
+      )}
+      {submission && submission.fileUrls.length > 0 && (
+        <div className="flex flex-wrap gap-3 text-sm">
+          {submission.fileUrls.map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+              Your answer sheet {i + 1}
+            </a>
+          ))}
+        </div>
+      )}
+
+      {canResubmit && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">
+            {submission ? "Replace your answer sheet" : "Upload your answer sheet"}
+          </h3>
+          <input
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            onChange={(e) => setFiles(e.target.files)}
+            className="text-xs"
+          />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="block rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            {submitting ? "Submitting…" : submission ? "Resubmit" : "Submit"}
+          </button>
+        </div>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>

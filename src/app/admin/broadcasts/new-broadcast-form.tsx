@@ -10,6 +10,11 @@ const TYPES: { value: BroadcastType; label: string; hint: string }[] = [
   { value: "promotion", label: "Promotion", hint: "Marketing/offer content -- same delivery as an announcement." },
   { value: "feedback", label: "Feedback request", hint: "Students can leave a 1-5 rating and an optional comment." },
   { value: "test", label: "Test", hint: "Add MCQ/short-answer questions after creating the draft, then Send." },
+  {
+    value: "exam",
+    label: "Exam",
+    hint: "Upload the question paper and add questions after creating the draft, then Send. Students upload a scanned/photographed answer sheet; you grade it question-by-question afterward.",
+  },
 ];
 
 const initialState: SaveBroadcastState = {};

@@ -273,7 +273,7 @@ export type TopicSummary = {
 // operations with real cross-cutting logic that shouldn't trust a client
 // (resolving who a broadcast reaches, and scoring a submitted test) go
 // through services/broadcast itself (see broadcastClient.ts).
-export type BroadcastType = "announcement" | "promotion" | "feedback" | "test";
+export type BroadcastType = "announcement" | "promotion" | "feedback" | "test" | "exam";
 export type BroadcastStatus = "draft" | "sent" | "closed";
 
 export type Broadcast = {
@@ -286,6 +286,11 @@ export type Broadcast = {
   subject_id: string | null;
   medium: Medium | null;
   status: BroadcastStatus;
+  // The uploaded exam question paper (type='exam' only) -- Storage
+  // *paths* in the private `exam-files` bucket, not public URLs; resolved
+  // to a short-lived signed URL server-side for whoever's authorized to
+  // see them. Always empty for every other broadcast type.
+  attachment_paths: string[];
   sent_at: string | null;
   created_by: string | null;
   created_at: string;
@@ -343,6 +348,44 @@ export type TestAnswer = {
   answer_text: string | null;
   is_correct: boolean | null;
   score: number | null;
+};
+
+// type='exam' broadcasts (0029_exam_broadcast_type.sql): unlike
+// test_questions, there's no question_type/options/correct_option here --
+// every exam question is inherently marked by a human against the
+// student's uploaded answer sheet, nothing machine-answerable.
+export type ExamQuestion = {
+  id: string;
+  broadcast_id: string;
+  question: string;
+  max_score: number;
+  sort_order: number;
+};
+
+export type ExamSubmissionStatus = "submitted" | "graded";
+
+export type ExamSubmission = {
+  id: string;
+  broadcast_id: string;
+  user_id: string;
+  file_paths: string[];
+  status: ExamSubmissionStatus;
+  total_score: number | null;
+  max_possible_score: number | null;
+  feedback: string | null;
+  submitted_at: string;
+};
+
+// Per-question marks an admin assigns while grading one submission --
+// mirrors test_answers' (attempt_id, question_id) shape, minus the
+// selected_option/answer_text/is_correct columns that don't apply here
+// (the actual response lives in ExamSubmission.file_paths, not per
+// question).
+export type ExamQuestionScore = {
+  id: string;
+  submission_id: string;
+  question_id: string;
+  score: number;
 };
 
 export interface Database {
@@ -520,6 +563,31 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "test_answers_attempt_id_fkey"; columns: ["attempt_id"]; referencedRelation: "test_attempts"; referencedColumns: ["id"] },
           { foreignKeyName: "test_answers_question_id_fkey"; columns: ["question_id"]; referencedRelation: "test_questions"; referencedColumns: ["id"] },
+        ];
+      };
+      exam_questions: {
+        Row: ExamQuestion;
+        Insert: Partial<ExamQuestion>;
+        Update: Partial<ExamQuestion>;
+        Relationships: [
+          { foreignKeyName: "exam_questions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      exam_submissions: {
+        Row: ExamSubmission;
+        Insert: Partial<ExamSubmission>;
+        Update: Partial<ExamSubmission>;
+        Relationships: [
+          { foreignKeyName: "exam_submissions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+        ];
+      };
+      exam_question_scores: {
+        Row: ExamQuestionScore;
+        Insert: Partial<ExamQuestionScore>;
+        Update: Partial<ExamQuestionScore>;
+        Relationships: [
+          { foreignKeyName: "exam_question_scores_submission_id_fkey"; columns: ["submission_id"]; referencedRelation: "exam_submissions"; referencedColumns: ["id"] },
+          { foreignKeyName: "exam_question_scores_question_id_fkey"; columns: ["question_id"]; referencedRelation: "exam_questions"; referencedColumns: ["id"] },
         ];
       };
     };

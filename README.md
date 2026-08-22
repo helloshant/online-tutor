@@ -1446,6 +1446,47 @@ mount; opening an item marks it read optimistically (the unread dot disappears i
 `POST /api/inbox/:id/read` call happens in the background) the same way `chat-panel.tsx`'s own
 optimistic message bubble does.
 
+### Exams — a fifth broadcast type, file exchange instead of forms
+
+`type='exam'` (`0029_exam_broadcast_type.sql`) is a different interaction shape from the other four
+broadcast types: instead of everything happening in-app (a rating, MCQ answers), an admin attaches
+the actual question paper as one or more files, and each student uploads their own scanned/
+photographed answer sheet after writing the exam on paper — there's no way to auto-grade a
+handwritten response the way an MCQ answer is auto-graded, so an admin marks it afterward,
+question-by-question, against the uploaded sheet.
+
+- **Authoring**: same draft → targeting → Send flow as every other broadcast type
+  (`/admin/broadcasts`), but a draft exam also needs the question paper uploaded
+  (`uploadExamPaper`, one or more images/PDF, `exam-files` bucket) and at least one question added
+  (`addExamQuestion` — just question text + max marks; unlike Test's `test_questions`, there's no
+  `question_type`/`options`/`correct_option`, since every exam question is inherently marked by a
+  human, nothing machine-answerable). **Send** stays disabled until both are present, mirroring how
+  Test's Send is disabled with zero questions.
+- **Private storage, not public**: unlike `answer-bank-images` (`0017_answer_bank_image.sql`, a
+  public bucket — fine for a textbook diagram meant to be shown to every student who hits that
+  question), an exam paper and especially a student's own answer sheet aren't content that should
+  be openly reachable by anyone who obtains the URL. `exam-files` is a **private** bucket; every
+  link a student or admin sees is a short-lived signed URL (`createSignedUrls`, 10-minute TTL)
+  generated server-side only after confirming the viewer is authorized (an admin via
+  `requireAdminPage`, a student via the same `broadcast_recipients` ownership check the rest of the
+  student-facing broadcast routes use) — never a permanent stored URL.
+- **Submission**: a student opens the exam in their Inbox (`GET /api/broadcasts/[id]/exam` —
+  signed paper URLs, questions, their own existing submission if any), then uploads one or more
+  files as their answer sheet (`POST /api/broadcasts/[id]/exam/submit`, `multipart/form-data`,
+  `exam_submissions` — one row per student, `file_paths` an array like `answered_questions.image_urls`
+  already is). Re-submitting replaces the file list while still `'submitted'`; once `'graded'`, the
+  route refuses further submissions the same way a graded Test attempt can't be redone.
+- **Grading is entirely manual admin-entered data**, unlike Test's MCQ auto-scoring — so unlike
+  `/v1/broadcasts/:id/test/submit`, there's no "don't trust a client-reported score" boundary to
+  route through `services/broadcast` here at all. `gradeExamSubmission`
+  (`src/app/admin/broadcasts/actions.ts`) is a plain admin action: one form per submission covers
+  every question's marks at once (`score-<questionId>` fields), writes `exam_question_scores`, and
+  re-derives the submission's `total_score`/`max_possible_score`/`status` from every scored-question
+  row every time — same "recompute from scratch, never patch incrementally" reasoning
+  `services/broadcast/src/grading.ts`'s `recomputeAttemptTotals` uses for Test attempts, so a
+  regrade can't drift out of sync. `status` becomes `'graded'` once every question on that
+  submission has a mark; until then it's `'submitted'`, shown to the student as "awaiting grading".
+
 ## Local setup
 
 You can run this either with Docker Compose (one command, all services) or by running the web app,

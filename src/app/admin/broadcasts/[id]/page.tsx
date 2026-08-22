@@ -4,14 +4,47 @@ import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { BroadcastType } from "@/lib/supabase/types";
 import { QuestionForm } from "./question-form";
-import { deleteTestQuestion, gradeShortAnswer, sendBroadcastAction } from "../actions";
+import { ExamQuestionForm } from "./exam-question-form";
+import { ExamPaperUploadForm } from "./exam-paper-upload-form";
+import {
+  deleteExamQuestion,
+  deleteTestQuestion,
+  gradeExamSubmission,
+  gradeShortAnswer,
+  removeExamPaperFile,
+  sendBroadcastAction,
+} from "../actions";
 
 const TYPE_LABELS: Record<BroadcastType, string> = {
   announcement: "Announcement",
   promotion: "Promotion",
   feedback: "Feedback request",
   test: "Test",
+  exam: "Exam",
 };
+
+// Exam files live in a private bucket -- every link to one is a
+// server-generated signed URL, valid for a short window, never a stored
+// public URL (see 0029_exam_broadcast_type.sql). Reused for both the
+// question paper (admin-facing) and a submitted answer sheet
+// (admin-facing, grading a submission).
+const EXAM_BUCKET = "exam-files";
+const SIGNED_URL_TTL_SECONDS = 60 * 10;
+
+async function signExamFileUrls(paths: string[]): Promise<Map<string, string>> {
+  if (paths.length === 0) return new Map();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.storage.from(EXAM_BUCKET).createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) {
+    console.error("Failed to sign exam file URLs:", error);
+    return new Map();
+  }
+  const result = new Map<string, string>();
+  for (const d of data) {
+    if (d.path && d.signedUrl) result.set(d.path, d.signedUrl);
+  }
+  return result;
+}
 
 type QuestionRow = {
   id: string;
@@ -67,6 +100,12 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
       {broadcast.type === "test" && (
         <TestQuestionsSection broadcastId={id} isDraft={isDraft} />
       )}
+      {broadcast.type === "exam" && (
+        <>
+          <ExamPaperSection broadcastId={id} paths={broadcast.attachment_paths ?? []} isDraft={isDraft} />
+          <ExamQuestionsSection broadcastId={id} isDraft={isDraft} />
+        </>
+      )}
 
       {isDraft ? (
         <form action={sendBroadcastAction.bind(null, id)} className="mt-4">
@@ -89,6 +128,20 @@ async function SendButton({ broadcastId, type }: { broadcastId: string; type: Br
       .select("id", { count: "exact", head: true })
       .eq("broadcast_id", broadcastId);
     if (!count) {
+      disabled = true;
+      hint = "Add at least one question before sending.";
+    }
+  }
+  if (type === "exam") {
+    const supabase = createAdminClient();
+    const [{ data: broadcast }, { count }] = await Promise.all([
+      supabase.from("broadcasts").select("attachment_paths").eq("id", broadcastId).single(),
+      supabase.from("exam_questions").select("id", { count: "exact", head: true }).eq("broadcast_id", broadcastId),
+    ]);
+    if (!broadcast?.attachment_paths || broadcast.attachment_paths.length === 0) {
+      disabled = true;
+      hint = "Upload the question paper before sending.";
+    } else if (!count) {
       disabled = true;
       hint = "Add at least one question before sending.";
     }
@@ -179,6 +232,170 @@ async function ResultsSection({ broadcastId, type }: { broadcastId: string; type
 
       {type === "feedback" && <FeedbackResults broadcastId={broadcastId} />}
       {type === "test" && <TestResults broadcastId={broadcastId} />}
+      {type === "exam" && <ExamResults broadcastId={broadcastId} />}
+    </div>
+  );
+}
+
+async function ExamPaperSection({
+  broadcastId,
+  paths,
+  isDraft,
+}: {
+  broadcastId: string;
+  paths: string[];
+  isDraft: boolean;
+}) {
+  const urlByPath = await signExamFileUrls(paths);
+
+  return (
+    <div className="mt-4">
+      <h2 className="text-sm font-semibold">Question paper</h2>
+      <div className="mt-2 space-y-1">
+        {paths.length === 0 && <p className="text-sm text-foreground/50">Nothing uploaded yet.</p>}
+        {paths.map((path, i) => (
+          <div key={path} className="flex items-center gap-2 text-sm">
+            {urlByPath.has(path) ? (
+              <a href={urlByPath.get(path)} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                File {i + 1}
+              </a>
+            ) : (
+              <span className="text-foreground/50">File {i + 1} (link expired -- reload the page)</span>
+            )}
+            {isDraft && (
+              <form action={removeExamPaperFile.bind(null, broadcastId, path)}>
+                <button className="text-xs font-medium text-red-600 hover:underline">Remove</button>
+              </form>
+            )}
+          </div>
+        ))}
+      </div>
+      {isDraft && (
+        <div className="mt-2">
+          <ExamPaperUploadForm broadcastId={broadcastId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function ExamQuestionsSection({ broadcastId, isDraft }: { broadcastId: string; isDraft: boolean }) {
+  const supabase = createAdminClient();
+  const { data: questions } = await supabase
+    .from("exam_questions")
+    .select("id, question, max_score, sort_order")
+    .eq("broadcast_id", broadcastId)
+    .order("sort_order");
+  const rows = questions ?? [];
+
+  return (
+    <div className="mt-4">
+      <h2 className="text-sm font-semibold">Questions (marks to grade against the uploaded answer sheet)</h2>
+      <div className="mt-2 space-y-2">
+        {rows.length === 0 && <p className="text-sm text-foreground/50">No questions yet.</p>}
+        {rows.map((q, i) => (
+          <div key={q.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm">
+            <p className="font-medium">
+              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/40">({q.max_score} pt)</span>
+            </p>
+            {isDraft && (
+              <form action={deleteExamQuestion.bind(null, broadcastId, q.id)}>
+                <button className="text-xs font-medium text-red-600 hover:underline">Delete</button>
+              </form>
+            )}
+          </div>
+        ))}
+      </div>
+      {isDraft && (
+        <div className="mt-3">
+          <ExamQuestionForm broadcastId={broadcastId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function ExamResults({ broadcastId }: { broadcastId: string }) {
+  const supabase = createAdminClient();
+  const [{ data: submissions }, { data: questions }] = await Promise.all([
+    supabase
+      .from("exam_submissions")
+      .select("id, user_id, file_paths, status, total_score, max_possible_score, submitted_at")
+      .eq("broadcast_id", broadcastId)
+      .order("submitted_at", { ascending: false }),
+    supabase.from("exam_questions").select("id, question, max_score, sort_order").eq("broadcast_id", broadcastId).order("sort_order"),
+  ]);
+
+  const submissionRows = submissions ?? [];
+  const questionRows = questions ?? [];
+
+  // profiles, not auth.users -- same reasoning as FeedbackResults above.
+  const userIds = [...new Set(submissionRows.map((s) => s.user_id))];
+  const { data: users } =
+    userIds.length > 0 ? await supabase.from("profiles").select("id, full_name").in("id", userIds) : { data: [] };
+  const nameById = new Map((users ?? []).map((u) => [u.id, u.full_name]));
+
+  const submissionIds = submissionRows.map((s) => s.id);
+  const { data: existingScores } =
+    submissionIds.length > 0
+      ? await supabase.from("exam_question_scores").select("submission_id, question_id, score").in("submission_id", submissionIds)
+      : { data: [] as { submission_id: string; question_id: string; score: number }[] };
+  const scoreByKey = new Map((existingScores ?? []).map((s) => [`${s.submission_id}:${s.question_id}`, s.score]));
+
+  const allFilePaths = submissionRows.flatMap((s) => s.file_paths ?? []);
+  const urlByPath = await signExamFileUrls(allFilePaths);
+
+  return (
+    <div className="mt-4">
+      <h2 className="text-sm font-semibold">Submissions ({submissionRows.length})</h2>
+      <div className="mt-2 space-y-3">
+        {submissionRows.length === 0 && <p className="text-sm text-foreground/50">No answer sheets submitted yet.</p>}
+        {submissionRows.map((s) => (
+          <div key={s.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium">{nameById.get(s.user_id) ?? "Student"}</p>
+              <span className="text-xs text-foreground/60">
+                {s.status === "graded"
+                  ? `${s.total_score ?? 0}/${s.max_possible_score ?? 0}`
+                  : "awaiting grading"}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs">
+              {(s.file_paths ?? []).map((path, i) =>
+                urlByPath.has(path) ? (
+                  <a key={path} href={urlByPath.get(path)} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                    Answer sheet {i + 1}
+                  </a>
+                ) : (
+                  <span key={path} className="text-foreground/50">
+                    Answer sheet {i + 1} (link expired -- reload)
+                  </span>
+                )
+              )}
+            </div>
+            <form action={gradeExamSubmission.bind(null, broadcastId, s.id)} className="mt-2 space-y-1.5 border-t border-border pt-2">
+              {questionRows.map((q) => (
+                <div key={q.id} className="flex items-center gap-2">
+                  <label className="flex-1 text-xs text-foreground/70">{q.question}</label>
+                  <input
+                    name={`score-${q.id}`}
+                    type="number"
+                    min="0"
+                    max={q.max_score}
+                    step="0.5"
+                    defaultValue={scoreByKey.get(`${s.id}:${q.id}`) ?? ""}
+                    placeholder={`0-${q.max_score}`}
+                    className="w-20 rounded-lg border border-border bg-background px-2 py-1 text-xs"
+                  />
+                </div>
+              ))}
+              <button className="rounded-lg border border-brand px-2 py-1 text-xs font-medium text-brand hover:bg-brand/5">
+                Save marks
+              </button>
+            </form>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
