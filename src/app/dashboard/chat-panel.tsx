@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { MathText } from "@/components/math-text";
+import { CitationText } from "@/components/citation-text";
 import { LoadingIndicator } from "@/components/loading-indicator";
+import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -437,7 +438,7 @@ export function ChatPanel({
           ) : (
             <div
               key={entry.message.id}
-              className={`flex ${entry.message.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex flex-col ${entry.message.role === "user" ? "items-end" : "items-start"}`}
             >
               <div
                 className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
@@ -461,9 +462,23 @@ export function ChatPanel({
                     <LoadingIndicator label="Translating…" />
                   </span>
                 ) : (
-                  entry.message.content !== "[Image]" && <MathText text={entry.message.content} />
+                  entry.message.content !== "[Image]" && <CitationText text={entry.message.content} />
                 )}
               </div>
+              {/* Only a real, settled assistant reply -- not the optimistic
+                  user bubble, and not while this exact reply is still being
+                  re-answered in another language (nothing stable to attach
+                  feedback to mid-regeneration). */}
+              {entry.message.role === "assistant" &&
+                entry.message.id !== regeneratingMessageId &&
+                !entry.message.id.startsWith("optimistic-") && (
+                  <FeedbackButtons
+                    kind="chat_message"
+                    targetId={entry.message.id}
+                    subjectId={subject.id}
+                    contentSnapshot={entry.message.content}
+                  />
+                )}
             </div>
           )
         )}

@@ -15,6 +15,21 @@ const PAGES: { key: AdminPageKey; label: string; description: string }[] = [
     label: "Chapter notes",
     description: "Author detailed chapter summaries for semantic (RAG) retrieval in chat.",
   },
+  {
+    key: "topic_summaries",
+    label: "Topic summaries",
+    description: "Review, approve, reject LLM-generated topic summaries before they're reused.",
+  },
+  {
+    key: "broadcasts",
+    label: "Broadcasts",
+    description: "Send announcements, promotions, feedback requests, tests, and exams to students.",
+  },
+  {
+    key: "feedback",
+    label: "Feedback",
+    description: "Review student 👍/👎 on chat replies, topic summaries, and exercises.",
+  },
 ];
 
 export default async function AuthorizationPage() {

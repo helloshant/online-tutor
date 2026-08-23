@@ -779,6 +779,79 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   examples" checklist entry that was a straightforward, clearly-net-positive addition rather than a
   judgment call, so it was added directly rather than left as a follow-up.
 
+### Closing the loop on RAG quality: student feedback, coverage, and grounding rollups
+
+The pipeline described above (chapter-notes RAG → cache → answer bank → LLM, syllabus-gated,
+citation-instructed) is the right shape for a tutoring product, but shape alone doesn't earn a
+student's trust. Four small, deliberately connected additions close specific gaps that shape alone
+left open — none of them touch the pipeline's retrieval/generation logic itself, only what surrounds
+it: whether a student can react to what they're shown, whether an admin can see where ingestion is
+thin, and whether an admin can see how often a subject is actually leaning on that ingested content
+versus the model's own general knowledge.
+
+- **Citation chips.** `buildTutorSystemPrompt`'s rule 6 (see above) already asked the model to write
+  `(Source: ...)` inline whenever it grounds an answer in chapter-notes RAG material — that
+  instruction predates this change, but rendered as plain parenthetical text inside a reply it's easy
+  to miss entirely, which defeats the point: the citation is exactly what should let a student tell
+  "this is grounded in my actual textbook" apart from "this is the model's own general knowledge," and
+  that distinction is invisible if it reads no differently from the rest of the sentence. `CitationText`
+  (`src/components/citation-text.tsx`) finds that same `(Source: ...)` pattern and renders it as a
+  small badge instead, passing everything else straight through `MathText` unchanged — a message with
+  no citation in it renders identically to before. Wired into `ChatPanel`'s message bubbles (every
+  role, not just assistant — a student typing the literal text themselves is a harmless edge case, not
+  worth a role check) and `TopicSummaryMessage`'s summary text; **not** wired into exercises, since
+  `buildExerciseGenerationPrompt` never grounds on chapter notes in the first place — there's nothing
+  for a citation pattern to ever match there.
+
+- **Per-answer 👍/👎.** The review-gate model (`topic_summaries`/`answered_questions`'
+  `validation_status`) governs whether a *generated* row gets reused across students, but nothing let
+  the one student actually looking at an answer flag it as wrong, in the moment. `answer_feedback`
+  (`0031_answer_feedback.sql`) is a new backend-only table (RLS enabled, zero client policies — same
+  posture as `answered_questions`/`chapter_documents`/`topic_summaries`) capturing a `kind`
+  (`chat_message` / `topic_summary` / `exercise`), a `rating` (`up`/`down`), an optional student note,
+  and — this is the deliberate design choice — a full `content_snapshot` of exactly what the student
+  saw, rather than only a foreign key. A `target_id` is still recorded where one exists (a
+  `chat_messages.id` is always stable; a topic summary/exercise vote uses the `syllabus_topics.id`
+  instead, since a summary served straight from `chapter_notes` source has no `topic_summaries` row at
+  all, and a freshly-generated exercise has no id returned to the caller — see the migration's own
+  comment for the full reasoning), but `content_snapshot` is what makes a row self-sufficient for an
+  admin to review regardless of whether that id still resolves to anything by the time they look. No
+  unique DB constraint enforces "one vote per student per thing" — a text column this size can't sit
+  in a btree unique index — so `POST /api/feedback` (`src/app/api/feedback/route.ts`) does a
+  delete-then-insert instead, scoped to `(user_id, kind, target_id)` when a `target_id` is present (a
+  chat message or a topic summary/exercise's shared topic id); a single exercise out of a
+  multi-exercise batch deliberately omits `target_id` entirely, since several exercises share one topic
+  and a shared id there would make voting on exercise #2 silently delete separate feedback already
+  given on exercise #4. `FeedbackButtons` (`src/components/feedback-buttons.tsx`) is the shared client
+  component wired into all three surfaces; a 👎 offers an optional inline note before/after recording.
+  `/admin/feedback` is a new admin page (gated by the new `feedback` `admin_page_permissions` page,
+  grandfathered the same way every prior page addition was) listing open feedback, down-votes first,
+  with a content preview, the student's name, and a link out to whichever existing review surface
+  actually fixes the thing (`/admin/topic-summaries` or `/admin/answer-bank`) — this page only triages
+  and closes the feedback item itself, the same division of responsibility the rest of the admin panel
+  already uses everywhere else.
+
+- **Ingestion coverage.** `/admin/chapter-notes` now opens with a coverage section: every
+  board/grade/subject/medium segment in the catalog, grouped and sorted worst-coverage-first, showing
+  how many of its syllabus topics have zero `chapter_documents` rows — an expandable list names exactly
+  which chapter/topic pairs are missing. Before this, a gap in ingestion was invisible until a student
+  happened to ask about it and got an answer with nothing to ground it in; this makes the gap visible
+  to an admin ahead of that, in the same place they already go to author chapter notes, so ingestion
+  effort can be prioritized by what's actually missing rather than worked through in catalog order.
+
+- **Grounding-by-subject rollup.** `chat_events` gained a `grounded boolean` column
+  (`0031_answer_feedback.sql`), set only on `/v1/chat`'s `source='llm'` events — `true` when
+  chapter-notes RAG chunks were found and included in that reply's prompt, `false` otherwise, and left
+  `null` everywhere else (`cache`/`database`/`rejected`/`chapter_notes` sources, and every
+  topic-summary/exercises event — `buildTopicSummaryPrompt`/`buildExerciseGenerationPrompt` never take
+  a `referenceChunks` param, so "grounded" isn't a meaningful question there in the first place), the
+  same "null means not applicable" convention the token/cost columns already use. `/admin/observability`
+  now has a "Grounding by subject" table — per subject, what share of questions were **reused**
+  (cache/database/chapter-notes, no fresh LLM call at all), **grounded** (a fresh LLM call that actually
+  used RAG material), or **ungrounded** (a fresh LLM call with nothing to ground it in — the model's own
+  general knowledge). A subject with a high ungrounded share is the direct, data-backed answer to
+  "where should I ingest more chapter notes next," rather than a guess.
+
 ### Mobile navigation
 
 Most students use this on a phone, so `DashboardShell` is two genuinely different navigation

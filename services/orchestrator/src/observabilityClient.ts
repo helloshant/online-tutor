@@ -19,6 +19,10 @@ export type ChatEventInput = {
   completionTokens?: number | null;
   answerBankId?: string | null;
   latencyMs?: number | null;
+  // See the observability service's own matching type comment -- only ever
+  // set (true/false) for /v1/chat's 'llm'-source events; omitted everywhere
+  // else.
+  grounded?: boolean | null;
 };
 
 export async function recordChatEvent(event: ChatEventInput): Promise<void> {

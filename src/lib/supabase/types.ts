@@ -199,6 +199,13 @@ export type ChatEvent = {
   cost_usd: number | null;
   answer_bank_id: string | null;
   latency_ms: number | null;
+  // Only meaningful for source='llm' rows from /v1/chat -- whether
+  // chapter-notes RAG chunks were found and included in the prompt. Null
+  // everywhere else (topic-summary/exercises generation never grounds on
+  // chapter_documents, and "grounded" isn't applicable to a cache/database/
+  // rejected/chapter_notes row in the first place) -- see
+  // 0031_answer_feedback.sql.
+  grounded: boolean | null;
   created_at: string;
 };
 
@@ -210,7 +217,8 @@ export type AdminPageKey =
   | "coupons"
   | "chapter_notes"
   | "topic_summaries"
-  | "broadcasts";
+  | "broadcasts"
+  | "feedback";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -386,6 +394,36 @@ export type ExamQuestionScore = {
   submission_id: string;
   question_id: string;
   score: number;
+};
+
+// Per-answer 👍/👎, closing the loop the review-gate model
+// (topic_summaries/answered_questions' validation_status) never covered: a
+// student flagging an answer they're looking at *right now* as wrong, in
+// any of the three places an LLM answer is shown. See
+// 0031_answer_feedback.sql for why target_id is best-effort (means a
+// different table per `kind`, and two of the three kinds have no clean
+// per-instance row id available at the moment a student sees the content)
+// rather than a real foreign key -- content_snapshot is what makes a row
+// self-sufficient for an admin to review regardless of whether target_id
+// still resolves to anything.
+export type AnswerFeedbackKind = "chat_message" | "topic_summary" | "exercise";
+export type AnswerFeedbackRating = "up" | "down";
+export type AnswerFeedbackStatus = "open" | "resolved";
+
+export type AnswerFeedback = {
+  id: string;
+  user_id: string;
+  kind: AnswerFeedbackKind;
+  target_id: string | null;
+  subject_id: string | null;
+  question: string | null;
+  content_snapshot: string;
+  rating: AnswerFeedbackRating;
+  note: string | null;
+  status: AnswerFeedbackStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
 };
 
 export interface Database {
@@ -588,6 +626,14 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "exam_question_scores_submission_id_fkey"; columns: ["submission_id"]; referencedRelation: "exam_submissions"; referencedColumns: ["id"] },
           { foreignKeyName: "exam_question_scores_question_id_fkey"; columns: ["question_id"]; referencedRelation: "exam_questions"; referencedColumns: ["id"] },
+        ];
+      };
+      answer_feedback: {
+        Row: AnswerFeedback;
+        Insert: Partial<AnswerFeedback>;
+        Update: Partial<AnswerFeedback>;
+        Relationships: [
+          { foreignKeyName: "answer_feedback_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
         ];
       };
     };

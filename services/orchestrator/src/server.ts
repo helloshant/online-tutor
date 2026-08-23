@@ -394,6 +394,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
       latencyMs: Date.now() - startedAt,
+      grounded: referenceChunks.length > 0,
     });
 
     const response: ChatOrchestrationResponse = { reply: text, source: "llm" };

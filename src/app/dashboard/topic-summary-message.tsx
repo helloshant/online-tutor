@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
+import { CitationText } from "@/components/citation-text";
 import { LoadingIndicator } from "@/components/loading-indicator";
+import { FeedbackButtons } from "@/components/feedback-buttons";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
 type ExerciseItem = { question: string; answer: string };
@@ -154,9 +156,23 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
         ) : summaryError ? (
           <p className="text-red-600">{summaryError}</p>
         ) : (
-          <p className="whitespace-pre-wrap text-foreground/80">
-            <MathText text={summary ?? ""} />
-          </p>
+          <>
+            <p className="whitespace-pre-wrap text-foreground/80">
+              <CitationText text={summary ?? ""} />
+            </p>
+            {/* target_id is the topic itself, not a topic_summaries row --
+                see 0031_answer_feedback.sql's comment on why: a summary
+                served straight from admin-authored chapter notes has no
+                such row at all, and this is exactly what
+                /admin/topic-summaries is itself keyed on. */}
+            <FeedbackButtons
+              kind="topic_summary"
+              targetId={topic.id}
+              subjectId={topic.subject_id}
+              question={`${topic.chapter} / ${topic.topic}`}
+              contentSnapshot={summary ?? ""}
+            />
+          </>
         )}
 
         {!loadingSummary && !summaryError && (
@@ -236,6 +252,18 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
                           <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
                             <MathText text={ex.answer} />
                           </p>
+                          {/* No target_id -- several exercises share this one
+                              topic and none has a stable per-instance row id
+                              available here (see FeedbackButtons' own
+                              comment on targetId); content_snapshot alone is
+                              what tells this exercise apart from its
+                              siblings for whoever reviews it. */}
+                          <FeedbackButtons
+                            kind="exercise"
+                            subjectId={topic.subject_id}
+                            question={`${topic.chapter} / ${topic.topic}`}
+                            contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
+                          />
                         </li>
                       ))}
                     </ol>

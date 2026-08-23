@@ -115,6 +115,7 @@ app.post("/v1/events", requireSharedSecret, async (req: Request, res: Response) 
     cost_usd: costUsd,
     answer_bank_id: body.answerBankId ?? null,
     latency_ms: body.latencyMs ?? null,
+    grounded: body.grounded ?? null,
   });
 
   if (error) {

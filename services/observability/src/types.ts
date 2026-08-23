@@ -24,4 +24,10 @@ export type ChatEventInput = {
   completionTokens?: number | null;
   answerBankId?: string | null;
   latencyMs?: number | null;
+  // Only meaningful for source='llm' from the orchestrator's /v1/chat --
+  // whether chapter-notes RAG chunks were found and included in the prompt.
+  // Omitted (stays null) for every other source and for topic-summary/
+  // exercises events, which never ground on chapter_documents at all -- see
+  // supabase/migrations/0031_answer_feedback.sql.
+  grounded?: boolean | null;
 };
