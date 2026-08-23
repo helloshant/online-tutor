@@ -85,7 +85,14 @@ export async function findRelevantExercises(
 export async function recordAnswer(
   scope: AnswerScope,
   answer: string,
-  validationStatus: "auto_approved" | "pending_review"
+  validationStatus: "auto_approved" | "pending_review",
+  // The student whose question triggered this write -- an audit trail
+  // distinct from `scope.question` itself, which (for a chat-originated
+  // entry) is already a restated version rather than the student's raw
+  // wording -- see questionRewrite.ts and 0033_answer_bank_created_by.sql.
+  // Callers that can't resolve one (there are none today) should pass null
+  // rather than guessing.
+  createdBy: string | null
 ): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
@@ -99,6 +106,7 @@ export async function recordAnswer(
     answer,
     validation_status: validationStatus,
     topic_id: scope.topicId ?? null,
+    created_by: createdBy,
   });
 
   if (error) {

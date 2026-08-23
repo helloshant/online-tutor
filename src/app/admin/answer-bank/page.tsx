@@ -100,17 +100,47 @@ export default async function AnswerBankPage({
           .order("sort_order")
       : null;
 
-  const [{ data: fetchedRows }, { data: boards }, { data: grades }, { data: subjects }, filterTopicsResult] =
-    await Promise.all([
-      query,
-      supabase.from("boards").select("*").order("name"),
-      supabase.from("grades").select("*").order("level"),
-      supabase.from("subjects").select("*").order("name"),
-      filterTopicsQuery ?? Promise.resolve({ data: null }),
-    ]);
+  const [
+    { data: fetchedRows },
+    { data: boards },
+    { data: grades },
+    { data: subjects },
+    filterTopicsResult,
+    { data: profiles },
+    { data: authUsers },
+  ] = await Promise.all([
+    query,
+    supabase.from("boards").select("*").order("name"),
+    supabase.from("grades").select("*").order("level"),
+    supabase.from("subjects").select("*").order("name"),
+    filterTopicsQuery ?? Promise.resolve({ data: null }),
+    // For "Asked by" below -- created_by (0033_answer_bank_created_by.sql)
+    // points at auth.users, which this table can't embed directly (no FK
+    // PostgREST can detect, same reason every other "who did this" display
+    // in this app does a separate profiles query and joins client-side
+    // instead of a nested select -- see /admin/feedback for the identical
+    // pattern).
+    supabase.from("profiles").select("id, full_name, role"),
+    supabase.auth.admin.listUsers({ perPage: 1000 }),
+  ]);
   const filterTopics = filterTopicsResult.data;
   const hasNextPage = (fetchedRows?.length ?? 0) > PAGE_SIZE;
   const rows = (fetchedRows ?? []).slice(0, PAGE_SIZE);
+
+  const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
+  const emailById = new Map((authUsers?.users ?? []).map((u) => [u.id, u.email]));
+  // Distinguishes a student's own question (validation_status started at
+  // pending_review/auto_approved, from an LLM generation) from an admin's
+  // deliberate bulk import (validation_status starts admin_approved) --
+  // both populate created_by, but the label should read differently since
+  // "asked by" would misdescribe content an admin typed in directly.
+  function describeCreator(userId: string | null): string | null {
+    if (!userId) return null;
+    const profile = profileById.get(userId);
+    const name = profile?.full_name || emailById.get(userId) || "a deleted user";
+    const isStaff = profile?.role === "admin" || profile?.role === "superadmin";
+    return isStaff ? `Imported by ${name}` : `Asked by ${name}`;
+  }
 
   // Merges the current filters with the given overrides -- every link/form
   // in this page goes through this so clicking a status pill or a tag chip
@@ -299,6 +329,17 @@ export default async function AnswerBankPage({
                     <span title="Syllabus topic this entry is scoped to">
                       {topic.chapter} — {topic.topic}
                     </span>
+                  </>
+                )}
+                {describeCreator(row.created_by) && (
+                  <>
+                    <span>&middot;</span>
+                    {/* Auditability, not content -- the question above is
+                        already a restated version for a chat-originated
+                        entry (see questionRewrite.ts), never the asker's raw
+                        wording, so this identifies *who* rather than
+                        recovering *what they actually typed*. */}
+                    <span title="Who caused this entry to exist">{describeCreator(row.created_by)}</span>
                   </>
                 )}
               </div>

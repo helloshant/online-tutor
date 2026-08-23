@@ -167,6 +167,14 @@ export type AnsweredQuestion = {
   // (column default '{}'), see 0017_answer_bank_image.sql and
   // 0023_answer_bank_multiple_images.sql.
   image_urls: string[];
+  // Who caused this row to exist -- the student whose chat question (or
+  // "Relevant Exercises" click) triggered the LLM generation, or the admin
+  // who bulk-imported it. Not a copy of what they asked -- a chat-originated
+  // `question` is itself already a restated version, not the student's raw
+  // wording (see questionRewrite.ts) -- so this is the alternate audit
+  // trail for tracing a problematic entry back to its source. Null for rows
+  // predating this column. See 0033_answer_bank_created_by.sql.
+  created_by: string | null;
   created_at: string;
   last_used_at: string;
 };

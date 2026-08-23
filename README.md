@@ -907,17 +907,44 @@ Two deliberate design choices:
   if the restatement call itself fails, `restateQuestionForStorage` returns `null` and the caller skips
   the answer-bank write *entirely*, rather than falling back to the original text — silently storing
   exactly what this step exists to avoid storing on its one bad day would defeat the entire point.
-- **The Redis cache is deliberately left alone**, still keyed on the student's real question text, not
-  the restated one. Cache entries are short-TTL, fast-repeat lookups, not a durable cross-student
-  corpus, so the stricter safeguard above doesn't need to apply there — and keeping the exact original
-  text actually matters for correctness: a generalized restatement ("solving a linear equation with
-  variables on both sides") is exactly the right level of detail for the durable, fuzzy-matched answer
-  bank, but used as an *exact* cache key it risks a wrong hit against a different specific problem that
-  merely shares the same underlying concept.
+- **The Redis cache needed no change at all — it never stored the question text in the first place.**
+  `cache.ts`'s `cacheKey()` runs the (normalized) question through a one-way SHA-256 hash and uses
+  *that* as the Redis key; the value it stores is only ever the answer. A hash isn't reversible, so
+  nothing about the original text — copyrighted or not — is recoverable from what actually sits in
+  Redis, regardless of which text (raw or restated) produced the key. Worth being precise about this:
+  an earlier description of this design said the cache was "kept keyed on the student's real question
+  text," which is true in the narrow "same input → same key" sense but reads as if the text itself
+  persists there, which it doesn't.
 
 Runs as a fire-and-forget background call after the student's reply has already been sent (same
 pattern as `recordAnswer`/`setCachedAnswer` themselves) — it can never add latency to, or fail, the
 reply itself.
+
+### `created_by`: auditability once the question text itself is gone
+
+The restatement above closes the content-level risk, but it also means an admin looking at a bank
+entry after the fact can no longer see whose original wording it came from — deliberately, that's the
+whole point. That leaves a different, legitimate need unmet: if a specific entry ever needs following
+up on, there should still be a way to trace it back to *who* caused it to exist, even though *what
+they literally typed* is no longer recoverable. `0033_answer_bank_created_by.sql` adds a nullable
+`created_by uuid references auth.users` to `answered_questions` for exactly that — not a copy of
+content, a pointer to a person.
+
+Two different kinds of writer populate it, and both are legitimate provenance:
+
+- **A student**, via `services/orchestrator/src/answerBank.ts`'s `recordAnswer` — threaded through
+  from `/v1/chat`'s answer-bank write (`studentBody.userId`) and `/v1/topic-exercises`' generation
+  write (`body.userId`), i.e. whichever student's live question or "Relevant Exercises" click
+  triggered the LLM generation this entry banks.
+- **An admin**, via `src/app/admin/answer-bank/actions.ts`'s `bulkImportAnswers` — the admin who ran
+  the import, captured from `requireAdminPage`'s own session rather than trusted from the form.
+
+`/admin/answer-bank` resolves `created_by` to a name the same way `/admin/feedback` does (a separate
+`profiles` query joined client-side via a `Map`, since `auth.users` isn't something PostgREST can
+embed directly) and labels it differently depending on who it was — **"Asked by {name}"** for a
+student-originated entry, **"Imported by {name}"** for an admin one, decided by checking that user's
+`profiles.role` rather than assuming from which write path populated it. Null for every row that
+predates this column — there's no attempt to backfill history that was never captured.
 
 ### Mobile navigation
 

@@ -516,7 +516,8 @@ async function importParsedRows(
   rows: ParsedImportRow[],
   tags: string[],
   scope: { boardId: string; gradeId: string; subjectId: string; medium: Medium; topicId: string | null },
-  imageFiles: File[]
+  imageFiles: File[],
+  createdBy: string
 ): Promise<BulkImportState> {
   const supabase = createAdminClient();
 
@@ -647,6 +648,7 @@ async function importParsedRows(
         question: r.question,
         answer: r.answer,
         validation_status: "admin_approved" as const,
+        created_by: createdBy,
         tags,
         // Compacts away any null left by a rare mid-upload failure (as
         // opposed to a synchronously-unmatched filename, whose marker was
@@ -678,7 +680,7 @@ export async function bulkImportAnswers(
   _prevState: BulkImportState,
   formData: FormData
 ): Promise<BulkImportState> {
-  await requireAdminPage("answer_bank");
+  const session = await requireAdminPage("answer_bank");
 
   const boardId = formData.get("boardId") as string | null;
   const gradeId = formData.get("gradeId") as string | null;
@@ -734,7 +736,7 @@ export async function bulkImportAnswers(
     };
   }
 
-  return importParsedRows(rows, tags, scope, imageFiles);
+  return importParsedRows(rows, tags, scope, imageFiles, session.user.id);
 }
 
 const MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024;

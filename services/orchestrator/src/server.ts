@@ -385,7 +385,12 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
             console.error("Skipping answer-bank write -- question restatement failed for this question.");
             return;
           }
-          const saved = await recordAnswer({ ...scope, question: restatedQuestion }, text, validation.status);
+          const saved = await recordAnswer(
+            { ...scope, question: restatedQuestion },
+            text,
+            validation.status,
+            studentBody.userId
+          );
           if (!saved) console.error("Failed to store this chat answer in the answer bank.");
         })();
         // Only cache (i.e. let it be replayed to other students) once it's
@@ -843,7 +848,8 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       const saved = await recordAnswer(
         { ...scope, question: exercise.question, topicId: body.topicId },
         exercise.answer,
-        validation.status
+        validation.status,
+        body.userId
       );
       if (!saved) {
         console.error(
