@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
+import { LoadingIndicator } from "@/components/loading-indicator";
 import { TopicSummaryMessage } from "./topic-summary-message";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -456,7 +457,9 @@ export function ChatPanel({
                   />
                 )}
                 {entry.message.id === regeneratingMessageId ? (
-                  <span className="text-foreground/40">Translating…</span>
+                  <span className="text-foreground/40">
+                    <LoadingIndicator label="Translating…" />
+                  </span>
                 ) : (
                   entry.message.content !== "[Image]" && <MathText text={entry.message.content} />
                 )}
@@ -467,7 +470,7 @@ export function ChatPanel({
         {sending && (
           <div className="flex justify-start">
             <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/40">
-              Thinking…
+              <LoadingIndicator label="Thinking…" />
             </div>
           </div>
         )}

@@ -557,6 +557,34 @@ generate-and-store), tagged with a descriptive `question` string (`topic-summary
 `topic-exercises: ...`) so they're distinguishable from ordinary chat questions in the admin
 observability dashboard.
 
+### Loading indicators for LLM-backed fetches
+
+Every place in the student UI that waits on an LLM response used a plain, static text label
+("Thinking…", "Generating summary…") with no motion at all — indistinguishable from a stalled or
+broken request once a generation ran more than a second or two, which is what prompted this. A
+shared `LoadingIndicator` component (`src/components/loading-indicator.tsx`) — three dots bouncing
+in a stagger via Tailwind's `animate-bounce` and per-dot `[animation-delay:...]` — is now used
+everywhere the wait is actually an LLM call, decorating the existing label text rather than
+replacing it, since the wording ("Thinking…" vs. "Translating…" vs. "Generating summary…") is what
+tells a student *what's* in flight and the animation is what tells them it's still moving:
+
+- `ChatPanel`'s `sending` bubble ("Thinking…", a fresh reply) and its `regeneratingMessageId` state
+  ("Translating…", the toggle re-answering the last reply in the other language — see "English-subject
+  language toggle" above).
+- `TopicSummaryMessage`'s `loadingSummary` state ("Generating summary…").
+- `TopicSummaryMessage`'s `loadingExercises` state — previously just a disabled button whose own
+  label changed to "Finding exercises…", easy to miss since `search_topic_exercises` usually *does*
+  resolve instantly (an answer-bank hit) and a click only actually waits when it falls through to the
+  LLM (see "Topic summaries and relevant exercises" above). A second line now appears under the
+  button specifically while that fetch is in flight ("Asking the tutor for relevant exercises…").
+
+Nothing else in the student UI needed this: `PracticePanel`'s search is a plain read-only Postgres
+query with no LLM in its path (its own "Searching…"/"Loading…" states are left as static text,
+correctly — there's nothing in-flight there for an animation to honestly represent), and the
+Broadcasts/Inbox feature (announcements, promotions, feedback, tests, exams) never calls an LLM at
+all — `services/broadcast` only fans out messages and recomputes stored scores (see "Broadcasts"
+below), so none of its own loading states apply here either.
+
 ### Topic summary review
 
 `/v1/topic-summary` checks four sources, in order, before ever calling the LLM — each a fallback

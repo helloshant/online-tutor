@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
+import { LoadingIndicator } from "@/components/loading-indicator";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
 type ExerciseItem = { question: string; answer: string };
@@ -147,7 +148,9 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
         </div>
 
         {loadingSummary ? (
-          <p className="text-foreground/50">Generating summary…</p>
+          <p className="text-foreground/50">
+            <LoadingIndicator label="Generating summary…" />
+          </p>
         ) : summaryError ? (
           <p className="text-red-600">{summaryError}</p>
         ) : (
@@ -161,14 +164,25 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
             {exercisesError && <p className="mb-2 text-red-600">{exercisesError}</p>}
 
             {exercises === null ? (
-              <button
-                type="button"
-                onClick={handleLoadExercises}
-                disabled={loadingExercises}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-              >
-                {loadingExercises ? "Finding exercises…" : "Relevant Exercises"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleLoadExercises}
+                  disabled={loadingExercises}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {loadingExercises ? "Finding exercises…" : "Relevant Exercises"}
+                </button>
+                {/* The lookup checks the answer bank first (instant) but falls
+                    through to the LLM on a miss, which can take a few
+                    seconds -- this makes that wait visible instead of just a
+                    disabled button with no other feedback. */}
+                {loadingExercises && (
+                  <p className="mt-2 text-sm text-foreground/50">
+                    <LoadingIndicator label="Asking the tutor for relevant exercises…" />
+                  </p>
+                )}
+              </>
             ) : (
               <>
                 {topicTags.length > 0 && (
