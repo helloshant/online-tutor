@@ -870,6 +870,55 @@ versus the model's own general knowledge.
   general knowledge). A subject with a high ungrounded share is the direct, data-backed answer to
   "where should I ingest more chapter notes next," rather than a guess.
 
+### Rephrase-before-store: a student's question can be a copy too
+
+Everything above is about content *this app* ingests. But a student's own chat question can itself be
+a verbatim copy of something from a copyrighted guide book or workbook — typed out, or pasted on
+desktop — and answering it live was never the issue (reading a copyrighted work to help someone
+understand it is ordinary tutoring, and `buildTutorSystemPrompt` already grounds/paraphrases the
+*reply* correctly regardless of source). The issue is specifically the **answer bank**
+(`answered_questions`, matched against by every other student's future questions via
+`search_answer_bank`) — writing a student's exact copied text into a table built for durable,
+cross-student reuse is a meaningfully different, riskier act than a one-off live reply, the same
+distinction the copyright discussion for `chapter_documents` already turns on.
+
+Two things already narrow this risk before any new code: an image-only question never reaches the
+answer-bank write path at all (`scope` in `/v1/chat` is only ever non-null for a fresh, non-image,
+typed question — see `server.ts`), and the image itself is never persisted anywhere regardless (see
+"Image / screenshot questions" below) — so a photographed page's actual text was already never at
+risk of durable storage. The residual case is a student *typing* (or pasting) a copied question.
+
+`questionRewrite.ts`'s `restateQuestionForStorage` closes that gap: immediately before a chat Q&A
+pair is written to `answered_questions` (never before — the student's own reply and the Redis cache
+both still use their real question text, see below), the question is run through a short LLM call
+(`buildQuestionRestatementPrompt` in `prompts.ts`) that restates it in the model's own words —
+keeping every fact, number, equation, and the specific thing being asked (none of that is
+copyrightable on its own, and losing it would break legitimate reuse of the exact same problem), while
+dropping any narrative or passage-style wrapper the student may have copied alongside it (a "read the
+following passage and answer" framing, decorative word-problem prose, an exercise's own numbering).
+It's the same paraphrase-not-reproduce principle rule 6 already applies to the *answer* half of every
+reply, applied here to the *question* half for the first time.
+
+Two deliberate design choices:
+
+- **Fails closed, not open.** Every other best-effort write in this pipeline (`cache.ts`,
+  `answerBank.ts`) fails open — a missing connection or a network error just means an optimization is
+  skipped, never that the student's reply is affected. This is the one place that's the wrong default:
+  if the restatement call itself fails, `restateQuestionForStorage` returns `null` and the caller skips
+  the answer-bank write *entirely*, rather than falling back to the original text — silently storing
+  exactly what this step exists to avoid storing on its one bad day would defeat the entire point.
+- **The Redis cache is deliberately left alone**, still keyed on the student's real question text, not
+  the restated one. Cache entries are short-TTL, fast-repeat lookups, not a durable cross-student
+  corpus, so the stricter safeguard above doesn't need to apply there — and keeping the exact original
+  text actually matters for correctness: a generalized restatement ("solving a linear equation with
+  variables on both sides") is exactly the right level of detail for the durable, fuzzy-matched answer
+  bank, but used as an *exact* cache key it risks a wrong hit against a different specific problem that
+  merely shares the same underlying concept.
+
+Runs as a fire-and-forget background call after the student's reply has already been sent (same
+pattern as `recordAnswer`/`setCachedAnswer` themselves) — it can never add latency to, or fail, the
+reply itself.
+
 ### Mobile navigation
 
 Most students use this on a phone, so `DashboardShell` is two genuinely different navigation

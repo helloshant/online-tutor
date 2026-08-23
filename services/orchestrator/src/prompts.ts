@@ -166,6 +166,32 @@ Write ONLY in ${responseLanguage}, regardless of what language this prompt is in
 ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
 
+// Used only by questionRewrite.ts, immediately before a chat Q&A pair is
+// written to the shared, cross-student answer bank -- never shown to the
+// student, and never affects the reply they already received (this runs
+// after the reply is sent, in the background). A student's typed question
+// can legitimately be a verbatim copy of something from a copyrighted guide
+// book or workbook (typed out, or pasted on desktop) -- answering it live is
+// fine (the same grounding rules as any other reply already apply), but
+// writing that exact copied text into a table every other student's queries
+// can match against is a different, durable kind of copy. This restates the
+// question in the model's own words -- keeping every fact, number, and the
+// specific thing being asked (none of that is copyrightable on its own, and
+// losing it would break legitimate exact-problem reuse) while dropping any
+// narrative/passage framing the student may have copied along with it (a
+// "read the following passage" style wrapper, decorative word-problem prose,
+// etc.) -- the same paraphrase-not-reproduce principle
+// buildTutorSystemPrompt's rule 6 already applies to answers, just applied
+// to the question side of the pair for the first time here.
+export function buildQuestionRestatementPrompt(): string {
+  return `Restate the student's question in your own words, for storage in a database other students' similar questions will be matched against.
+
+Rules:
+1. Preserve every fact, number, equation, and the specific thing being asked -- these are not what this exists to remove, and losing them would make the stored question useless for finding this exact problem again.
+2. Remove any narrative or passage-style wrapper text the student may have copied from a book alongside the actual question (a "read the following passage and answer" framing, decorative story text around a word problem, an exercise's own numbering or instructions) -- keep only the actual question being asked, in your own phrasing.
+3. Keep it concise -- one to three sentences, no preamble, no explanation, no answer. Output ONLY the restated question, nothing else.`;
+}
+
 // Staff (admin/superadmin) aren't a specific grade's student and never
 // subscribe, so their chat isn't locked to one board/grade/syllabus/medium --
 // this is deliberately the "all privileges" unrestricted mode, mainly for

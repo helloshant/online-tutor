@@ -19,6 +19,7 @@ import { findRelevantChapterChunks } from "./chapterRag.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
+import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
   buildExerciseGenerationPrompt,
   buildStaffSystemPrompt,
@@ -367,13 +368,38 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     if (scope) {
       const validation = validateAnswerForStorage(text);
       if (validation.store) {
-        void recordAnswer(scope, text, validation.status).then((saved) => {
+        // The answer bank is a durable, cross-student-reusable store -- a
+        // student's own question text can legitimately be a verbatim copy
+        // of something from a copyrighted guide book (typed out, or pasted
+        // on desktop), and writing that exact text into a table every other
+        // student's queries get matched against is a different, riskier
+        // kind of copy than answering it live already was. Restate it in
+        // the model's own words first -- see buildQuestionRestatementPrompt
+        // for what that does and doesn't remove. Deliberately fails closed,
+        // not open: a failed restatement skips this write entirely rather
+        // than falling back to the original text, since storing exactly
+        // what this step exists to avoid storing would defeat the point.
+        void (async () => {
+          const restatedQuestion = await restateQuestionForStorage(scope.question);
+          if (!restatedQuestion) {
+            console.error("Skipping answer-bank write -- question restatement failed for this question.");
+            return;
+          }
+          const saved = await recordAnswer({ ...scope, question: restatedQuestion }, text, validation.status);
           if (!saved) console.error("Failed to store this chat answer in the answer bank.");
-        });
+        })();
         // Only cache (i.e. let it be replayed to other students) once it's
         // confident enough to auto-approve -- a pending_review answer stays
         // out of both the cache and the servable side of the answer bank
-        // until an admin confirms it.
+        // until an admin confirms it. Cached under the student's own
+        // original question text, not the restated one written to the
+        // answer bank above -- Redis entries are short-TTL, fast-repeat
+        // lookups rather than a durable cross-student corpus, so the
+        // stricter storage safeguard above doesn't need to apply here, and
+        // keeping the exact original text preserves precise-match accuracy
+        // for a genuine repeat of the same wording (a more generalized
+        // restatement risks a wrong cache hit against a different specific
+        // problem that merely shares the same underlying concept).
         if (validation.status === "auto_approved") {
           void setCachedAnswer(scope, text);
         }
