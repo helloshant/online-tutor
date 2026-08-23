@@ -778,6 +778,24 @@ alone, and neither does the tutor LLM at chat time without something to ground i
   more reliably than the rule's own prose alone — this is the one item from those notes' "few-shot
   examples" checklist entry that was a straightforward, clearly-net-positive addition rather than a
   judgment call, so it was added directly rather than left as a follow-up.
+- **Provenance tracking, prompted by a real constraint: the prescribed textbooks are copyrighted.**
+  `chapter_documents` can't just be a lightly-reworded copy of a publisher's book — the sustainable
+  approach is original, admin-authored notes at this app's own `syllabus_topics` granularity,
+  occasionally accelerated (never replaced) by genuinely open-licensed material (NCERT, DIKSHA/NROER,
+  OpenStax, confirmed-public-domain literary works) that still gets rewritten and reviewed rather than
+  pasted in. `0032_chapter_document_provenance.sql` adds `source_type` (`original` — the default and
+  intended common case — `public_domain`, `cc_licensed`, `ncert_or_diksha`, or `other`), `source_url`,
+  and `source_note` to `chapter_documents`, so *how* any given document came to be is auditable per-row
+  rather than resting on institutional memory. `SourceFields` (`src/app/admin/chapter-notes/
+  source-fields.tsx`) is the shared, collapsed-by-default form fragment wired into all three write
+  surfaces (the single-document form, its edit form, and the bulk JSON import — one provenance claim
+  per *file*, not per chapter, since a single offline authoring pass has one source story); the
+  document list badges anything that isn't `original` and links its `source_url` when present, but
+  deliberately doesn't badge the expected-common case, so the badge only draws attention when there's
+  actually something to look at. None of this is a substitute for actually writing original prose — see
+  `docs/content-authoring-guide.md` for the full policy (the copyright/fair-use framing, a literature-
+  vs-STEM risk split, the authoring workflow, and the specific open sources worth knowing about), which
+  is what this schema exists to make auditable, not a replacement for reading it.
 
 ### Closing the loop on RAG quality: student feedback, coverage, and grounding rollups
 

@@ -9,6 +9,14 @@ import { NewChapterDocumentForm } from "./new-document-form";
 // gets sent to embedding/retrieval, this truncation never touches storage.
 const PREVIEW_CHARS = 220;
 
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  original: "Original",
+  public_domain: "Public domain",
+  cc_licensed: "CC-licensed",
+  ncert_or_diksha: "NCERT/DIKSHA",
+  other: "Other source",
+};
+
 export default async function ChapterNotesPage() {
   await requireAdminPage("chapter_notes");
 
@@ -86,7 +94,10 @@ export default async function ChapterNotesPage() {
       <p className="mt-1 text-sm text-foreground/60">
         Detailed, admin-authored chapter content (e.g. a full English-medium literature chapter
         summary), retrieved by meaning during chat so the tutor can ground its answers in the real
-        text instead of guessing from the chapter title alone.
+        text instead of guessing from the chapter title alone. Prescribed textbooks are copyrighted --
+        write these in your own words rather than reproducing/closely paraphrasing a textbook; see{" "}
+        <code className="rounded bg-brand/10 px-1 py-0.5">docs/content-authoring-guide.md</code> in the
+        repo before authoring content at scale.
       </p>
 
       <section className="mt-6 rounded-xl border border-border bg-surface">
@@ -158,12 +169,40 @@ export default async function ChapterNotesPage() {
             <div key={doc.id} className="rounded-xl border border-border bg-surface p-4 text-sm">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-medium">{doc.title}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium">{doc.title}</p>
+                    {/* "Original" (the default, and intended common case) is
+                        deliberately not badged -- a badge on every single row
+                        for the expected default would just be visual noise;
+                        it only earns attention when there's actually
+                        something to note. */}
+                    {doc.source_type !== "original" && (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        {SOURCE_TYPE_LABELS[doc.source_type] ?? doc.source_type}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-foreground/50">
                     {topic
                       ? `${topic.boards?.name} · ${topic.grades?.name} · ${topic.subjects?.name} · ${topic.medium} · ${topic.chapter} — ${topic.topic}`
                       : "(topic no longer exists)"}
                   </p>
+                  {doc.source_type !== "original" && (doc.source_url || doc.source_note) && (
+                    <p className="mt-1 text-xs text-foreground/50">
+                      {doc.source_url && (
+                        <a
+                          href={doc.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-brand hover:underline"
+                        >
+                          {doc.source_url}
+                        </a>
+                      )}
+                      {doc.source_url && doc.source_note && " — "}
+                      {doc.source_note}
+                    </p>
+                  )}
                 </div>
                 <form action={deleteChapterDocument.bind(null, doc.id)}>
                   <button type="submit" className="text-xs font-medium text-red-600 hover:underline">
@@ -172,7 +211,14 @@ export default async function ChapterNotesPage() {
                 </form>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-foreground/70">{preview}</p>
-              <EditChapterDocumentForm id={doc.id} title={doc.title} content={doc.content} />
+              <EditChapterDocumentForm
+                id={doc.id}
+                title={doc.title}
+                content={doc.content}
+                sourceType={doc.source_type}
+                sourceUrl={doc.source_url}
+                sourceNote={doc.source_note}
+              />
             </div>
           );
         })}

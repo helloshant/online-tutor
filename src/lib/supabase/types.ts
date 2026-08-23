@@ -243,11 +243,21 @@ export type AdminPagePermission = {
 // is never touched from this app -- only the orchestrator's own separate
 // Supabase connection reads/writes it (same as topic_summaries), so it has
 // no entry here.
+// What the author drew on beyond their own understanding of the syllabus
+// topic when writing this document -- "original" (the default, and the
+// intended common case) means no external source at all; the rest exist to
+// make that claim auditable when it isn't -- see
+// 0032_chapter_document_provenance.sql and docs/content-authoring-guide.md.
+export type ChapterDocumentSourceType = "original" | "public_domain" | "cc_licensed" | "ncert_or_diksha" | "other";
+
 export type ChapterDocument = {
   id: string;
   topic_id: string;
   title: string;
   content: string;
+  source_type: ChapterDocumentSourceType;
+  source_url: string | null;
+  source_note: string | null;
   created_by: string | null;
   created_at: string;
 };

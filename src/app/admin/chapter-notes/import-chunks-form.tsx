@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { importChapterChunksJson, type ImportChapterChunksState } from "./actions";
+import { SourceFields } from "./source-fields";
 import type { Medium } from "@/lib/supabase/types";
 
 const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
@@ -178,6 +179,10 @@ export function ImportChunksForm({
           required
           className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-xs file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs"
         />
+        {/* Applies to every chapter this file creates/updates -- a single
+            offline authoring pass over one file has one provenance story,
+            not one per chapter. */}
+        <SourceFields />
         <button
           disabled={pending}
           className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"

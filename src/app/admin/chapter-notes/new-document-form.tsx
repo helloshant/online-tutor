@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { saveChapterDocument, type SaveChapterDocumentState } from "./actions";
+import { SourceFields } from "./source-fields";
 import type { Medium } from "@/lib/supabase/types";
 
 const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
@@ -167,6 +168,7 @@ export function NewChapterDocumentForm({
           required
           className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
         />
+        <SourceFields />
         <button
           disabled={pending}
           className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"

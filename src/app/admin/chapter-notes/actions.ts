@@ -4,7 +4,33 @@ import { revalidatePath } from "next/cache";
 import { requireAdminPage } from "@/lib/auth";
 import { embedChapterDocument, importChapterChunks } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Medium } from "@/lib/supabase/types";
+import type { ChapterDocumentSourceType, Medium } from "@/lib/supabase/types";
+
+const SOURCE_TYPES: ChapterDocumentSourceType[] = [
+  "original",
+  "public_domain",
+  "cc_licensed",
+  "ncert_or_diksha",
+  "other",
+];
+
+// Shared by both save paths below -- falls back to "original" on anything
+// missing/invalid rather than rejecting the save outright, since an author
+// who simply doesn't touch this field (the common case) should still get a
+// clean, meaningful default rather than a form error.
+function readSourceFields(formData: FormData): {
+  sourceType: ChapterDocumentSourceType;
+  sourceUrl: string | null;
+  sourceNote: string | null;
+} {
+  const rawType = formData.get("sourceType") as string | null;
+  const sourceType = SOURCE_TYPES.includes(rawType as ChapterDocumentSourceType)
+    ? (rawType as ChapterDocumentSourceType)
+    : "original";
+  const sourceUrl = ((formData.get("sourceUrl") as string | null) ?? "").trim() || null;
+  const sourceNote = ((formData.get("sourceNote") as string | null) ?? "").trim() || null;
+  return { sourceType, sourceUrl, sourceNote };
+}
 
 export interface SaveChapterDocumentState {
   error?: string;
@@ -28,6 +54,7 @@ export async function saveChapterDocument(
   const content = ((formData.get("content") as string | null) ?? "").trim();
   if (!title) return { error: "Title is required." };
   if (!content) return { error: "Content is required." };
+  const { sourceType, sourceUrl, sourceNote } = readSourceFields(formData);
 
   let documentId: string;
   let topicId: string;
@@ -49,7 +76,7 @@ export async function saveChapterDocument(
 
     const { error: updateError } = await supabase
       .from("chapter_documents")
-      .update({ title, content })
+      .update({ title, content, source_type: sourceType, source_url: sourceUrl, source_note: sourceNote })
       .eq("id", documentId);
     if (updateError) {
       console.error("Failed to update chapter document:", updateError);
@@ -61,7 +88,15 @@ export async function saveChapterDocument(
 
     const { data: created, error: insertError } = await supabase
       .from("chapter_documents")
-      .insert({ topic_id: topicId, title, content, created_by: session.user.id })
+      .insert({
+        topic_id: topicId,
+        title,
+        content,
+        source_type: sourceType,
+        source_url: sourceUrl,
+        source_note: sourceNote,
+        created_by: session.user.id,
+      })
       .select("id")
       .single();
     if (insertError || !created) {
@@ -219,6 +254,10 @@ export async function importChapterChunksJson(
     return { error: "Board, grade, subject, medium, and book are all required." };
   }
   const medium = rawMedium as Medium;
+  // One provenance claim for the whole book -- a JSON file prepared offline
+  // is, by construction, a single authoring pass over a single source (or
+  // none), not a mix per chapter.
+  const { sourceType, sourceUrl, sourceNote } = readSourceFields(formData);
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -318,7 +357,7 @@ export async function importChapterChunksJson(
       documentId = existingDoc.id;
       const { error: updateError } = await supabase
         .from("chapter_documents")
-        .update({ content })
+        .update({ content, source_type: sourceType, source_url: sourceUrl, source_note: sourceNote })
         .eq("id", documentId);
       if (updateError) {
         console.error(`Failed to update chapter document "${title}":`, updateError);
@@ -328,7 +367,15 @@ export async function importChapterChunksJson(
     } else {
       const { data: created, error: insertError } = await supabase
         .from("chapter_documents")
-        .insert({ topic_id: topicId, title, content, created_by: session.user.id })
+        .insert({
+          topic_id: topicId,
+          title,
+          content,
+          source_type: sourceType,
+          source_url: sourceUrl,
+          source_note: sourceNote,
+          created_by: session.user.id,
+        })
         .select("id")
         .single();
       if (insertError || !created) {

@@ -2,6 +2,8 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { saveChapterDocument, type SaveChapterDocumentState } from "./actions";
+import { SourceFields } from "./source-fields";
+import type { ChapterDocumentSourceType } from "@/lib/supabase/types";
 
 const initialState: SaveChapterDocumentState = {};
 
@@ -12,10 +14,16 @@ export function EditChapterDocumentForm({
   id,
   title,
   content,
+  sourceType,
+  sourceUrl,
+  sourceNote,
 }: {
   id: string;
   title: string;
   content: string;
+  sourceType: ChapterDocumentSourceType;
+  sourceUrl: string | null;
+  sourceNote: string | null;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [state, formAction, pending] = useActionState(saveChapterDocument, initialState);
@@ -47,6 +55,7 @@ export function EditChapterDocumentForm({
           required
           className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
         />
+        <SourceFields defaultSourceType={sourceType} defaultSourceUrl={sourceUrl} defaultSourceNote={sourceNote} />
         <button
           type="submit"
           disabled={pending}
