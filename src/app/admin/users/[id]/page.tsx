@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmail,
   setAccountExpired,
   setUserRole,
+  updateSubscriptionBoardGrade,
   updateSubscriptionSubjects,
   updateUserProfile,
 } from "../../actions";
@@ -31,7 +32,7 @@ export default async function AdminUserDetailPage({
   const { id } = await params;
   const admin = createAdminClient();
 
-  const [{ data: authUser }, { data: profile }, { data: subscriptions }, { data: identityRows }] =
+  const [{ data: authUser }, { data: profile }, { data: subscriptions }, { data: identityRows }, { data: boards }, { data: grades }] =
     await Promise.all([
       admin.auth.admin.getUserById(id),
       admin.from("profiles").select("*").eq("id", id).single(),
@@ -44,6 +45,11 @@ export default async function AdminUserDetailPage({
       // returned user's `identities` array -- query the real table via RPC
       // instead (see 0014_email_identity_check.sql).
       admin.rpc("get_users_with_email_identity", { p_user_ids: [id] }),
+      // Flat, board-agnostic lists (same ones onboarding itself offers) --
+      // fed to BoardGradeEditor below so it can offer every board/grade,
+      // not just the subscription's current one.
+      admin.from("boards").select("id, name").order("name"),
+      admin.from("grades").select("id, name").order("level"),
     ]);
 
   if (!authUser?.user) notFound();
@@ -190,7 +196,7 @@ export default async function AdminUserDetailPage({
 
       <div className="mt-3 space-y-3">
         {(subscriptions ?? []).map((sub) => (
-          <SubscriptionCard key={sub.id} sub={sub} userId={id} />
+          <SubscriptionCard key={sub.id} sub={sub} userId={id} boards={boards ?? []} grades={grades ?? []} />
         ))}
 
         {(subscriptions ?? []).length === 0 && (
@@ -240,7 +246,17 @@ type SubscriptionRow = {
   subscription_subjects: { subjects: { id: string; name: string } | null }[];
 };
 
-async function SubscriptionCard({ sub, userId }: { sub: unknown; userId: string }) {
+async function SubscriptionCard({
+  sub,
+  userId,
+  boards,
+  grades,
+}: {
+  sub: unknown;
+  userId: string;
+  boards: { id: string; name: string }[];
+  grades: { id: string; name: string }[];
+}) {
   const row = sub as SubscriptionRow;
   const currentSubjectIds = new Set(
     row.subscription_subjects.map((s) => s.subjects?.id).filter((v): v is string => Boolean(v))
@@ -325,15 +341,103 @@ async function SubscriptionCard({ sub, userId }: { sub: unknown; userId: string 
       </dl>
 
       {isEditable && (
-        <SubjectEditor
-          subscriptionId={row.id}
-          userId={userId}
-          boardId={row.board_id}
-          gradeId={row.grade_id}
-          currentSubjectIds={currentSubjectIds}
-        />
+        <>
+          <BoardGradeEditor
+            subscriptionId={row.id}
+            userId={userId}
+            boardId={row.board_id}
+            gradeId={row.grade_id}
+            boards={boards}
+            grades={grades}
+          />
+          <SubjectEditor
+            subscriptionId={row.id}
+            userId={userId}
+            boardId={row.board_id}
+            gradeId={row.grade_id}
+            currentSubjectIds={currentSubjectIds}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+// Lets an admin/superadmin correct a student's board and grade after the
+// fact (wrong selection at onboarding, or a genuine grade change mid-year)
+// -- same collapsed-<details> pattern as SubjectEditor below. Offers every
+// board/grade (boards and grades are flat, board-agnostic lists -- see
+// onboarding's own wizard), not just ones already in use for this
+// student. Subjects that no longer validate for the newly-picked
+// board/grade are re-checked and dropped server-side in
+// updateSubscriptionBoardGrade, same as SubjectEditor's own submission
+// re-validates against board_grade_subjects.
+function BoardGradeEditor({
+  subscriptionId,
+  userId,
+  boardId,
+  gradeId,
+  boards,
+  grades,
+}: {
+  subscriptionId: string;
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  boards: { id: string; name: string }[];
+  grades: { id: string; name: string }[];
+}) {
+  return (
+    <details className="mt-4 rounded-lg border border-border">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/60 hover:bg-brand/5">
+        Edit board / grade
+      </summary>
+      <form
+        action={updateSubscriptionBoardGrade.bind(null, subscriptionId, userId)}
+        className="space-y-3 border-t border-border p-3"
+      >
+        <div className="flex flex-wrap gap-3">
+          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+            Board
+            <select
+              name="boardId"
+              defaultValue={boardId}
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            >
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+            Grade
+            <select
+              name="gradeId"
+              defaultValue={gradeId}
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            >
+              {grades.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
+            Save board / grade
+          </button>
+          <p className="text-xs text-foreground/40">
+            Subjects not offered under the new board/grade are dropped automatically. If none of the
+            current subjects carry over, the change is blocked -- adjust subjects for the target
+            board/grade separately first.
+          </p>
+        </div>
+      </form>
+    </details>
   );
 }
 

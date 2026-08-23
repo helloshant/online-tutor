@@ -140,6 +140,87 @@ export async function updateSubscriptionSubjects(subscriptionId: string, userId:
   revalidatePath(`/admin/users/${userId}`);
 }
 
+// Lets an admin/superadmin correct a student's board and grade after the
+// fact -- e.g. onboarding was completed with the wrong grade selected, or
+// the student moved up a grade mid-year. Same eligibility and "don't trust
+// the UI alone" posture as updateSubscriptionSubjects above: only offered
+// (and re-checked here) for a subscription that's still 'active' or
+// 'pending_payment'.
+export async function updateSubscriptionBoardGrade(subscriptionId: string, userId: string, formData: FormData) {
+  await requireAdminPage("users");
+  const supabase = await createClient();
+
+  const boardId = String(formData.get("boardId") ?? "");
+  const gradeId = String(formData.get("gradeId") ?? "");
+  if (!boardId || !gradeId) return;
+
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("id, status")
+    .eq("id", subscriptionId)
+    .in("status", ["active", "pending_payment"])
+    .maybeSingle();
+  if (!subscription) return;
+
+  // A subject valid under the old board/grade isn't guaranteed to still be
+  // offered under the new one (e.g. a subject that doesn't exist at the
+  // target grade) -- re-validate the subscription's currently-selected
+  // subjects against board_grade_subjects for the *new* board/grade, same
+  // guard updateSubscriptionSubjects applies when subjects themselves are
+  // edited directly.
+  const { data: currentSubjectRows } = await supabase
+    .from("subscription_subjects")
+    .select("subject_id")
+    .eq("subscription_id", subscriptionId);
+  const currentSubjectIds = (currentSubjectRows ?? []).map((r) => r.subject_id);
+
+  const { data: validOfferings } = await supabase
+    .from("board_grade_subjects")
+    .select("subject_id")
+    .eq("board_id", boardId)
+    .eq("grade_id", gradeId)
+    .in("subject_id", currentSubjectIds);
+  const validSubjectIds = (validOfferings ?? []).map((o) => o.subject_id);
+
+  // Same floor updateSubscriptionSubjects enforces: a subscription can't be
+  // left with zero subjects. If none of the currently-selected subjects
+  // are offered under the target board/grade, block the whole change --
+  // silently no-op, same as that action does for an empty selection --
+  // rather than landing the subscription in a board/grade with nothing it
+  // can actually be used for. The admin should pick a subject list that
+  // has at least some overlap, or edit subjects on the target board/grade
+  // in a separate step first.
+  if (validSubjectIds.length === 0) return;
+
+  await supabase.from("subscriptions").update({ board_id: boardId, grade_id: gradeId }).eq("id", subscriptionId);
+
+  if (validSubjectIds.length !== currentSubjectIds.length) {
+    await supabase.from("subscription_subjects").delete().eq("subscription_id", subscriptionId);
+    await supabase
+      .from("subscription_subjects")
+      .insert(validSubjectIds.map((subjectId) => ({ subscription_id: subscriptionId, subject_id: subjectId })));
+  }
+
+  // Same coupon-redeemed guard as updateSubscriptionSubjects: only
+  // recompute amount_paise off the (possibly now-smaller) subject count
+  // when no coupon has already been redeemed against this subscription.
+  const { data: redeemedCoupon } = await supabase
+    .from("coupon_codes")
+    .select("id")
+    .eq("subscription_id", subscriptionId)
+    .not("used_by", "is", null)
+    .maybeSingle();
+  if (!redeemedCoupon) {
+    await supabase
+      .from("subscriptions")
+      .update({ amount_paise: amountForSubjects(validSubjectIds.length) })
+      .eq("id", subscriptionId);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath(`/admin/users/${userId}`);
+}
+
 export async function createUser(formData: FormData) {
   const session = await requireAdminPage("users");
   const fullName = String(formData.get("fullName") ?? "").trim();
