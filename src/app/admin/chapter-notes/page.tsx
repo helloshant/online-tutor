@@ -99,7 +99,16 @@ export default async function ChapterNotesPage() {
   const incompleteGroups = Array.from(coverageGroups.values())
     .filter((g) => g.missingTopics.length > 0)
     .sort((a, b) => b.missingTopics.length - a.missingTopics.length);
-  const fullyCoveredCount = coverageGroups.size - incompleteGroups.length;
+  // The complement of incompleteGroups -- named here (not just counted) so
+  // an admin checking on one specific segment (e.g. "is CBSE Grade 10
+  // Hindi actually done?") can confirm it by name instead of only seeing it
+  // folded into the "N other segments fully covered" count below, with no
+  // way to tell which N those actually are without querying the database
+  // directly.
+  const fullyCoveredGroups = Array.from(coverageGroups.values())
+    .filter((g) => g.missingTopics.length === 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const fullyCoveredCount = fullyCoveredGroups.length;
 
   return (
     <div>
@@ -148,6 +157,20 @@ export default async function ChapterNotesPage() {
               </details>
             ))}
           </div>
+        )}
+        {fullyCoveredGroups.length > 0 && (
+          <details className="border-t border-border px-4 py-3">
+            <summary className="cursor-pointer text-sm text-foreground/60">
+              Show fully covered segments ({fullyCoveredGroups.length})
+            </summary>
+            <ul className="mt-2 space-y-1 pl-4 text-xs text-foreground/60">
+              {fullyCoveredGroups.map((group) => (
+                <li key={group.key}>
+                  {group.label} — {group.totalTopics}/{group.totalTopics} topics ingested
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </section>
 
