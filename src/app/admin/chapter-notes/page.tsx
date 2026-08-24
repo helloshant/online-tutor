@@ -27,7 +27,7 @@ export default async function ChapterNotesPage() {
   // session-scoped client would silently see zero rows.
   const supabase = createAdminClient();
 
-  const [{ data: boards }, { data: grades }, { data: subjects }, { data: documents }, { data: allTopics }, { data: ingestedTopicRows }] =
+  const [{ data: boards }, { data: grades }, { data: subjects }, { data: documents }, { data: allTopics }, { data: ingestedTopicRows }, { data: offeringRows }] =
     await Promise.all([
       supabase.from("boards").select("*").order("name"),
       supabase.from("grades").select("*").order("level"),
@@ -51,12 +51,22 @@ export default async function ChapterNotesPage() {
       // row -- a plain existence check, not the documents themselves (which
       // is what `documents` above is already for).
       supabase.from("chapter_documents").select("topic_id"),
+      // Which board/grade/subject combos actually offered to students --
+      // same table onboarding itself checks. syllabus_topics can (and does,
+      // in practice) carry rows for a board/grade/subject that isn't
+      // actually offered any more (e.g. a leftover from before a subject
+      // was split/merged) -- without this filter, the coverage section
+      // below reports "gaps" for combinations no student could ever
+      // actually reach, which reads as inventing subjects that don't
+      // exist in the Catalog page's own board/grade/subject offerings.
+      supabase.from("board_grade_subjects").select("board_id, grade_id, subject_id"),
     ]);
 
   const boardNameById = new Map((boards ?? []).map((b) => [b.id, b.name]));
   const gradeNameById = new Map((grades ?? []).map((g) => [g.id, g.name]));
   const subjectNameById = new Map((subjects ?? []).map((s) => [s.id, s.name]));
   const ingestedTopicIds = new Set((ingestedTopicRows ?? []).map((r) => r.topic_id));
+  const offeredCombos = new Set((offeringRows ?? []).map((o) => `${o.board_id}|${o.grade_id}|${o.subject_id}`));
 
   // Grouped by board/grade/subject/medium -- the same scope a student's
   // syllabus panel is itself keyed on -- so an admin sees "which of my
@@ -72,6 +82,9 @@ export default async function ChapterNotesPage() {
   };
   const coverageGroups = new Map<string, CoverageGroup>();
   for (const t of allTopics ?? []) {
+    // Skip syllabus_topics rows for a board/grade/subject combo that isn't
+    // currently offered -- see offeringRows above.
+    if (!offeredCombos.has(`${t.board_id}|${t.grade_id}|${t.subject_id}`)) continue;
     const key = `${t.board_id}|${t.grade_id}|${t.subject_id}|${t.medium}`;
     const group = coverageGroups.get(key) ?? {
       key,
