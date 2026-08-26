@@ -324,7 +324,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
           // plain midpoint -- there's no clear direction to slide toward.
           const fromBusy = busyVertices.has(s.from);
           const toBusy = busyVertices.has(s.to);
-          const t = fromBusy && !toBusy ? 0.7 : toBusy && !fromBusy ? 0.3 : 0.5;
+          const t = fromBusy && !toBusy ? 0.6 : toBusy && !fromBusy ? 0.4 : 0.5;
           const midX = x1 + (x2 - x1) * t;
           const midY = y1 + (y2 - y1) * t;
           const dx = x2 - x1;
@@ -339,8 +339,24 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
             px = -px;
             py = -py;
           }
-          labelPos = { x: midX + px * SEGMENT_LABEL_OFFSET, y: midY + py * SEGMENT_LABEL_OFFSET };
-          occupiedBoxes.push(textBox(labelPos.x, labelPos.y, s.label, 10, "middle"));
+          // Collision-checked against occupiedBoxes (every point label,
+          // always; any earlier segment label) by trying a few
+          // increasing offset distances along the same perpendicular
+          // direction -- not just the closest one. A real bug caught
+          // directly from a reported screenshot: sliding the anchor
+          // toward the segment's non-busy end (above) to clear a crowded
+          // vertex can just as easily slide it onto to the point label at
+          // THAT end instead ("60 - h" landing on top of "D") -- the
+          // fixed single offset here never had a way to notice or
+          // correct for that, only the angle side was ever collision-
+          // checked before this.
+          const candidates = [SEGMENT_LABEL_OFFSET, 18, 26, 36].map((offset) => ({
+            x: midX + px * offset,
+            y: midY + py * offset,
+          }));
+          const picked = pickLeastOverlapping(candidates, (c) => textBox(c.x, c.y, s.label!, 10, "middle"), occupiedBoxes);
+          labelPos = picked.candidate;
+          occupiedBoxes.push(picked.box);
         }
         return (
           <g key={i}>
