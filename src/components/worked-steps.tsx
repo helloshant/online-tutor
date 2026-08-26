@@ -55,21 +55,21 @@ export function WorkedSteps({ text }: { text: string }) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {segments.map((segment, i) =>
         segment.kind === "text" ? (
           // Leading/trailing prose (a brief intro, the closing summary/
           // final answer) -- only rendered when non-blank, since a model
           // that opens straight into [STEP: ...] leaves nothing here.
           segment.content.trim() && (
-            <p key={i} className="whitespace-pre-wrap">
+            <p key={i} className="whitespace-pre-wrap leading-snug">
               <DiagramText text={segment.content} />
             </p>
           )
         ) : (
-          <div key={i} className="rounded-lg border border-border bg-background/60 p-3">
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-brand">
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[10px]">
+          <div key={i} className="rounded-lg border border-border bg-background/60 px-2.5 py-2">
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-brand">
+              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[9px]">
                 {segment.number}
               </span>
               {/* MathText, not the full DiagramText/CitationText stack --
@@ -80,7 +80,7 @@ export function WorkedSteps({ text }: { text: string }) {
                   text otherwise -- \( \), $ $ etc. showing up literally. */}
               <MathText text={segment.title} />
             </p>
-            <div className="whitespace-pre-wrap text-sm">
+            <div className="whitespace-pre-wrap text-sm leading-snug">
               <DiagramText text={segment.content} />
             </div>
           </div>

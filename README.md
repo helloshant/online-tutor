@@ -1420,6 +1420,15 @@ isn't a general math-notation parser, just that one common pattern. Unicode supe
 present in imported text (`kᵃ`, `k⁰`, ...) render fine on their own and simply don't match either
 pass.
 
+`MathText` also renders basic markdown emphasis — `**bold**`, `*italic*`/`_italic_` — as `<strong>`/
+`<em>`, on the same "everything left over after LaTeX" text: observed directly in real chat output
+("the **Pythagoras theorem**") showing its own literal asterisks before this existed, since nothing
+in the stack interpreted markdown at all. Not a general markdown parser (no links, headings, lists,
+code fences — none of which show up in a short chat reply) — just these two, checked bold-before-
+italic in one pass so `**x**` is never misread as two adjacent `*x*` italics, with each match's
+inner text still run through the caret-exponent pass so e.g. a bolded exponent expression keeps
+working.
+
 ### Image / screenshot questions (vision, not OCR)
 
 Students and staff can attach a screenshot or photo to a chat message — e.g. a textbook question or

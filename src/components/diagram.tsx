@@ -73,16 +73,16 @@ function sharedScale(minX: number, maxX: number, minY: number, maxY: number) {
 
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <figure className="my-1 max-w-full">
+    <figure className="my-0.5 max-w-full">
       <svg
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        className="h-auto w-full max-w-sm rounded-lg border border-border bg-background/40"
+        className="h-auto w-full max-w-[260px] rounded-lg border border-border bg-background/40"
         role="img"
         aria-label={title ?? "Diagram"}
       >
         {children}
       </svg>
-      {title && <figcaption className="mt-1 text-center text-xs text-foreground/50">{title}</figcaption>}
+      {title && <figcaption className="mt-0.5 text-center text-xs text-foreground/50">{title}</figcaption>}
     </figure>
   );
 }

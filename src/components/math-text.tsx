@@ -8,7 +8,11 @@ import "katex/dist/katex.min.css";
 // that's how an LLM naturally writes math. Rendered as plain text it shows
 // up as literal backslashes and braces, which is what this exists to fix:
 // split on the four common delimiter styles and render each math segment
-// with KaTeX, leaving everything else as plain text.
+// with KaTeX. Everything else -- not just plain text -- goes through
+// renderEmphasis below (markdown **bold**/*italic*) and, within that,
+// renderCaretExponents (plain-text pseudo-math like x^-5), so a run of
+// non-LaTeX text still gets its own formatting rather than showing raw
+// markdown/caret syntax literally.
 const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)/g;
 
 // Bulk-imported textbook content (e.g. Ganit Prakash, see the Answer Bank's
@@ -68,6 +72,49 @@ function renderCaretExponents(text: string, nextKey: () => number): React.ReactN
   return parts;
 }
 
+// Basic markdown emphasis -- the model routinely writes **bold** and
+// *italic*/_italic_ (standard for how LLMs are trained to write emphasis),
+// which rendered as plain text just shows the literal asterisks/
+// underscores instead of the emphasis they're meant to convey (observed in
+// real chat output: "the **Pythagoras theorem**" showing its own asterisks).
+// Not a general markdown parser -- no links, headings, code fences, lists,
+// none of which show up in a short chat reply the way emphasis does -- just
+// these two. Bold is checked before italic in the same pass (one combined
+// alternation) so `**x**` is never first misread as two adjacent `*x*`
+// italics. Each match's own inner text still goes through
+// renderCaretExponents, so e.g. a bolded exponent expression keeps working.
+const EMPHASIS_PATTERN = /\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|_([^_\n]+?)_/g;
+
+function renderEmphasis(text: string, nextKey: () => number): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(EMPHASIS_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      parts.push(...renderCaretExponents(text.slice(lastIndex, index), nextKey));
+    }
+
+    const bold = match[1];
+    const italic = match[2] ?? match[3];
+    parts.push(
+      bold !== undefined ? (
+        <strong key={nextKey()}>{renderCaretExponents(bold, nextKey)}</strong>
+      ) : (
+        <em key={nextKey()}>{renderCaretExponents(italic ?? "", nextKey)}</em>
+      )
+    );
+
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(...renderCaretExponents(text.slice(lastIndex), nextKey));
+  }
+
+  return parts;
+}
+
 export function MathText({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
@@ -80,7 +127,7 @@ export function MathText({ text }: { text: string }) {
   for (const match of text.matchAll(MATH_PATTERN)) {
     const index = match.index ?? 0;
     if (index > lastIndex) {
-      parts.push(...renderCaretExponents(text.slice(lastIndex, index), nextKey));
+      parts.push(...renderEmphasis(text.slice(lastIndex, index), nextKey));
     }
 
     const displayLatex = match[1] ?? match[2];
@@ -112,7 +159,7 @@ export function MathText({ text }: { text: string }) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(...renderCaretExponents(text.slice(lastIndex), nextKey));
+    parts.push(...renderEmphasis(text.slice(lastIndex), nextKey));
   }
 
   return <>{parts}</>;
