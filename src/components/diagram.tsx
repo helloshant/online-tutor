@@ -26,10 +26,16 @@ function niceStep(range: number, maxTicks = 7): number {
 }
 
 // Maps a logical (min..max) range onto (marginStart..viewSize - marginEnd)
-// at the given `scale` -- ordinarily the same value on both axes (via
-// computeScales below), so shapes don't get stretched and a right angle
-// still looks like one; only diverges per-axis in computeScales' own
-// degenerate-aspect-ratio fallback.
+// at the given `scale` -- always the SAME value on both axes (see
+// sharedScale below), so shapes don't get stretched and a right angle
+// still looks like one. Any degenerate-aspect-ratio correction happens
+// earlier, on the logical coordinates themselves (see
+// proportionalPoints) -- never here, since scaling x and y differently
+// would corrupt every angle computed from these already-scaled pixel
+// positions (an actual regression hit once: it separated two overlapping
+// point labels, but also visually collapsed a real 30°/60° angle pair
+// down to two unreadable slivers, since dir() below measures direction in
+// this function's *output* space).
 function makeScale(min: number, max: number, viewSize: number, scale: number, flip: boolean) {
   const usable = viewSize - 2 * MARGIN;
   const center = (min + max) / 2;
@@ -65,34 +71,57 @@ function boundingBox(xs: number[], ys: number[], includeOrigin: boolean) {
   return { minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY };
 }
 
-// Uniform scaling (one factor for both axes) is what keeps a right angle
-// looking like one -- but it also means the axis with the *smaller* range
-// gets tied to whatever scale the *larger*-range axis needs to fit its own
-// box. Most of the time that's fine (the model's coordinates are roughly
-// proportional to the real problem). But observed directly in real output:
-// a two-triangle elevation/depression diagram where the model reused the
-// prompt's own small illustrative helper-point offset (a handful of units)
-// while the problem's real vertical distances ran into the tens of units --
-// the shared scale ends up bound entirely by the tall axis, and the short
-// axis collapses to a sliver a few pixels wide, overlapping point labels
-// (rendered as what looked like one label "OH") and making the whole shape
-// an unreadable needle.
-//
-// Capped independent scaling: below `maxSkew`, behaves identically to a
-// single shared scale (right angles stay accurate, the common case is
-// untouched). Only past that ratio does the short axis get "zoomed in"
-// independently of the long one, capped so it never exceeds `maxSkew` times
-// the long axis's own scale -- a diagram that's still somewhat skewed reads
-// far better than one collapsed to a hairline, and this only ever engages
-// for a genuinely degenerate aspect ratio, not an ordinary elongated shape.
-function computeScales(minX: number, maxX: number, minY: number, maxY: number) {
+function sharedScale(minX: number, maxX: number, minY: number, maxY: number) {
   const usableW = VIEW_WIDTH - 2 * MARGIN;
   const usableH = VIEW_HEIGHT - 2 * MARGIN;
-  const rawScaleX = usableW / (maxX - minX);
-  const rawScaleY = usableH / (maxY - minY);
-  const uniform = Math.min(rawScaleX, rawScaleY);
-  const cap = uniform * 4;
-  return { scaleX: Math.min(rawScaleX, cap), scaleY: Math.min(rawScaleY, cap) };
+  return Math.min(usableW / (maxX - minX), usableH / (maxY - minY));
+}
+
+// The model's coordinates are logical units it's told not to worry about
+// the precision of -- and it routinely reuses the prompt's own small
+// illustrative helper-point offsets even when the problem's real distances
+// are much larger on the other axis (observed directly: a building/tower
+// depression diagram with a tiny horizontal offset next to vertical
+// distances in the tens of units). Uniform scaling then ties the short
+// axis's scale to whatever the long axis needs, collapsing it to a sliver
+// a few pixels wide -- overlapping point labels, and (tried once, reverted)
+// NOT safely fixable by scaling x/y differently at the pixel-mapping step,
+// since every angle arc below is computed from direction vectors in that
+// same pixel space and a non-uniform scale visibly distorts them.
+//
+// Fixed further upstream instead: widen the degenerate axis's LOGICAL
+// spread before any scaling happens, so the single shared scale above
+// still applies uniformly afterward -- everything downstream (segments,
+// angle arcs, right-angle boxes) stays exactly as geometrically consistent
+// as it was before this ever ran. This does mean an arc's drawn angle is
+// only an approximation of the real one once it kicks in (same as the
+// segment lengths already are -- the model's coordinates were never exact
+// to begin with, and the actual value is always given via the segment/
+// angle's own "label" text, never read off the drawing) -- a fair trade
+// for a diagram that's actually legible instead of a collapsed sliver.
+// Below `maxSkew`, this is a complete no-op (the common case, already
+// reasonably proportioned, is untouched).
+function proportionalPoints<P extends { x: number; y: number }>(points: P[]): P[] {
+  if (points.length < 2) return points;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const xRange = maxX - minX;
+  const yRange = maxY - minY;
+  if (xRange <= 0 || yRange <= 0) return points;
+  const maxSkew = 4;
+  if (Math.max(xRange, yRange) / Math.min(xRange, yRange) <= maxSkew) return points;
+  if (xRange < yRange) {
+    const factor = yRange / maxSkew / xRange;
+    const centerX = (minX + maxX) / 2;
+    return points.map((p) => ({ ...p, x: centerX + (p.x - centerX) * factor }));
+  }
+  const factor = xRange / maxSkew / yRange;
+  const centerY = (minY + maxY) / 2;
+  return points.map((p) => ({ ...p, y: centerY + (p.y - centerY) * factor }));
 }
 
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
@@ -121,24 +150,25 @@ function DiagramFrame({ title, children }: { title?: string; children: React.Rea
 }
 
 function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
-  const xs = spec.points.map((p) => p.x);
-  const ys = spec.points.map((p) => p.y);
+  const points = proportionalPoints(spec.points);
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
   const { minX, maxX, minY, maxY } = boundingBox(xs, ys, false);
-  const { scaleX, scaleY } = computeScales(minX, maxX, minY, maxY);
-  const sx = makeScale(minX, maxX, VIEW_WIDTH, scaleX, false);
+  const scale = sharedScale(minX, maxX, minY, maxY);
+  const sx = makeScale(minX, maxX, VIEW_WIDTH, scale, false);
   // SVG y grows downward -- flip so a larger logical y renders higher, the
   // way a student expects "up" to read on paper.
-  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scaleY, true);
+  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scale, true);
 
-  const byLabel = new Map(spec.points.map((p) => [p.label, p]));
+  const byLabel = new Map(points.map((p) => [p.label, p]));
   const ANGLE_RADIUS = 16;
   // Rough "middle of the shape" in already-scaled SVG space -- just the
   // average of every point, not a true polygon centroid, but good enough
   // to reliably decide which side of a segment is "outward" for placing
   // that segment's length label clear of the shape's interior/fill.
   const centroid = {
-    x: spec.points.reduce((sum, p) => sum + sx(p.x), 0) / spec.points.length,
-    y: spec.points.reduce((sum, p) => sum + sy(p.y), 0) / spec.points.length,
+    x: points.reduce((sum, p) => sum + sx(p.x), 0) / points.length,
+    y: points.reduce((sum, p) => sum + sy(p.y), 0) / points.length,
   };
   const SEGMENT_LABEL_OFFSET = 12;
   // Mutated during the angles .map() below, in iteration order -- same
@@ -261,7 +291,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
           </g>
         );
       })}
-      {spec.points.map((p) => (
+      {points.map((p) => (
         <g key={p.label}>
           <circle cx={sx(p.x)} cy={sy(p.y)} r={2.5} style={{ fill: "var(--foreground)" }} />
           <text x={sx(p.x) + 6} y={sy(p.y) - 6} fontSize={11} style={{ fill: "var(--foreground)" }}>
@@ -278,9 +308,9 @@ function GraphDiagram({ spec }: { spec: GraphSpec }) {
   const xs = allPoints.map((p) => p.x);
   const ys = allPoints.map((p) => p.y);
   const { minX, maxX, minY, maxY } = boundingBox(xs, ys, true);
-  const { scaleX, scaleY } = computeScales(minX, maxX, minY, maxY);
-  const sx = makeScale(minX, maxX, VIEW_WIDTH, scaleX, false);
-  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scaleY, true);
+  const scale = sharedScale(minX, maxX, minY, maxY);
+  const sx = makeScale(minX, maxX, VIEW_WIDTH, scale, false);
+  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scale, true);
 
   const stepX = niceStep(maxX - minX);
   const stepY = niceStep(maxY - minY);
