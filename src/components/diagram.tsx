@@ -237,7 +237,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // concentric arcs instead.
         const occurrence = angleOccurrenceAtVertex.get(a.at) ?? 0;
         angleOccurrenceAtVertex.set(a.at, occurrence + 1);
-        const radius = ANGLE_RADIUS + occurrence * 9;
+        const radius = ANGLE_RADIUS + occurrence * 11;
         const atX = sx(at.x);
         const atY = sy(at.y);
         const dir = (px: number, py: number) => {
@@ -329,9 +329,18 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // traces the actual (non-reflex) angle between the two rays.
         const cross = d1.x * d2.y - d1.y * d2.x;
         const sweep = cross > 0 ? 1 : 0;
+        // Grows faster with occurrence than the arc radius itself
+        // (radius+12, +10 more per repeat) -- observed directly: two
+        // shared-vertex angles whose "to" rays are close together (as an
+        // elevation/depression pair usually is) have nearly the same
+        // bisector direction, so radial distance is the only thing that
+        // can keep their labels apart; matching the arcs' own tighter
+        // stagger left both labels, and a nearby point label, crowded
+        // into the same few pixels.
+        const labelDistance = radius + 12 + occurrence * 10;
         const labelPos = {
-          x: atX + (d1.x + d2.x) * (radius + 10),
-          y: atY + (d1.y + d2.y) * (radius + 10),
+          x: atX + (d1.x + d2.x) * labelDistance,
+          y: atY + (d1.y + d2.y) * labelDistance,
         };
         return (
           <g key={i}>
