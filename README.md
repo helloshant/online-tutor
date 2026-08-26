@@ -1447,6 +1447,20 @@ for this pass. Same plain-text storage story as worked-example steps above: a `[
 just more text inside a step, so a cached/banked reply containing one needs no schema changes and
 renders identically on reuse.
 
+Rule 6's prompt originally had only one worked example (a plain right triangle) -- tested against a
+harder problem (two right triangles sharing a building, angles of elevation/depression measured from
+a horizontal line rather than an already-drawn side), the model produced no `[DIAGRAM]` block at all,
+confirmed via `diagram-text.tsx`'s own `console.warn` (nothing logged -- it never attempted one, as
+opposed to attempting one that failed to parse). Diagnosis, not a guess: `parseDiagramSpec`'s
+`angles` field can only measure between two existing *points*, and the prompt had no example showing
+how to represent "angle from an implied horizontal line" at all, only a between-two-drawn-sides right
+angle. Added a second geometry example demonstrating the actual pattern for this — an extra point
+added purely to mark the horizontal/vertical reference the problem itself never names, with a
+non-right, labeled angle (`"label":"30°"`, no `rightAngle`) measured against it — plus explicit
+guidance to use one combined `[DIAGRAM]` block for a two-triangle scene sharing points, not two
+separate ones. Verified the example itself both validates (`parseDiagramSpec`) and renders correctly
+(an angle arc with its degree label, not a right-angle box) before adding it to the prompt.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since
