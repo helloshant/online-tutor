@@ -124,6 +124,113 @@ function proportionalPoints<P extends { x: number; y: number }>(points: P[]): P[
   return points.map((p) => ({ ...p, y: centerY + (p.y - centerY) * factor }));
 }
 
+type TextBox = { left: number; right: number; top: number; bottom: number };
+
+// A rough, deliberately approximate bounding box for an SVG <text> --  not
+// real text metrics (no DOM/canvas measurement is available at this point
+// in the render, and this needs to run for whatever labels the model
+// happens to supply), just close enough to tell "these two labels would
+// visibly overlap" apart from "these two are actually clear," which is all
+// placeAngleLabel below needs it for.
+function textBox(x: number, y: number, text: string, fontSize: number, anchor: "start" | "middle"): TextBox {
+  const width = text.length * fontSize * 0.62;
+  const height = fontSize * 1.15;
+  const left = anchor === "middle" ? x - width / 2 : x;
+  return { left, right: left + width, top: y - height, bottom: y + fontSize * 0.25 };
+}
+
+// Padding beyond each box's own estimated extent before two labels count
+// as "overlapping" -- larger than a bare-minimum touching-edges pad (2px):
+// a "clear" result that's actually only a couple of pixels of gap still
+// reads as visually cramped once real glyph rendering (ascenders,
+// descenders, anti-aliasing) is accounted for, which textBox's own
+// estimate doesn't capture. Verified directly: a real production diagram
+// (two angle labels, no other nearby text) that measured 19px apart center
+// to center -- technically clear at pad=2 -- still looked stacked close
+// together in a screenshot; raising the pad forces candidates to find
+// actual breathing room, not just formally non-touching boxes.
+function boxesOverlap(a: TextBox, b: TextBox, pad = 5): boolean {
+  return a.left - pad < b.right && a.right + pad > b.left && a.top - pad < b.bottom && a.bottom + pad > b.top;
+}
+
+// Candidate label positions, tried in preference order: first at the
+// angle's own natural bisector direction (closest to its arc -- the ideal
+// spot when nothing else is nearby), then progressively further out and/or
+// rotated to either side, until one clears every label already placed (see
+// occupiedBoxes in GeometryDiagram). A single fixed rotation was tried
+// first here and reverted: tuned against one specific reported diagram, it
+// looked right for that one case and put the label right on top of
+// something else in others, since which direction actually has open space
+// depends on the specific angle geometry -- checking real positions
+// against each other generalizes where assuming a direction doesn't.
+// Capped deliberately: a candidate at extra=52/rotateDeg=70 was tried and
+// reverted -- it reliably cleared every collision in a genuinely crowded
+// diagram, but by landing so far from its own arc that the label read as
+// disconnected from what it was labeling (the same failure an even-more
+// aggressive radial-only approach hit earlier in this feature's history).
+// A moderate overlap that's still visually anchored to its arc beats a
+// collision-free label floating in empty space -- pickLeastOverlapping
+// below already prefers whichever of these stays closest to the natural
+// bisector when nothing is fully clear, so the cap is what keeps the
+// worst case merely "a bit tight" instead of "unreadable but technically
+// non-overlapping."
+const ANGLE_LABEL_CANDIDATES: { extra: number; rotateDeg: number }[] = [
+  { extra: 8, rotateDeg: 0 },
+  { extra: 8, rotateDeg: 20 },
+  { extra: 8, rotateDeg: -20 },
+  { extra: 16, rotateDeg: 0 },
+  { extra: 16, rotateDeg: 30 },
+  { extra: 16, rotateDeg: -30 },
+  { extra: 26, rotateDeg: 0 },
+  { extra: 26, rotateDeg: 40 },
+  { extra: 26, rotateDeg: -40 },
+  { extra: 34, rotateDeg: 0 },
+];
+
+// Shared by placeAngleLabel and the segment-label placement in
+// GeometryDiagram: try each candidate box against everything already
+// placed, returning the first that's fully clear -- or, when a diagram is
+// too compact for anything to be fully clear (observed directly: a short
+// segment's label and an angle label both needing space near the same
+// vertex), the one that overlaps the LEAST rather than always the first
+// candidate tried, since always-first meant "closest to its own natural
+// spot" even when a later candidate would have overlapped nothing, or
+// overlapped less.
+function pickLeastOverlapping<T extends { x: number; y: number }>(
+  candidates: T[],
+  boxFor: (c: T) => TextBox,
+  occupiedBoxes: TextBox[]
+): { candidate: T; box: TextBox } {
+  let best: { candidate: T; box: TextBox; overlapCount: number } | null = null;
+  for (const candidate of candidates) {
+    const box = boxFor(candidate);
+    const overlapCount = occupiedBoxes.filter((b) => boxesOverlap(box, b)).length;
+    if (overlapCount === 0) return { candidate, box };
+    if (!best || overlapCount < best.overlapCount) best = { candidate, box, overlapCount };
+  }
+  return { candidate: best!.candidate, box: best!.box };
+}
+
+function placeAngleLabel(
+  atX: number,
+  atY: number,
+  d1: { x: number; y: number },
+  d2: { x: number; y: number },
+  radius: number,
+  occupiedBoxes: TextBox[],
+  label: string
+): { x: number; y: number } {
+  const bisectorAngle = Math.atan2(d1.y + d2.y, d1.x + d2.x);
+  const candidates = ANGLE_LABEL_CANDIDATES.map(({ extra, rotateDeg }) => {
+    const angle = bisectorAngle + (rotateDeg * Math.PI) / 180;
+    const distance = radius + extra;
+    return { x: atX + Math.cos(angle) * distance, y: atY + Math.sin(angle) * distance };
+  });
+  const { candidate, box } = pickLeastOverlapping(candidates, (c) => textBox(c.x, c.y, label, 9, "middle"), occupiedBoxes);
+  occupiedBoxes.push(box);
+  return candidate;
+}
+
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
     <figure className="my-0.5 max-w-full">
@@ -175,6 +282,13 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
   // math-text.tsx's nextKey()); tracks how many angles at each vertex have
   // already been drawn, so a repeat gets pushed onto a larger radius.
   const angleOccurrenceAtVertex = new Map<string, number>();
+  // Every label's approximate box, built up in draw order -- point labels
+  // first (always drawn, fixed position), then each segment label as the
+  // segments loop below places it, then each angle label as placeAngleLabel
+  // picks a spot clear of everything placed before it. Point labels are
+  // computed here rather than left to their own render pass further down
+  // so an angle label has the full picture before it ever has to choose.
+  const occupiedBoxes: TextBox[] = points.map((p) => textBox(sx(p.x) + 6, sy(p.y) - 6, p.label, 11, "start"));
 
   return (
     <DiagramFrame title={spec.title}>
@@ -209,6 +323,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
             py = -py;
           }
           labelPos = { x: midX + px * SEGMENT_LABEL_OFFSET, y: midY + py * SEGMENT_LABEL_OFFSET };
+          occupiedBoxes.push(textBox(labelPos.x, labelPos.y, s.label, 10, "middle"));
         }
         return (
           <g key={i}>
@@ -336,28 +451,12 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // traces the actual (non-reflex) angle between the two rays.
         const cross = d1.x * d2.y - d1.y * d2.x;
         const sweep = cross > 0 ? 1 : 0;
-        // Two shared-vertex angles whose "to" rays are close together (an
-        // elevation/depression pair, this whole fallback's own use case)
-        // have nearly the same bisector direction -- pushing radial
-        // distance out to separate their labels (tried first) put the
-        // second one so far past its own arc that it read as disconnected
-        // from it, floating in space rather than labeling anything.
-        // Weighting the averaged direction toward this angle's own "to"
-        // ray (tried second) still wasn't reliably enough separation,
-        // since how much two such rays actually differ varies by problem.
-        // Rotating the bisector itself by a fixed angle per repeat is
-        // deterministic regardless of the underlying geometry: every
-        // repeat at a vertex lands exactly ROTATE_STEP further around,
-        // at a distance that stays close to its own arc.
-        const ROTATE_STEP = (24 * Math.PI) / 180;
-        const bisectorAngle = Math.atan2(d1.y + d2.y, d1.x + d2.x);
-        const rotateDir = cross > 0 ? -1 : 1;
-        const labelAngle = bisectorAngle + rotateDir * occurrence * ROTATE_STEP;
-        const labelDistance = radius + 10;
-        const labelPos = {
-          x: atX + Math.cos(labelAngle) * labelDistance,
-          y: atY + Math.sin(labelAngle) * labelDistance,
-        };
+        // See placeAngleLabel above: tries the natural bisector position
+        // first, then a bounded set of further-out/rotated alternatives,
+        // picking whichever one actually clears every label already
+        // placed in this diagram (points, segment labels, earlier
+        // angles) -- rather than assuming a direction has open space.
+        const labelPos = a.label ? placeAngleLabel(atX, atY, d1, d2, radius, occupiedBoxes, a.label) : null;
         return (
           <g key={i}>
             {horizontalStub}
@@ -367,7 +466,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
               style={{ stroke: "var(--brand)" }}
               strokeWidth={1.25}
             />
-            {a.label && (
+            {labelPos && (
               <text x={labelPos.x} y={labelPos.y} fontSize={9} textAnchor="middle" style={{ fill: "var(--brand)" }}>
                 {a.label}
               </text>
