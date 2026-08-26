@@ -169,28 +169,33 @@ function boxesOverlap(a: TextBox, b: TextBox, pad = 5): boolean {
 // something else in others, since which direction actually has open space
 // depends on the specific angle geometry -- checking real positions
 // against each other generalizes where assuming a direction doesn't.
-// Capped deliberately: a candidate at extra=52/rotateDeg=70 was tried and
-// reverted -- it reliably cleared every collision in a genuinely crowded
-// diagram, but by landing so far from its own arc that the label read as
-// disconnected from what it was labeling (the same failure an even-more
-// aggressive radial-only approach hit earlier in this feature's history).
-// A moderate overlap that's still visually anchored to its arc beats a
-// collision-free label floating in empty space -- pickLeastOverlapping
-// below already prefers whichever of these stays closest to the natural
-// bisector when nothing is fully clear, so the cap is what keeps the
-// worst case merely "a bit tight" instead of "unreadable but technically
-// non-overlapping."
-const ANGLE_LABEL_CANDIDATES: { extra: number; rotateDeg: number }[] = [
-  { extra: 8, rotateDeg: 0 },
-  { extra: 8, rotateDeg: 20 },
-  { extra: 8, rotateDeg: -20 },
-  { extra: 16, rotateDeg: 0 },
-  { extra: 16, rotateDeg: 30 },
-  { extra: 16, rotateDeg: -30 },
-  { extra: 26, rotateDeg: 0 },
-  { extra: 26, rotateDeg: 40 },
-  { extra: 26, rotateDeg: -40 },
-  { extra: 34, rotateDeg: 0 },
+// Capped deliberately, and scaled to the arc's OWN radius rather than a
+// flat pixel amount: a fixed-pixel version (extra=52 tried once, and the
+// whole original set re-tried after the radius stagger below grew from 11
+// to 16/occurrence) reliably cleared collisions in a crowded diagram, but
+// for the SECOND (larger-radius) angle at a vertex, the same flat pixel
+// offset is a much smaller fraction of that bigger radius -- landing
+// disproportionately far from its own arc, read directly from a reported
+// screenshot as "labeled quite away" from where the angle actually is.
+// distanceMultiplier keeps that ratio constant regardless of which
+// occurrence's radius it's applied to. A moderate overlap that's still
+// visually anchored to its arc beats a collision-free label floating in
+// empty space -- pickLeastOverlapping below already prefers whichever of
+// these stays closest to the natural bisector when nothing is fully
+// clear, so the cap is what keeps the worst case merely "a bit tight"
+// instead of "unreadable but technically non-overlapping" OR
+// "disconnected from its own arc."
+const ANGLE_LABEL_CANDIDATES: { distanceMultiplier: number; rotateDeg: number }[] = [
+  { distanceMultiplier: 1.5, rotateDeg: 0 },
+  { distanceMultiplier: 1.5, rotateDeg: 20 },
+  { distanceMultiplier: 1.5, rotateDeg: -20 },
+  { distanceMultiplier: 1.75, rotateDeg: 0 },
+  { distanceMultiplier: 1.75, rotateDeg: 30 },
+  { distanceMultiplier: 1.75, rotateDeg: -30 },
+  { distanceMultiplier: 2.0, rotateDeg: 0 },
+  { distanceMultiplier: 2.0, rotateDeg: 40 },
+  { distanceMultiplier: 2.0, rotateDeg: -40 },
+  { distanceMultiplier: 2.25, rotateDeg: 0 },
 ];
 
 // Shared by placeAngleLabel and the segment-label placement in
@@ -266,9 +271,9 @@ function placeAngleLabel(
   label: string
 ): { x: number; y: number } {
   const bisectorAngle = Math.atan2(d1.y + d2.y, d1.x + d2.x);
-  const candidates = ANGLE_LABEL_CANDIDATES.map(({ extra, rotateDeg }) => {
+  const candidates = ANGLE_LABEL_CANDIDATES.map(({ distanceMultiplier, rotateDeg }) => {
     const angle = bisectorAngle + (rotateDeg * Math.PI) / 180;
-    const distance = radius + extra;
+    const distance = radius * distanceMultiplier;
     return { x: atX + Math.cos(angle) * distance, y: atY + Math.sin(angle) * distance };
   });
   const { candidate, box } = pickLeastOverlapping(candidates, (c) => textBox(c.x, c.y, label, 9, "middle"), occupiedBoxes);
