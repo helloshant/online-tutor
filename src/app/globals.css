@@ -34,3 +34,15 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* KaTeX's own stylesheet (imported in math-text.tsx) gives every display
+   equation `margin: 1em 0` -- reasonable for a standalone document, but
+   this app's math is almost always one equation among several inside a
+   compact chat bubble/step card, where a full 1em (plus the block wrapper
+   around it in math-text.tsx) between *every* equation reads as a wall of
+   empty space rather than a worked solution. Tightened app-wide, not just
+   for worked-steps -- a display equation deserves less air everywhere in
+   this app than KaTeX's own default assumes, not only in that one place. */
+.katex-display {
+  margin: 0.35em 0;
+}

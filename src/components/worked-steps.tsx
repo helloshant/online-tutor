@@ -20,6 +20,19 @@ import { DiagramText } from "@/components/diagram-text";
 // rendering for free, with nothing duplicated here.
 const STEP_PATTERN = /\[STEP:\s*([^\]]+)\]\s*([\s\S]*?)\s*\[\/STEP\]/g;
 
+// The model routinely writes a blank line before/after a display equation
+// or between sub-parts of a step (natural in prose) -- harmless in plain
+// text, but every segment below renders with whitespace-pre-wrap, so each
+// blank line becomes a literal empty line's worth of vertical space.
+// Stacked with KaTeX's own per-equation margin (see globals.css) across a
+// step with several equations, that reads as a wall of empty space rather
+// than a compact worked solution. Collapses any run of 2+ newlines down to
+// exactly one -- still breaks each line where the model actually put a
+// line break, just drops the *blank* lines specifically.
+function collapseBlankLines(text: string): string {
+  return text.replace(/\n{2,}/g, "\n");
+}
+
 type Segment = { kind: "text"; content: string } | { kind: "step"; title: string; content: string; number: number };
 
 function parseSegments(text: string): Segment[] {
@@ -30,15 +43,20 @@ function parseSegments(text: string): Segment[] {
   for (const match of text.matchAll(STEP_PATTERN)) {
     const index = match.index ?? 0;
     if (index > lastIndex) {
-      segments.push({ kind: "text", content: text.slice(lastIndex, index) });
+      segments.push({ kind: "text", content: collapseBlankLines(text.slice(lastIndex, index)) });
     }
     stepNumber += 1;
-    segments.push({ kind: "step", title: match[1].trim(), content: match[2].trim(), number: stepNumber });
+    segments.push({
+      kind: "step",
+      title: match[1].trim(),
+      content: collapseBlankLines(match[2].trim()),
+      number: stepNumber,
+    });
     lastIndex = index + match[0].length;
   }
 
   if (lastIndex < text.length) {
-    segments.push({ kind: "text", content: text.slice(lastIndex) });
+    segments.push({ kind: "text", content: collapseBlankLines(text.slice(lastIndex)) });
   }
 
   return segments;

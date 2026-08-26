@@ -1354,6 +1354,15 @@ exercises are parsed by a strict `Q:`/`A:`/`---` convention server-side that thi
 against, and a summary isn't a worked solution to begin with — a natural next step, not a gap in
 this one.
 
+Real output surfaced a real density problem too: the model naturally writes a blank line before/
+after each display equation, and every segment here renders with `whitespace-pre-wrap`, so each
+blank line became a literal empty line of vertical space — stacked with KaTeX's own default `1em`
+margin around every display equation (see "Math rendering" below), a step with a few equations read
+as mostly empty space. `parseSegments`'s `collapseBlankLines` collapses any run of 2+ newlines down
+to exactly one before a step's content is even rendered — still breaks a line wherever the model put
+one, just drops the *blank* lines specifically — and `globals.css` tightens `.katex-display`'s own
+margin app-wide (not just for steps) from KaTeX's `1em 0` default to `0.35em 0`.
+
 ### Worked-example diagrams — geometry, graphs, and number lines, computed not drawn by the model
 
 A step that involves a shape or a graph is far clearer with a picture than with prose alone, but
