@@ -329,18 +329,27 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // traces the actual (non-reflex) angle between the two rays.
         const cross = d1.x * d2.y - d1.y * d2.x;
         const sweep = cross > 0 ? 1 : 0;
-        // Grows faster with occurrence than the arc radius itself
-        // (radius+12, +10 more per repeat) -- observed directly: two
-        // shared-vertex angles whose "to" rays are close together (as an
-        // elevation/depression pair usually is) have nearly the same
-        // bisector direction, so radial distance is the only thing that
-        // can keep their labels apart; matching the arcs' own tighter
-        // stagger left both labels, and a nearby point label, crowded
-        // into the same few pixels.
-        const labelDistance = radius + 12 + occurrence * 10;
+        // Two shared-vertex angles whose "to" rays are close together (an
+        // elevation/depression pair, this whole fallback's own use case)
+        // have nearly the same bisector direction -- pushing radial
+        // distance out to separate their labels (tried first) put the
+        // second one so far past its own arc that it read as disconnected
+        // from it, floating in space rather than labeling anything.
+        // Weighting the averaged direction toward this angle's own "to"
+        // ray (tried second) still wasn't reliably enough separation,
+        // since how much two such rays actually differ varies by problem.
+        // Rotating the bisector itself by a fixed angle per repeat is
+        // deterministic regardless of the underlying geometry: every
+        // repeat at a vertex lands exactly ROTATE_STEP further around,
+        // at a distance that stays close to its own arc.
+        const ROTATE_STEP = (24 * Math.PI) / 180;
+        const bisectorAngle = Math.atan2(d1.y + d2.y, d1.x + d2.x);
+        const rotateDir = cross > 0 ? -1 : 1;
+        const labelAngle = bisectorAngle + rotateDir * occurrence * ROTATE_STEP;
+        const labelDistance = radius + 10;
         const labelPos = {
-          x: atX + (d1.x + d2.x) * labelDistance,
-          y: atY + (d1.y + d2.y) * labelDistance,
+          x: atX + Math.cos(labelAngle) * labelDistance,
+          y: atY + Math.sin(labelAngle) * labelDistance,
         };
         return (
           <g key={i}>
