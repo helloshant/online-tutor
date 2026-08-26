@@ -282,6 +282,10 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
   // math-text.tsx's nextKey()); tracks how many angles at each vertex have
   // already been drawn, so a repeat gets pushed onto a larger radius.
   const angleOccurrenceAtVertex = new Map<string, number>();
+  // Vertices with an angle drawn at them -- a segment's own label anchor
+  // (below) gets biased away from whichever end is one of these, since
+  // that end is exactly where an arc and its label also need room.
+  const busyVertices = new Set(spec.angles?.map((a) => a.at) ?? []);
   // Every label's approximate box, built up in draw order -- point labels
   // first (always drawn, fixed position), then each segment label as the
   // segments loop below places it, then each angle label as placeAngleLabel
@@ -308,8 +312,21 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         const y2 = sy(to.y);
         let labelPos: { x: number; y: number } | null = null;
         if (s.label) {
-          const midX = (x1 + x2) / 2;
-          const midY = (y1 + y2) / 2;
+          // Anchored at the segment's own midpoint by default, but slid
+          // toward whichever end ISN'T a "busy" vertex (one with an angle
+          // drawn at it) when exactly one end is -- a segment's own
+          // midpoint can otherwise land right in the middle of that
+          // vertex's angle-label real estate (observed directly in
+          // production: a segment's length label and an angle label
+          // fighting for the same few pixels next to a shared vertex,
+          // "60 - h" and "60°" both wanting to sit close to a depression
+          // angle's own vertex). Both ends busy, or neither, keeps the
+          // plain midpoint -- there's no clear direction to slide toward.
+          const fromBusy = busyVertices.has(s.from);
+          const toBusy = busyVertices.has(s.to);
+          const t = fromBusy && !toBusy ? 0.7 : toBusy && !fromBusy ? 0.3 : 0.5;
+          const midX = x1 + (x2 - x1) * t;
+          const midY = y1 + (y2 - y1) * t;
           const dx = x2 - x1;
           const dy = y2 - y1;
           const len = Math.hypot(dx, dy) || 1;
