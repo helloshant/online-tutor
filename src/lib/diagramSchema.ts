@@ -30,7 +30,23 @@ export type GeometrySpec = {
   // before this field existed: a diagram with no way to show 5 m/12 m/13 m
   // is a shape, not a worked illustration of the specific problem.
   segments: { from: string; to: string; label?: string }[];
-  angles?: { at: string; from: string; to: string; label?: string; rightAngle?: boolean }[];
+  // `from` names an actual point for an angle between two drawn rays (e.g.
+  // the ladder's right angle). `fromHorizontal: true` is the alternative
+  // for an elevation/depression angle, where one ray is an *implied*
+  // horizontal at the vertex's own height rather than a point the problem
+  // actually names -- `from` is ignored in that case, since diagram.tsx
+  // computes that ray itself (always exactly horizontal in already-scaled
+  // pixel space, by construction). This exists because the natural-language
+  // instruction to "add a helper point at the vertex's own height" was
+  // observed, twice, reusing a nearby scene point instead (e.g. a tower's
+  // base standing in for the observer's own horizontal) -- collapsing both
+  // angles down to a couple of degrees, since that reused point is nearly
+  // straight down from the vertex, not off to the side. A boolean flag
+  // removes the model's chance to get the coordinate math wrong entirely,
+  // the same reason every other geometric computation here (scaling, arc
+  // sweep direction, right-angle boxes) already lives in diagram.tsx and
+  // not in the model's own numbers.
+  angles?: { at: string; from?: string; to: string; label?: string; rightAngle?: boolean; fromHorizontal?: boolean }[];
   shadeRegion?: string[];
   title?: string;
 };
@@ -104,15 +120,21 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
     const parsedAngles: NonNullable<GeometrySpec["angles"]> = [];
     for (const a of raw.angles) {
       if (typeof a !== "object" || a === null) return null;
-      const { at, from, to, label, rightAngle } = a as Record<string, unknown>;
-      if (typeof at !== "string" || typeof from !== "string" || typeof to !== "string") return null;
-      if (!labels.has(at) || !labels.has(from) || !labels.has(to)) return null;
+      const { at, from, to, label, rightAngle, fromHorizontal } = a as Record<string, unknown>;
+      if (typeof at !== "string" || typeof to !== "string") return null;
+      if (!labels.has(at) || !labels.has(to)) return null;
+      const usesHorizontal = fromHorizontal === true;
+      // `from` is still required (and must name a real point) unless the
+      // horizontal ray is computed instead -- an angle needs two rays one
+      // way or the other.
+      if (!usesHorizontal && (typeof from !== "string" || !labels.has(from))) return null;
       parsedAngles.push({
         at,
-        from,
+        from: typeof from === "string" && labels.has(from) ? from : undefined,
         to,
         label: isNonEmptyString(label, MAX_LABEL_LENGTH) ? label : undefined,
         rightAngle: rightAngle === true,
+        fromHorizontal: usesHorizontal,
       });
     }
     angles = parsedAngles;

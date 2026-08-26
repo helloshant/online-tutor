@@ -224,9 +224,9 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
       })}
       {spec.angles?.map((a, i) => {
         const at = byLabel.get(a.at);
-        const from = byLabel.get(a.from);
+        const from = a.fromHorizontal ? undefined : byLabel.get(a.from ?? "");
         const to = byLabel.get(a.to);
-        if (!at || !from || !to) return null;
+        if (!at || !to || (!a.fromHorizontal && !from)) return null;
         // The classic pair this feature exists for -- two angles of
         // elevation/depression measured from the same point (e.g. a
         // building's top, to a tower's top and bottom) -- share a vertex
@@ -246,8 +246,34 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
           const len = Math.hypot(dx, dy) || 1;
           return { x: dx / len, y: dy / len };
         };
-        const d1 = dir(sx(from.x), sy(from.y));
+        // fromHorizontal is computed here, not supplied by the model: a
+        // pure (±1, 0) unit vector in already-scaled pixel space, which is
+        // horizontal by construction regardless of the model's own
+        // coordinates -- pointed toward whichever side "to" is actually on,
+        // so the angle opens up on the same side as the ray it's paired
+        // with rather than an arbitrary fixed direction.
+        const d1 = a.fromHorizontal
+          ? { x: sx(to.x) - atX >= 0 ? 1 : -1, y: 0 }
+          : dir(sx(from!.x), sy(from!.y));
         const d2 = dir(sx(to.x), sy(to.y));
+        // A short dashed stub showing the implied horizontal itself --
+        // without it there'd be nothing on screen explaining what the arc
+        // below is measured from, since (unlike the `from`-point case)
+        // there's no drawn segment along this ray. Rendered here and
+        // folded into the shared arc/right-angle-box rendering below via a
+        // fragment, rather than duplicating that rendering for this case.
+        const horizontalStub = a.fromHorizontal ? (
+          <line
+            x1={atX}
+            y1={atY}
+            x2={atX + d1.x * (radius + 14)}
+            y2={atY}
+            style={{ stroke: "var(--foreground)" }}
+            strokeWidth={1}
+            strokeDasharray="3 2"
+            opacity={0.5}
+          />
+        ) : null;
         if (a.rightAngle) {
           // Standard right-angle box notation: a small square corner formed
           // by stepping one unit along each ray, plus the corner between.
@@ -277,6 +303,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         };
         return (
           <g key={i}>
+            {horizontalStub}
             <path
               d={`M ${arcStart.x} ${arcStart.y} A ${radius} ${radius} 0 0 ${sweep} ${arcEnd.x} ${arcEnd.y}`}
               fill="none"
