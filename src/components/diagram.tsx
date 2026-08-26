@@ -272,7 +272,17 @@ function placeAngleLabel(
     return { x: atX + Math.cos(angle) * distance, y: atY + Math.sin(angle) * distance };
   });
   const { candidate, box } = pickLeastOverlapping(candidates, (c) => textBox(c.x, c.y, label, 9, "middle"), occupiedBoxes);
-  occupiedBoxes.push(box);
+  // Weighted the same as a point label (see occupiedBoxes' own init in
+  // GeometryDiagram): a real regression caught directly from a reported
+  // screenshot -- weighting only point labels higher successfully steered
+  // a second angle's label away from a point label it used to collide
+  // with, but its fallback then landed squarely on the FIRST angle's own
+  // label instead, trading one bad collision for an equally bad one (two
+  // different degree values overlapping is at least as confusing as a
+  // label obscuring a point's name). Matching the weight means a later
+  // angle now prefers grazing a lower-priority obstacle (an arc curve, a
+  // segment label) over either kind of higher-stakes collision.
+  occupiedBoxes.push({ ...box, weight: 3 });
   return candidate;
 }
 
@@ -440,7 +450,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // concentric arcs instead.
         const occurrence = angleOccurrenceAtVertex.get(a.at) ?? 0;
         angleOccurrenceAtVertex.set(a.at, occurrence + 1);
-        const radius = ANGLE_RADIUS + occurrence * 11;
+        const radius = ANGLE_RADIUS + occurrence * 16;
         const atX = sx(at.x);
         const atY = sy(at.y);
         const dir = (px: number, py: number) => {
