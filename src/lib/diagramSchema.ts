@@ -117,6 +117,22 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
   let angles: GeometrySpec["angles"];
   if (raw.angles !== undefined) {
     if (!Array.isArray(raw.angles)) return null;
+    const rawAngles = raw.angles.slice(0, MAX_ANGLES);
+
+    // First pass: which "to" targets are already legitimately spoken for
+    // at each vertex, considering only entries that are valid on their own
+    // (a self-referential "to" doesn't count as claiming anything). Used
+    // below to recover a broken angle -- never to guess at one.
+    const usedTargetsByVertex = new Map<string, Set<string>>();
+    for (const entry of rawAngles) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { at, to } = entry as Record<string, unknown>;
+      if (typeof at !== "string" || typeof to !== "string") continue;
+      if (!labels.has(at) || !labels.has(to) || to === at) continue;
+      if (!usedTargetsByVertex.has(at)) usedTargetsByVertex.set(at, new Set());
+      usedTargetsByVertex.get(at)!.add(to);
+    }
+
     const parsedAngles: NonNullable<GeometrySpec["angles"]> = [];
     // A malformed individual angle is skipped, not treated as a reason to
     // drop the whole diagram -- observed directly in production: one
@@ -128,16 +144,31 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
     // point reference there means the shape itself is broken), but an
     // angle is closer to a decorative annotation on an already-valid
     // shape -- worth keeping the rest even when one entry is bad.
-    for (const a of raw.angles.slice(0, MAX_ANGLES)) {
+    for (const a of rawAngles) {
       if (typeof a !== "object" || a === null) continue;
-      const { at, from, to, label, rightAngle, fromHorizontal } = a as Record<string, unknown>;
-      if (typeof at !== "string" || typeof to !== "string") continue;
-      if (!labels.has(at) || !labels.has(to)) continue;
-      // "to" (or "from") naming the SAME point as "at" gives a zero-length
-      // ray -- not fixable by the collinear-angle fallback in diagram.tsx,
-      // since that only ever corrects the *direction* of "from", never a
-      // ray that has no direction to correct in the first place.
-      if (to === at) continue;
+      const { at, from, to: rawTo, label, rightAngle, fromHorizontal } = a as Record<string, unknown>;
+      if (typeof at !== "string" || typeof rawTo !== "string") continue;
+      if (!labels.has(at) || !labels.has(rawTo)) continue;
+
+      let to = rawTo;
+      if (to === at) {
+        // "to" naming the SAME point as "at" gives a zero-length ray --
+        // not fixable by the collinear-angle fallback in diagram.tsx,
+        // since that only ever corrects the *direction* of "from", never
+        // a ray that has no direction to correct in the first place.
+        // Recoverable, though, for exactly this app's headline pattern:
+        // two angles at one vertex to two OTHER points (a tower's top and
+        // bottom) -- if there's exactly one point in the scene that isn't
+        // the vertex and isn't already another angle's target here, that
+        // is a mechanical deduction, not a guess among several
+        // candidates, so use it instead of losing the angle entirely.
+        const used = usedTargetsByVertex.get(at) ?? new Set<string>();
+        const candidates = points.map((p) => p.label).filter((l) => l !== at && !used.has(l));
+        if (candidates.length !== 1) continue; // ambiguous or no candidate -- drop, don't guess
+        to = candidates[0];
+        used.add(to);
+        usedTargetsByVertex.set(at, used);
+      }
       const usesHorizontal = fromHorizontal === true;
       // `from` is still required (and must name a real, distinct point)
       // unless the horizontal ray is computed instead -- an angle needs
