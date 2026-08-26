@@ -25,11 +25,11 @@ function niceStep(range: number, maxTicks = 7): number {
   return niceResidual * magnitude;
 }
 
-// Maps a logical (min..max) range onto (marginStart..viewSize - marginEnd),
-// uniformly with the companion axis (via a shared `scale`) so shapes never
-// get stretched -- a right angle drawn with a different x/y scale would no
-// longer look like one, which would defeat the entire point of this being
-// computed rather than left to the model.
+// Maps a logical (min..max) range onto (marginStart..viewSize - marginEnd)
+// at the given `scale` -- ordinarily the same value on both axes (via
+// computeScales below), so shapes don't get stretched and a right angle
+// still looks like one; only diverges per-axis in computeScales' own
+// degenerate-aspect-ratio fallback.
 function makeScale(min: number, max: number, viewSize: number, scale: number, flip: boolean) {
   const usable = viewSize - 2 * MARGIN;
   const center = (min + max) / 2;
@@ -65,10 +65,34 @@ function boundingBox(xs: number[], ys: number[], includeOrigin: boolean) {
   return { minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY };
 }
 
-function sharedScale(minX: number, maxX: number, minY: number, maxY: number) {
+// Uniform scaling (one factor for both axes) is what keeps a right angle
+// looking like one -- but it also means the axis with the *smaller* range
+// gets tied to whatever scale the *larger*-range axis needs to fit its own
+// box. Most of the time that's fine (the model's coordinates are roughly
+// proportional to the real problem). But observed directly in real output:
+// a two-triangle elevation/depression diagram where the model reused the
+// prompt's own small illustrative helper-point offset (a handful of units)
+// while the problem's real vertical distances ran into the tens of units --
+// the shared scale ends up bound entirely by the tall axis, and the short
+// axis collapses to a sliver a few pixels wide, overlapping point labels
+// (rendered as what looked like one label "OH") and making the whole shape
+// an unreadable needle.
+//
+// Capped independent scaling: below `maxSkew`, behaves identically to a
+// single shared scale (right angles stay accurate, the common case is
+// untouched). Only past that ratio does the short axis get "zoomed in"
+// independently of the long one, capped so it never exceeds `maxSkew` times
+// the long axis's own scale -- a diagram that's still somewhat skewed reads
+// far better than one collapsed to a hairline, and this only ever engages
+// for a genuinely degenerate aspect ratio, not an ordinary elongated shape.
+function computeScales(minX: number, maxX: number, minY: number, maxY: number) {
   const usableW = VIEW_WIDTH - 2 * MARGIN;
   const usableH = VIEW_HEIGHT - 2 * MARGIN;
-  return Math.min(usableW / (maxX - minX), usableH / (maxY - minY));
+  const rawScaleX = usableW / (maxX - minX);
+  const rawScaleY = usableH / (maxY - minY);
+  const uniform = Math.min(rawScaleX, rawScaleY);
+  const cap = uniform * 4;
+  return { scaleX: Math.min(rawScaleX, cap), scaleY: Math.min(rawScaleY, cap) };
 }
 
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
@@ -100,11 +124,11 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
   const xs = spec.points.map((p) => p.x);
   const ys = spec.points.map((p) => p.y);
   const { minX, maxX, minY, maxY } = boundingBox(xs, ys, false);
-  const scale = sharedScale(minX, maxX, minY, maxY);
-  const sx = makeScale(minX, maxX, VIEW_WIDTH, scale, false);
+  const { scaleX, scaleY } = computeScales(minX, maxX, minY, maxY);
+  const sx = makeScale(minX, maxX, VIEW_WIDTH, scaleX, false);
   // SVG y grows downward -- flip so a larger logical y renders higher, the
   // way a student expects "up" to read on paper.
-  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scale, true);
+  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scaleY, true);
 
   const byLabel = new Map(spec.points.map((p) => [p.label, p]));
   const ANGLE_RADIUS = 16;
@@ -117,6 +141,11 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
     y: spec.points.reduce((sum, p) => sum + sy(p.y), 0) / spec.points.length,
   };
   const SEGMENT_LABEL_OFFSET = 12;
+  // Mutated during the angles .map() below, in iteration order -- same
+  // pattern as the `key` counters elsewhere in this codebase (e.g.
+  // math-text.tsx's nextKey()); tracks how many angles at each vertex have
+  // already been drawn, so a repeat gets pushed onto a larger radius.
+  const angleOccurrenceAtVertex = new Map<string, number>();
 
   return (
     <DiagramFrame title={spec.title}>
@@ -168,6 +197,17 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         const from = byLabel.get(a.from);
         const to = byLabel.get(a.to);
         if (!at || !from || !to) return null;
+        // The classic pair this feature exists for -- two angles of
+        // elevation/depression measured from the same point (e.g. a
+        // building's top, to a tower's top and bottom) -- share a vertex
+        // AND one ray, so at a single fixed radius their arcs and labels
+        // land on top of each other (observed directly: two overlapping
+        // degree labels unreadable as one). Stagger each additional angle
+        // at the same vertex onto a larger radius so they render as
+        // concentric arcs instead.
+        const occurrence = angleOccurrenceAtVertex.get(a.at) ?? 0;
+        angleOccurrenceAtVertex.set(a.at, occurrence + 1);
+        const radius = ANGLE_RADIUS + occurrence * 9;
         const atX = sx(at.x);
         const atY = sy(at.y);
         const dir = (px: number, py: number) => {
@@ -181,7 +221,7 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         if (a.rightAngle) {
           // Standard right-angle box notation: a small square corner formed
           // by stepping one unit along each ray, plus the corner between.
-          const size = 9;
+          const size = 9 + occurrence * 4;
           const p1 = { x: atX + d1.x * size, y: atY + d1.y * size };
           const p2 = { x: atX + d1.x * size + d2.x * size, y: atY + d1.y * size + d2.y * size };
           const p3 = { x: atX + d2.x * size, y: atY + d2.y * size };
@@ -195,20 +235,20 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
             />
           );
         }
-        const arcStart = { x: atX + d1.x * ANGLE_RADIUS, y: atY + d1.y * ANGLE_RADIUS };
-        const arcEnd = { x: atX + d2.x * ANGLE_RADIUS, y: atY + d2.y * ANGLE_RADIUS };
+        const arcStart = { x: atX + d1.x * radius, y: atY + d1.y * radius };
+        const arcEnd = { x: atX + d2.x * radius, y: atY + d2.y * radius };
         // Cross product sign decides sweep direction so the arc always
         // traces the actual (non-reflex) angle between the two rays.
         const cross = d1.x * d2.y - d1.y * d2.x;
         const sweep = cross > 0 ? 1 : 0;
         const labelPos = {
-          x: atX + (d1.x + d2.x) * (ANGLE_RADIUS + 10),
-          y: atY + (d1.y + d2.y) * (ANGLE_RADIUS + 10),
+          x: atX + (d1.x + d2.x) * (radius + 10),
+          y: atY + (d1.y + d2.y) * (radius + 10),
         };
         return (
           <g key={i}>
             <path
-              d={`M ${arcStart.x} ${arcStart.y} A ${ANGLE_RADIUS} ${ANGLE_RADIUS} 0 0 ${sweep} ${arcEnd.x} ${arcEnd.y}`}
+              d={`M ${arcStart.x} ${arcStart.y} A ${radius} ${radius} 0 0 ${sweep} ${arcEnd.x} ${arcEnd.y}`}
               fill="none"
               style={{ stroke: "var(--brand)" }}
               strokeWidth={1.25}
@@ -238,9 +278,9 @@ function GraphDiagram({ spec }: { spec: GraphSpec }) {
   const xs = allPoints.map((p) => p.x);
   const ys = allPoints.map((p) => p.y);
   const { minX, maxX, minY, maxY } = boundingBox(xs, ys, true);
-  const scale = sharedScale(minX, maxX, minY, maxY);
-  const sx = makeScale(minX, maxX, VIEW_WIDTH, scale, false);
-  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scale, true);
+  const { scaleX, scaleY } = computeScales(minX, maxX, minY, maxY);
+  const sx = makeScale(minX, maxX, VIEW_WIDTH, scaleX, false);
+  const sy = makeScale(minY, maxY, VIEW_HEIGHT, scaleY, true);
 
   const stepX = niceStep(maxX - minX);
   const stepY = niceStep(maxY - minY);
