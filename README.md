@@ -1354,14 +1354,22 @@ exercises are parsed by a strict `Q:`/`A:`/`---` convention server-side that thi
 against, and a summary isn't a worked solution to begin with — a natural next step, not a gap in
 this one.
 
-Real output surfaced a real density problem too: the model naturally writes a blank line before/
-after each display equation, and every segment here renders with `whitespace-pre-wrap`, so each
-blank line became a literal empty line of vertical space — stacked with KaTeX's own default `1em`
-margin around every display equation (see "Math rendering" below), a step with a few equations read
-as mostly empty space. `parseSegments`'s `collapseBlankLines` collapses any run of 2+ newlines down
-to exactly one before a step's content is even rendered — still breaks a line wherever the model put
-one, just drops the *blank* lines specifically — and `globals.css` tightens `.katex-display`'s own
-margin app-wide (not just for steps) from KaTeX's `1em 0` default to `0.35em 0`.
+Real output surfaced a real density problem too, in two layers. First: the model naturally writes a
+blank line before/after each display equation, and every segment here renders with
+`whitespace-pre-wrap`, so each blank line became a literal empty line of vertical space.
+`parseSegments`'s `collapseBlankLines` collapses any run of 2+ newlines down to exactly one before a
+step's content is even rendered — still breaks a line wherever the model put one, just drops the
+*blank* lines specifically. Second, and the bigger contributor once measured: a display equation
+renders as its own `display:block` box, which already forces a line break before/after itself in the
+layout — a single newline still immediately adjacent to it (which collapsing blank lines down to one
+doesn't remove) compounds with that forced break instead of being absorbed by it, adding a *second*,
+visibly separate gap on top of the first. `MathText` now strips any newline directly touching a
+display-mode match on both sides (see `math-text.tsx`) rather than just collapsing runs of them.
+Confirmed with an actual rendered measurement, not just reasoning about it: a same-page comparison
+before/after this fix on a mock multi-equation step (headless Chromium via Playwright, measuring
+`getBoundingClientRect` gaps between elements) showed several transitions between adjacent equations
+dropping from ~56px to ~14px. `globals.css` also tightens `.katex-display`'s own margin app-wide (not
+just for steps) from KaTeX's `1em 0` default to `0.35em 0`.
 
 ### Worked-example diagrams — geometry, graphs, and number lines, computed not drawn by the model
 

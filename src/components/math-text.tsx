@@ -126,13 +126,31 @@ export function MathText({ text }: { text: string }) {
   // to call from render with a module-level pattern.
   for (const match of text.matchAll(MATH_PATTERN)) {
     const index = match.index ?? 0;
-    if (index > lastIndex) {
-      parts.push(...renderEmphasis(text.slice(lastIndex, index), nextKey));
-    }
-
     const displayLatex = match[1] ?? match[2];
     const inlineLatex = match[3] ?? match[4];
     const displayMode = displayLatex !== undefined;
+
+    let precedingText = text.slice(lastIndex, index);
+    // A display equation renders as its own display:block box (KaTeX's
+    // .katex-display, with its own CSS margin -- see globals.css) -- it
+    // already forces a line break before/after itself in the layout. A
+    // newline immediately adjacent to it in the model's own source text
+    // (very common: it naturally writes "...values:\n\[ ... \]\n...") is
+    // therefore redundant, and rendered under white-space: pre-wrap that
+    // redundant newline doesn't just get absorbed -- it adds a *second*,
+    // visibly separate line break on top of the block's own, which is
+    // what produced the oversized gaps seen in real output (measured and
+    // confirmed: stripping it demonstrably shrinks the gap, not just a
+    // guess). Trimmed only immediately adjacent to the match, not deeper
+    // into the surrounding text, so a genuine blank line further back
+    // (already collapsed to one by worked-steps.tsx anyway) is untouched.
+    if (displayMode) {
+      precedingText = precedingText.replace(/[ \t]*\n[ \t]*$/, "");
+    }
+    if (precedingText) {
+      parts.push(...renderEmphasis(precedingText, nextKey));
+    }
+
     const html = katex.renderToString(displayLatex ?? inlineLatex ?? "", {
       throwOnError: false,
       displayMode,
@@ -155,7 +173,15 @@ export function MathText({ text }: { text: string }) {
       )
     );
 
-    lastIndex = index + match[0].length;
+    let nextIndex = index + match[0].length;
+    if (displayMode) {
+      // Same reasoning, mirrored for whatever comes right after -- see
+      // above.
+      const rest = text.slice(nextIndex);
+      const stripped = rest.replace(/^[ \t]*\n[ \t]*/, "");
+      nextIndex += rest.length - stripped.length;
+    }
+    lastIndex = nextIndex;
   }
 
   if (lastIndex < text.length) {
