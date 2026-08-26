@@ -257,7 +257,7 @@ function registerArcObstacle(
     const angle = angle1 + span * t;
     const x = atX + Math.cos(angle) * radius;
     const y = atY + Math.sin(angle) * radius;
-    occupiedBoxes.push({ left: x - 5, right: x + 5, top: y - 5, bottom: y + 5 });
+    occupiedBoxes.push({ left: x - 3, right: x + 3, top: y - 3, bottom: y + 3 });
   }
 }
 
@@ -269,8 +269,17 @@ function placeAngleLabel(
   radius: number,
   occupiedBoxes: TextBox[],
   label: string
-): { x: number; y: number } {
+): { pos: { x: number; y: number }; anchor: { x: number; y: number } } {
   const bisectorAngle = Math.atan2(d1.y + d2.y, d1.x + d2.x);
+  // The arc's own midpoint -- always exactly on that angle's curve,
+  // regardless of where collision avoidance ultimately puts the label.
+  // Returned so the caller can draw a leader line back to it: with two
+  // (or more) concentric arcs sharing a vertex, position alone can't
+  // guarantee which one a given label belongs to no matter how well
+  // collisions are avoided -- reported directly as "labeled quite away"
+  // reading as ambiguous between the inner and outer arc, not just
+  // poorly placed in isolation.
+  const anchor = { x: atX + Math.cos(bisectorAngle) * radius, y: atY + Math.sin(bisectorAngle) * radius };
   const candidates = ANGLE_LABEL_CANDIDATES.map(({ distanceMultiplier, rotateDeg }) => {
     const angle = bisectorAngle + (rotateDeg * Math.PI) / 180;
     const distance = radius * distanceMultiplier;
@@ -288,7 +297,7 @@ function placeAngleLabel(
   // angle now prefers grazing a lower-priority obstacle (an arc curve, a
   // segment label) over either kind of higher-stakes collision.
   occupiedBoxes.push({ ...box, weight: 3 });
-  return candidate;
+  return { pos: candidate, anchor };
 }
 
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
@@ -557,7 +566,15 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // placed in this diagram (points, segment labels, earlier
         // angles, and now this angle's own arc curve) -- rather than
         // assuming a direction has open space.
-        const labelPos = a.label ? placeAngleLabel(atX, atY, d1, d2, radius, occupiedBoxes, a.label) : null;
+        const placed = a.label ? placeAngleLabel(atX, atY, d1, d2, radius, occupiedBoxes, a.label) : null;
+        // A thin leader line back to the arc's own midpoint, drawn only
+        // when the label ended up meaningfully displaced from it (a
+        // collision pushed it away -- the common case at a shared vertex
+        // with more than one angle) -- ties a label to its OWN arc
+        // unambiguously regardless of how close a neighboring arc's own
+        // label happens to be, which position alone can't guarantee once
+        // two curves share a vertex.
+        const leaderNeeded = placed && Math.hypot(placed.pos.x - placed.anchor.x, placed.pos.y - placed.anchor.y) > 6;
         return (
           <g key={i}>
             {horizontalStub}
@@ -567,8 +584,19 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
               style={{ stroke: "var(--brand)" }}
               strokeWidth={1.25}
             />
-            {labelPos && (
-              <text x={labelPos.x} y={labelPos.y} fontSize={9} textAnchor="middle" style={{ fill: "var(--brand)" }}>
+            {leaderNeeded && (
+              <line
+                x1={placed.anchor.x}
+                y1={placed.anchor.y}
+                x2={placed.pos.x}
+                y2={placed.pos.y}
+                style={{ stroke: "var(--brand)" }}
+                strokeWidth={0.75}
+                opacity={0.5}
+              />
+            )}
+            {placed && (
+              <text x={placed.pos.x} y={placed.pos.y} fontSize={9} textAnchor="middle" style={{ fill: "var(--brand)" }}>
                 {a.label}
               </text>
             )}
