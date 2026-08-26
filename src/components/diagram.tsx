@@ -99,6 +99,15 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
 
   const byLabel = new Map(spec.points.map((p) => [p.label, p]));
   const ANGLE_RADIUS = 16;
+  // Rough "middle of the shape" in already-scaled SVG space -- just the
+  // average of every point, not a true polygon centroid, but good enough
+  // to reliably decide which side of a segment is "outward" for placing
+  // that segment's length label clear of the shape's interior/fill.
+  const centroid = {
+    x: spec.points.reduce((sum, p) => sum + sx(p.x), 0) / spec.points.length,
+    y: spec.points.reduce((sum, p) => sum + sy(p.y), 0) / spec.points.length,
+  };
+  const SEGMENT_LABEL_OFFSET = 12;
 
   return (
     <DiagramFrame title={spec.title}>
@@ -112,16 +121,37 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         const from = byLabel.get(s.from);
         const to = byLabel.get(s.to);
         if (!from || !to) return null;
+        const x1 = sx(from.x);
+        const y1 = sy(from.y);
+        const x2 = sx(to.x);
+        const y2 = sy(to.y);
+        let labelPos: { x: number; y: number } | null = null;
+        if (s.label) {
+          const midX = (x1 + x2) / 2;
+          const midY = (y1 + y2) / 2;
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          const len = Math.hypot(dx, dy) || 1;
+          // Perpendicular to the segment, then flipped if it happens to
+          // point toward the shape's centroid, so the label always lands
+          // outside the shape rather than overlapping its fill/other edges.
+          let px = -dy / len;
+          let py = dx / len;
+          if (px * (centroid.x - midX) + py * (centroid.y - midY) > 0) {
+            px = -px;
+            py = -py;
+          }
+          labelPos = { x: midX + px * SEGMENT_LABEL_OFFSET, y: midY + py * SEGMENT_LABEL_OFFSET };
+        }
         return (
-          <line
-            key={i}
-            x1={sx(from.x)}
-            y1={sy(from.y)}
-            x2={sx(to.x)}
-            y2={sy(to.y)}
-            style={{ stroke: "var(--foreground)" }}
-            strokeWidth={1.5}
-          />
+          <g key={i}>
+            <line x1={x1} y1={y1} x2={x2} y2={y2} style={{ stroke: "var(--foreground)" }} strokeWidth={1.5} />
+            {labelPos && (
+              <text x={labelPos.x} y={labelPos.y} fontSize={10} textAnchor="middle" style={{ fill: "var(--foreground)" }}>
+                {s.label}
+              </text>
+            )}
+          </g>
         );
       })}
       {spec.angles?.map((a, i) => {

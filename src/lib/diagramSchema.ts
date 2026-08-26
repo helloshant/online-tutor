@@ -23,7 +23,13 @@ export type DiagramPoint = { label?: string; x: number; y: number };
 export type GeometrySpec = {
   type: "geometry";
   points: (DiagramPoint & { label: string })[];
-  segments: { from: string; to: string }[];
+  // `label` here is a segment's own known length/name (e.g. "5 m", "13 m")
+  // -- distinct from a *point's* label (its name, "A"/"B"/"C") -- so the
+  // model has somewhere to put the actual measurements a word problem
+  // gives, not just the abstract shape. Observed missing in real output
+  // before this field existed: a diagram with no way to show 5 m/12 m/13 m
+  // is a shape, not a worked illustration of the specific problem.
+  segments: { from: string; to: string; label?: string }[];
   angles?: { at: string; from: string; to: string; label?: string; rightAngle?: boolean }[];
   shadeRegion?: string[];
   title?: string;
@@ -84,12 +90,12 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
   }
 
   if (!Array.isArray(raw.segments) || raw.segments.length > MAX_SEGMENTS) return null;
-  const segments: { from: string; to: string }[] = [];
+  const segments: GeometrySpec["segments"] = [];
   for (const s of raw.segments) {
     if (typeof s !== "object" || s === null) return null;
-    const { from, to } = s as Record<string, unknown>;
+    const { from, to, label } = s as Record<string, unknown>;
     if (typeof from !== "string" || typeof to !== "string" || !labels.has(from) || !labels.has(to)) return null;
-    segments.push({ from, to });
+    segments.push({ from, to, label: isNonEmptyString(label, MAX_LABEL_LENGTH) ? label : undefined });
   }
 
   let angles: GeometrySpec["angles"];
