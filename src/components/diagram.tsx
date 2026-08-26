@@ -76,7 +76,7 @@ function DiagramFrame({ title, children }: { title?: string; children: React.Rea
     <figure className="my-0.5 max-w-full">
       <svg
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        className="h-auto w-full max-w-[260px] rounded-lg border border-border bg-background/40"
+        className="h-auto w-full max-w-[320px] rounded-lg border border-border bg-background/40"
         role="img"
         aria-label={title ?? "Diagram"}
       >
