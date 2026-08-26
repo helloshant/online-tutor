@@ -124,7 +124,13 @@ function proportionalPoints<P extends { x: number; y: number }>(points: P[]): P[
   return points.map((p) => ({ ...p, y: centerY + (p.y - centerY) * factor }));
 }
 
-type TextBox = { left: number; right: number; top: number; bottom: number };
+// `weight` (default 1) lets pickLeastOverlapping treat some obstacles as
+// worse to collide with than others -- a point's own name (e.g. "D") is
+// set higher, since a label overlapping the diagram's own point labels
+// reads as more confusing/broken than two nearby angle or segment labels
+// merely sitting close, so the least-overlap fallback should give up that
+// ground last, not treat every kind of collision as equally acceptable.
+type TextBox = { left: number; right: number; top: number; bottom: number; weight?: number };
 
 // A rough, deliberately approximate bounding box for an SVG <text> --  not
 // real text metrics (no DOM/canvas measurement is available at this point
@@ -201,14 +207,53 @@ function pickLeastOverlapping<T extends { x: number; y: number }>(
   boxFor: (c: T) => TextBox,
   occupiedBoxes: TextBox[]
 ): { candidate: T; box: TextBox } {
-  let best: { candidate: T; box: TextBox; overlapCount: number } | null = null;
+  let best: { candidate: T; box: TextBox; overlapWeight: number } | null = null;
   for (const candidate of candidates) {
     const box = boxFor(candidate);
-    const overlapCount = occupiedBoxes.filter((b) => boxesOverlap(box, b)).length;
-    if (overlapCount === 0) return { candidate, box };
-    if (!best || overlapCount < best.overlapCount) best = { candidate, box, overlapCount };
+    const overlapWeight = occupiedBoxes
+      .filter((b) => boxesOverlap(box, b))
+      .reduce((sum, b) => sum + (b.weight ?? 1), 0);
+    if (overlapWeight === 0) return { candidate, box };
+    if (!best || overlapWeight < best.overlapWeight) best = { candidate, box, overlapWeight };
   }
   return { candidate: best!.candidate, box: best!.box };
+}
+
+function normalizeAngle(a: number): number {
+  let n = a;
+  while (n > Math.PI) n -= 2 * Math.PI;
+  while (n < -Math.PI) n += 2 * Math.PI;
+  return n;
+}
+
+// Samples a handful of points along the arc actually drawn between d1 and
+// d2 (mirroring the same minor-arc direction the SVG <path>'s own
+// large-arc-flag=0 draws) and registers a small box around each as an
+// obstacle. Without this, a candidate label position was only ever judged
+// against OTHER LABELS -- never against the arc curve it's meant to sit
+// beside -- so a candidate right along the bisector at a modest offset
+// (the usual, most-preferred first candidate) could still land with the
+// arc's own stroke passing directly through the text, observed directly:
+// "30°" with the curve visibly crossing through both digits. Called
+// before placeAngleLabel for the SAME angle, so an angle avoids its own
+// arc, not just earlier ones.
+function registerArcObstacle(
+  atX: number,
+  atY: number,
+  d1: { x: number; y: number },
+  d2: { x: number; y: number },
+  radius: number,
+  occupiedBoxes: TextBox[]
+): void {
+  const angle1 = Math.atan2(d1.y, d1.x);
+  const angle2 = Math.atan2(d2.y, d2.x);
+  const span = normalizeAngle(angle2 - angle1);
+  for (const t of [0.15, 0.35, 0.5, 0.65, 0.85]) {
+    const angle = angle1 + span * t;
+    const x = atX + Math.cos(angle) * radius;
+    const y = atY + Math.sin(angle) * radius;
+    occupiedBoxes.push({ left: x - 5, right: x + 5, top: y - 5, bottom: y + 5 });
+  }
 }
 
 function placeAngleLabel(
@@ -292,7 +337,10 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
   // picks a spot clear of everything placed before it. Point labels are
   // computed here rather than left to their own render pass further down
   // so an angle label has the full picture before it ever has to choose.
-  const occupiedBoxes: TextBox[] = points.map((p) => textBox(sx(p.x) + 6, sy(p.y) - 6, p.label, 11, "start"));
+  const occupiedBoxes: TextBox[] = points.map((p) => ({
+    ...textBox(sx(p.x) + 6, sy(p.y) - 6, p.label, 11, "start"),
+    weight: 3,
+  }));
 
   return (
     <DiagramFrame title={spec.title}>
@@ -484,11 +532,16 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         // traces the actual (non-reflex) angle between the two rays.
         const cross = d1.x * d2.y - d1.y * d2.x;
         const sweep = cross > 0 ? 1 : 0;
+        // Registers this angle's own arc curve as an obstacle before
+        // placing its label, so even a first/only angle at a vertex
+        // avoids having its own arc stroke cross through its label.
+        registerArcObstacle(atX, atY, d1, d2, radius, occupiedBoxes);
         // See placeAngleLabel above: tries the natural bisector position
         // first, then a bounded set of further-out/rotated alternatives,
         // picking whichever one actually clears every label already
         // placed in this diagram (points, segment labels, earlier
-        // angles) -- rather than assuming a direction has open space.
+        // angles, and now this angle's own arc curve) -- rather than
+        // assuming a direction has open space.
         const labelPos = a.label ? placeAngleLabel(atX, atY, d1, d2, radius, occupiedBoxes, a.label) : null;
         return (
           <g key={i}>
