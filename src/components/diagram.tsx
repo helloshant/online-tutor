@@ -127,18 +127,17 @@ function proportionalPoints<P extends { x: number; y: number }>(points: P[]): P[
 function DiagramFrame({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
     <figure className="my-0.5 max-w-full">
-      {/* w-full with a percentage-based min, not a small fixed max-w-[...]px
-          -- a fixed pixel cap has no relationship to how wide the chat
-          window actually is, which is exactly what made this look "too
-          small" regardless of screen size. The diagram's own container
-          (the step card) is already unconstrained up to the chat bubble's
-          own width (max-w-[80%] of the panel, see chat-panel.tsx), so
-          letting this genuinely fill it -- with min-w-[50%] as a floor for
-          a narrower container -- comfortably clears "at least half the
-          chat window" in the normal case instead of being held back. */}
+      {/* Percentage-based width, not a small fixed max-w-[...]px -- a fixed
+          pixel cap has no relationship to how wide the chat window
+          actually is, which is exactly what made this look "too small"
+          regardless of screen size (see the w-full/min-w-[50%] version
+          this replaced). Scaled down to 75% of that by request: w-3/4 with
+          a min-w-[37.5%] floor (75% of the old 50%), mx-auto to center the
+          now-narrower diagram instead of it sitting flush against the
+          left edge of its container. */}
       <svg
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        className="h-auto w-full min-w-[50%] rounded-lg border border-border bg-background/40"
+        className="mx-auto block h-auto w-3/4 min-w-[37.5%] rounded-lg border border-border bg-background/40"
         role="img"
         aria-label={title ?? "Diagram"}
       >
