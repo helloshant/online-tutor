@@ -246,23 +246,55 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
           const len = Math.hypot(dx, dy) || 1;
           return { x: dx / len, y: dy / len };
         };
-        // fromHorizontal is computed here, not supplied by the model: a
-        // pure (±1, 0) unit vector in already-scaled pixel space, which is
+        // A pure (±1, 0) unit vector in already-scaled pixel space --
         // horizontal by construction regardless of the model's own
         // coordinates -- pointed toward whichever side "to" is actually on,
         // so the angle opens up on the same side as the ray it's paired
-        // with rather than an arbitrary fixed direction.
-        const d1 = a.fromHorizontal
-          ? { x: sx(to.x) - atX >= 0 ? 1 : -1, y: 0 }
-          : dir(sx(from!.x), sy(from!.y));
+        // with rather than an arbitrary fixed direction. Used directly for
+        // fromHorizontal, and also as a fallback below for a non-horizontal
+        // "from" that turns out to be nearly collinear with "to".
+        const horizontalDir = { x: sx(to.x) - atX >= 0 ? 1 : -1, y: 0 };
         const d2 = dir(sx(to.x), sy(to.y));
+        let usesHorizontal = a.fromHorizontal === true;
+        let d1 = usesHorizontal ? horizontalDir : dir(sx(from!.x), sy(from!.y));
+        if (!usesHorizontal) {
+          // Defense in depth against a real, repeated failure mode: a
+          // depression/elevation angle where the model supplied a "from"
+          // point that's nearly in the same direction as "to" (seen
+          // directly in production output: reusing a target's own base
+          // point as the reference instead of the horizontal, collapsing
+          // the angle to only a few degrees regardless of its label). A
+          // labeled angle this small is never what a school-level geometry
+          // problem is actually illustrating -- rather than render an
+          // unreadable sliver, silently fall back to the same computed
+          // horizontal fromHorizontal uses. Harmless for a genuinely
+          // intended small angle (there isn't one in practice at this
+          // level) and for every ordinary case (right angles, the ladder's
+          // 20-70°-ish angles), which stay far above this threshold.
+          const dot = d1.x * d2.x + d1.y * d2.y;
+          const cross = d1.x * d2.y - d1.y * d2.x;
+          const angleDeg = (Math.atan2(Math.abs(cross), dot) * 180) / Math.PI;
+          // 20°, not a stricter cutoff: verified directly against the exact
+          // JSON pulled from production (see the commit this threshold
+          // shipped in) that one of the two mislabeled angles there
+          // computed to ~13.6° post-stretch -- comfortably "collapsed" by
+          // any reasonable eyeball test, but above a naively tight cutoff
+          // like 10°. A single 20° threshold catches both without risking
+          // a legitimately-intended small angle at this app's level (this
+          // feature has no example, real or in the prompt, of an
+          // intentionally-drawn arc under 20°).
+          if (angleDeg < 20 && !a.rightAngle) {
+            d1 = horizontalDir;
+            usesHorizontal = true;
+          }
+        }
         // A short dashed stub showing the implied horizontal itself --
         // without it there'd be nothing on screen explaining what the arc
         // below is measured from, since (unlike the `from`-point case)
         // there's no drawn segment along this ray. Rendered here and
         // folded into the shared arc/right-angle-box rendering below via a
         // fragment, rather than duplicating that rendering for this case.
-        const horizontalStub = a.fromHorizontal ? (
+        const horizontalStub = usesHorizontal ? (
           <line
             x1={atX}
             y1={atY}
