@@ -143,7 +143,13 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] space-y-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+      {/* max-w-[80%] (the same conversational-bubble cap chat-panel.tsx's
+          ordinary messages use) reads fine for a short reply, but a topic
+          summary is a longer reference card, not a chat exchange -- capped
+          the same way, it left roughly half the panel empty on a normal
+          desktop width. Wider here specifically, not changed for ordinary
+          chat bubbles, which should stay narrower/conversational. */}
+      <div className="max-w-[95%] space-y-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-foreground/40">{topic.chapter}</p>
           <p className="font-semibold">{topic.topic}</p>
