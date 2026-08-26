@@ -116,18 +116,33 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
 
   let angles: GeometrySpec["angles"];
   if (raw.angles !== undefined) {
-    if (!Array.isArray(raw.angles) || raw.angles.length > MAX_ANGLES) return null;
+    if (!Array.isArray(raw.angles)) return null;
     const parsedAngles: NonNullable<GeometrySpec["angles"]> = [];
-    for (const a of raw.angles) {
-      if (typeof a !== "object" || a === null) return null;
+    // A malformed individual angle is skipped, not treated as a reason to
+    // drop the whole diagram -- observed directly in production: one
+    // angle entry with "to" set to the SAME point as "at" (a real mistake,
+    // not a hypothetical one), among an otherwise perfectly good diagram
+    // with a valid 30° angle, working points, and segments. Rejecting
+    // outright over that one bad entry would have thrown away everything
+    // that was actually fine. Points and segments stay strict (an unknown
+    // point reference there means the shape itself is broken), but an
+    // angle is closer to a decorative annotation on an already-valid
+    // shape -- worth keeping the rest even when one entry is bad.
+    for (const a of raw.angles.slice(0, MAX_ANGLES)) {
+      if (typeof a !== "object" || a === null) continue;
       const { at, from, to, label, rightAngle, fromHorizontal } = a as Record<string, unknown>;
-      if (typeof at !== "string" || typeof to !== "string") return null;
-      if (!labels.has(at) || !labels.has(to)) return null;
+      if (typeof at !== "string" || typeof to !== "string") continue;
+      if (!labels.has(at) || !labels.has(to)) continue;
+      // "to" (or "from") naming the SAME point as "at" gives a zero-length
+      // ray -- not fixable by the collinear-angle fallback in diagram.tsx,
+      // since that only ever corrects the *direction* of "from", never a
+      // ray that has no direction to correct in the first place.
+      if (to === at) continue;
       const usesHorizontal = fromHorizontal === true;
-      // `from` is still required (and must name a real point) unless the
-      // horizontal ray is computed instead -- an angle needs two rays one
-      // way or the other.
-      if (!usesHorizontal && (typeof from !== "string" || !labels.has(from))) return null;
+      // `from` is still required (and must name a real, distinct point)
+      // unless the horizontal ray is computed instead -- an angle needs
+      // two rays one way or the other.
+      if (!usesHorizontal && (typeof from !== "string" || !labels.has(from) || from === at)) continue;
       parsedAngles.push({
         at,
         from: typeof from === "string" && labels.has(from) ? from : undefined,

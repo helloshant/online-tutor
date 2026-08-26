@@ -227,6 +227,14 @@ function GeometryDiagram({ spec }: { spec: GeometrySpec }) {
         const from = a.fromHorizontal ? undefined : byLabel.get(a.from ?? "");
         const to = byLabel.get(a.to);
         if (!at || !to || (!a.fromHorizontal && !from)) return null;
+        // Defense in depth alongside diagramSchema.ts's own rejection of
+        // this: "to" (or "from") naming the same point as "at" gives a
+        // zero-length ray with no direction, which nothing below can
+        // recover from (unlike the collinear-but-nonzero case the
+        // fallback further down exists for). Checked before the occurrence
+        // counter increments, so a rejected angle doesn't consume a
+        // stagger slot a real angle at this vertex could use.
+        if (a.to === a.at || (a.from && a.from === a.at)) return null;
         // The classic pair this feature exists for -- two angles of
         // elevation/depression measured from the same point (e.g. a
         // building's top, to a tower's top and bottom) -- share a vertex
