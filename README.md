@@ -101,8 +101,10 @@ Six containers:
      capture, so they go straight to the LLM and are never written back into cache/db.
 
   Staff (admin/superadmin) chat bypasses the gate/cache/database stages — no board/grade/syllabus,
-  straight to the LLM, same as before — but is still reported to observability, since a staff LLM
-  call still costs real tokens.
+  straight to the LLM — unless they're previewing a specific board/grade/medium (see "Staff
+  board/grade preview" below), in which case they get the exact same gated/cached/database-backed
+  pipeline a real student under that combination would. Either way it's still reported to
+  observability, since a staff LLM call still costs real tokens.
 
   The response carries a `source: "cache" | "database" | "llm" | "rejected"` field.
 
@@ -958,8 +960,9 @@ layout patched to still render on mobile:
   `Chat`/`Practice` tab strip (`hidden ... lg:flex`) above the main content.
 - **Mobile (below `lg`)**: a single fixed **bottom navigation bar** (`<nav>`, `flex lg:hidden`,
   `pb-[env(safe-area-inset-bottom)]` to clear the iOS home-indicator gesture area) with up to four
-  destinations — `Subjects`, `Topics`, `Chat`, `Practice` (`Topics`/`Practice` only shown for
-  students, not staff, same `boardId && gradeId && medium` gate used throughout) — each a
+  destinations — `Subjects`, `Topics`, `Chat`, `Practice` (`Topics`/`Practice` gated on
+  `hasSyllabusScope`, i.e. `boardId && gradeId && medium` — true for a real student always, and for
+  staff only while previewing a board/grade, see "Staff board/grade preview" below) — each a
   full-screen view in the main content area. This replaces two earlier, narrower mobile patches
   (a horizontally scrollable subject-chip row, and a `Topics` tab folded into the same top strip
   desktop uses) with one native-feeling mobile nav surface instead of two competing ones squeezed
@@ -983,6 +986,51 @@ bug, not a font-size preference. The Send button is icon-only below `sm` (`➤`,
 since the visual "Send" text is hidden there) rather than a full text label, which was a third
 element competing for width alongside the attach button and the input itself on a narrow screen;
 the label reappears at `sm:` and up.
+
+### Staff board/grade preview
+
+Staff (admin/superadmin) never subscribe or pay — they've always gotten unrestricted access to
+every subject in the catalog, but until now that meant unrestricted *unscoped* chat too: no
+board/grade/syllabus, straight to the LLM, with no way to see what a real student under a specific
+board/grade/medium actually experiences (syllabus grounding, the answer bank, cached answers). A
+staff member can now optionally **preview** a specific board/grade/medium via a small form in the
+dashboard header (`StaffPreviewPicker`) and move freely between boards/grades to test each one —
+picking a combination navigates to `/dashboard?board=..&grade=..&medium=..`, a plain `GET` form (no
+client JS needed), which `dashboard/page.tsx` re-resolves and validates on every load, the same way
+it already validates a real student's subscription-derived scope.
+
+- **Validation**: `resolveStaffPreviewScope` (`src/lib/staffPreview.ts`) checks the requested
+  board/grade/subject combination against `board_grade_subjects` — the same offering table
+  onboarding itself scopes a real student's subject picker to — so a staff preview can never reach
+  a combination no actual student could. An unknown board/grade id, or one that genuinely offers no
+  subjects, falls straight through to the pre-existing unrestricted default rather than rendering a
+  broken preview. Reused by `/api/chat` and (via `resolveStudentSubjectScope`'s new optional
+  `staffPreview` parameter) the two answer-bank Practice endpoints, so every subject-scoped route a
+  preview touches applies the identical check.
+- **Once previewing, staff get the real thing**: `DashboardShell`'s `hasSyllabusScope` no longer
+  excludes staff (`Boolean(boardId && gradeId && medium)`, not `!isStaffUser && ...`) — a staff
+  preview renders `SyllabusPanel`/`TopicList`/`PracticePanel` exactly like a real student's own
+  scope would, and `/api/chat` runs the full `mode: "student"` pipeline (syllabus gate, cache,
+  answer bank, RAG) instead of the old unscoped `mode: "staff"` one. `/api/topics/[id]/summary` and
+  `/api/topics/[id]/exercises` needed no changes at all — both were already topic-id-driven with no
+  subscription requirement, falling back to the topic's own medium when there's no subscription to
+  read a native medium from (which is exactly the staff case, preview or not).
+- **Separate chat threads per preview**: staff chat has always stored `chat_messages` rows with
+  `subscription_id = null` (0004_superadmin_and_staff_access.sql), scoped only by
+  `(user_id, subject_id)` — fine when there was only ever one staff "mode," but a staff member
+  switching between board/grade previews on the *same* subject (e.g. Mathematics exists under
+  several boards) would otherwise see every other preview's history bleed into the current one, and
+  the LLM would be handed conversation context answered under a completely different board's
+  syllabus. `0036_chat_messages_staff_preview_scope.sql` adds nullable `board_id`/`grade_id`/`medium`
+  to `chat_messages`, populated only for a staff row written while previewing (null for a real
+  student, whose `subscription_id` already identifies their scope, and null for staff in
+  unrestricted mode, exactly matching every pre-existing row) — giving three cleanly separated
+  threads instead of one shared bucket: a student's subscription, one thread per staff preview, and
+  unrestricted staff mode. `/api/chat` and `ChatPanel`'s own history-loading query both apply this
+  three-way scoping identically, including the `regenerateMessageId` ownership check.
+- **Not previewing anything**: leaving board/grade/medium unselected (or clicking "Exit preview")
+  falls back to exactly the original staff experience — every subject in the catalog, unscoped chat,
+  no change in behavior from before this feature existed.
 
 ### Answer bank tags — search by source ("Ganit Prakash", "WBJEE 2023")
 

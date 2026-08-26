@@ -17,10 +17,22 @@ type SearchResult = { question: string; answer: string; image_urls: string[] };
 // drop a summary bubble into the chat timeline instead.
 export function PracticePanel({
   subjectId,
+  boardId,
+  gradeId,
+  medium,
   active,
   onAskAbout,
 }: {
   subjectId: string;
+  // Set only while a staff member is previewing a specific board/grade --
+  // included in the two answer-bank fetches below so the server can
+  // validate/apply that preview (see resolveStaffPreviewScope) instead of
+  // requiring a subscription, which staff never have. Undefined/omitted for
+  // a real student, whose scope is always resolved from their subscription
+  // server-side regardless of what's sent here.
+  boardId?: string | null;
+  gradeId?: string | null;
+  medium?: string | null;
   // Whether the Practice tab is the one currently showing -- dashboard-shell
   // keeps this panel mounted (just hidden via CSS) when switching tabs, so
   // its already-fetched `results` would otherwise sit stale in memory
@@ -71,6 +83,11 @@ export function PracticePanel({
 
     (async () => {
       const params = new URLSearchParams({ subjectId });
+      if (boardId && gradeId && medium) {
+        params.set("boardId", boardId);
+        params.set("gradeId", gradeId);
+        params.set("medium", medium);
+      }
       const res = await fetch(`/api/answer-bank/tags?${params.toString()}`);
       const body = await res.json().catch(() => null);
       if (!cancelled && res.ok && Array.isArray(body?.tags)) {
@@ -81,7 +98,7 @@ export function PracticePanel({
     return () => {
       cancelled = true;
     };
-  }, [subjectId]);
+  }, [subjectId, boardId, gradeId, medium]);
 
   const runSearch = useCallback(
     async (offset: number, append: boolean) => {
@@ -93,6 +110,11 @@ export function PracticePanel({
       const params = new URLSearchParams({ subjectId });
       if (selectedTag) params.set("tag", selectedTag);
       if (offset > 0) params.set("offset", String(offset));
+      if (boardId && gradeId && medium) {
+        params.set("boardId", boardId);
+        params.set("gradeId", gradeId);
+        params.set("medium", medium);
+      }
 
       try {
         // no-store, not the default cache mode -- rules out a browser (or
@@ -121,7 +143,7 @@ export function PracticePanel({
         }
       }
     },
-    [subjectId, selectedTag]
+    [subjectId, selectedTag, boardId, gradeId, medium]
   );
 
   // Auto-searches as soon as a tag is picked -- this is a facet filter, not

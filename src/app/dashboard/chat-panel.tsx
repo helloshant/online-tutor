@@ -70,6 +70,8 @@ function readImageFile(file: File): Promise<SelectedImage> {
 export function ChatPanel({
   subscriptionId,
   subject,
+  boardId,
+  gradeId,
   medium,
   isStaffUser,
   topicClick,
@@ -77,6 +79,14 @@ export function ChatPanel({
 }: {
   subscriptionId: string | null;
   subject: SubjectSummary;
+  // Set for a real student always, and for staff only while previewing a
+  // specific board/grade -- null for staff in unrestricted mode. Sent back
+  // to /api/chat as previewBoardId/previewGradeId so a staff request lands
+  // in that preview's own chat thread (see 0036_chat_messages_staff_preview_scope.sql)
+  // rather than staff's shared unrestricted-mode thread; harmless/ignored
+  // for a real student, whose scope is always subscription-derived anyway.
+  boardId: string | null;
+  gradeId: string | null;
   medium: Medium | null;
   isStaffUser: boolean;
   topicClick: { clickId: string; topic: SyllabusTopic } | null;
@@ -125,12 +135,22 @@ export function ChatPanel({
       // Always scope by user_id, not just subscription_id: staff chats carry
       // a null subscription_id, so without this a query could otherwise mix
       // together every staff member's conversation on the same subject.
+      // Mirrors /api/chat's own three-way chat-thread scoping: a real
+      // student's subscription; a staff preview of one board/grade
+      // (boardId/gradeId set, its own separate thread); or unrestricted
+      // staff mode (neither set).
       let query = supabase
         .from("chat_messages")
         .select("*")
         .eq("user_id", user.id)
         .eq("subject_id", subject.id);
-      query = subscriptionId ? query.eq("subscription_id", subscriptionId) : query.is("subscription_id", null);
+      if (subscriptionId) {
+        query = query.eq("subscription_id", subscriptionId);
+      } else if (boardId && gradeId && medium) {
+        query = query.is("subscription_id", null).eq("board_id", boardId).eq("grade_id", gradeId).eq("medium", medium);
+      } else {
+        query = query.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+      }
 
       const { data } = await query.order("created_at", { ascending: true });
       if (!cancelled) {
@@ -142,7 +162,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [subscriptionId, subject.id]);
+  }, [subscriptionId, subject.id, boardId, gradeId, medium]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -167,6 +187,9 @@ export function ChatPanel({
         user_id: "",
         subscription_id: subscriptionId,
         subject_id: subject.id,
+        board_id: null,
+        grade_id: null,
+        medium: null,
         role: "user",
         content: trimmed || "[Image]",
         created_at: new Date().toISOString(),
@@ -188,6 +211,12 @@ export function ChatPanel({
             // the server only honors it for English-subject, non-English-medium
             // students (see ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts).
             preferEnglish,
+            // Only meaningful for a staff request (resolveStaffPreviewScope
+            // re-validates and ignores it otherwise) -- undefined for a real
+            // student, whose scope is always subscription-derived server-side.
+            previewBoardId: boardId ?? undefined,
+            previewGradeId: gradeId ?? undefined,
+            previewMedium: medium ?? undefined,
           }),
         });
         const body = await res.json();
@@ -212,7 +241,7 @@ export function ChatPanel({
         setSending(false);
       }
     },
-    [sending, subscriptionId, subject.id, preferEnglish]
+    [sending, subscriptionId, subject.id, boardId, gradeId, medium, preferEnglish]
   );
 
   // Re-answers an already-shown assistant reply in a new language and
@@ -236,6 +265,9 @@ export function ChatPanel({
             message: questionText,
             regenerateMessageId: assistantMessageId,
             preferEnglish: nextPreferEnglish,
+            previewBoardId: boardId ?? undefined,
+            previewGradeId: gradeId ?? undefined,
+            previewMedium: medium ?? undefined,
           }),
         });
         const body = await res.json();
@@ -255,7 +287,7 @@ export function ChatPanel({
         setRegeneratingMessageId(null);
       }
     },
-    [subject.id]
+    [subject.id, boardId, gradeId, medium]
   );
 
   // Fires regenerateLastReply above exactly when the toggle changes *and*
@@ -384,7 +416,7 @@ export function ChatPanel({
         <div>
           <h1 className="text-sm font-semibold">{subject.name}</h1>
           <p className="text-xs text-foreground/50">
-            {isStaffUser
+            {isStaffUser && !medium
               ? "Staff access: unrestricted, not limited to any one syllabus."
               : `Answers are limited to this subject's syllabus, in ${
                   showLanguageToggle && preferEnglish ? "English" : medium

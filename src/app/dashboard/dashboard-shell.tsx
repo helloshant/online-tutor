@@ -8,6 +8,7 @@ import { SyllabusPanel } from "./syllabus-panel";
 import { PracticePanel } from "./practice-panel";
 import { InboxPanel } from "./inbox-panel";
 import { TopicList } from "./topic-list";
+import { StaffPreviewPicker } from "./staff-preview-picker";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -29,11 +30,13 @@ interface SubjectSummary {
 const ENGLISH_SUBJECT_CODE = "ENG";
 
 // The medium a subject's syllabus/topics should actually be fetched under
-// -- almost always the student's own subscribed medium, except for English
-// (see the constant above). `medium` can be null here (staff mode), but
-// every call site below only reaches this once `medium` is already known
-// non-null (guarded by `!isStaffUser && medium` in JSX), so the cast is
-// safe in context, not a blind assertion.
+// -- almost always the student's own subscribed medium (or, for staff, the
+// medium they're currently previewing), except for English (see the
+// constant above). `medium` can be null here (a real student always has
+// one, but staff outside of preview mode doesn't), but every call site
+// below only reaches this once `medium` is already known non-null (guarded
+// by `boardId && gradeId && medium` in JSX -- see hasSyllabusScope), so the
+// cast is safe in context, not a blind assertion.
 function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
   return subject.code === ENGLISH_SUBJECT_CODE ? "English" : medium;
 }
@@ -55,6 +58,8 @@ export function DashboardShell({
   medium,
   subjects,
   isStaffUser,
+  allBoards = [],
+  allGrades = [],
 }: {
   userName: string;
   subscriptionId: string | null;
@@ -65,6 +70,11 @@ export function DashboardShell({
   medium: Medium | null;
   subjects: SubjectSummary[];
   isStaffUser: boolean;
+  // Staff-only: the full board/grade lists fed to StaffPreviewPicker below.
+  // Never fetched (or needed) for a real student, so these default to empty
+  // rather than page.tsx having to pass them through unused every time.
+  allBoards?: { id: string; name: string }[];
+  allGrades?: { id: string; name: string }[];
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null
@@ -97,7 +107,10 @@ export function DashboardShell({
   const [mainTab, setMainTab] = useState<MainTab>("chat");
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
-  const hasSyllabusScope = !isStaffUser && Boolean(boardId && gradeId && medium);
+  // True for a real student always, and for staff only while previewing a
+  // specific board/grade/medium -- false for staff in unrestricted mode,
+  // same as before this combination existed.
+  const hasSyllabusScope = Boolean(boardId && gradeId && medium);
 
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
@@ -126,6 +139,8 @@ export function DashboardShell({
     setMainTab("chat");
   }
 
+  const subjectsHeading = isStaffUser ? (hasSyllabusScope ? "Offered subjects" : "All subjects") : "Your subjects";
+
   const mobileNavItems: { tab: MainTab; icon: string; label: string }[] = [
     { tab: "subjects", icon: "📚", label: "Subjects" },
     ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
@@ -140,10 +155,17 @@ export function DashboardShell({
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-brand">TutorOps</span>
           <span className="hidden text-xs text-foreground/50 sm:inline">
-            {isStaffUser ? "Staff access · all subjects" : `${boardName} · ${gradeName} · ${medium}`}
+            {isStaffUser
+              ? hasSyllabusScope
+                ? `Previewing: ${boardName} · ${gradeName} · ${medium}`
+                : "Staff access · all subjects"
+              : `${boardName} · ${gradeName} · ${medium}`}
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
+          {isStaffUser && (
+            <StaffPreviewPicker boards={allBoards} grades={allGrades} boardId={boardId} gradeId={gradeId} medium={medium} />
+          )}
           <span className="hidden text-foreground/70 sm:inline">{userName}</span>
           {isStaffUser && (
             <Link href="/admin" className="font-medium text-brand hover:underline">
@@ -167,7 +189,7 @@ export function DashboardShell({
           <div className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}>
             {!subjectsCollapsed && (
               <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                {isStaffUser ? "All subjects" : "Your subjects"}
+                {subjectsHeading}
               </h2>
             )}
             <button
@@ -206,7 +228,7 @@ export function DashboardShell({
           </nav>
         </aside>
 
-        {selectedSubject && boardId && gradeId && medium && !isStaffUser && (
+        {selectedSubject && boardId && gradeId && medium && (
           <SyllabusPanel
             key={`${selectedSubject.id}-syllabus`}
             boardId={boardId}
@@ -222,7 +244,7 @@ export function DashboardShell({
           {mainTab === "subjects" ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                {isStaffUser ? "All subjects" : "Your subjects"}
+                {subjectsHeading}
               </h1>
               {subjects.length === 0 ? (
                 <p className="text-sm text-foreground/50">No subjects subscribed.</p>
@@ -254,7 +276,12 @@ export function DashboardShell({
                   a Subjects tab here). */}
               {hasSyllabusScope && (
                 <div className="hidden shrink-0 gap-1 border-b border-border bg-surface px-6 pt-2 lg:flex">
-                  {(["chat", "practice", "inbox"] as const).map((tab) => (
+                  {/* Inbox is a real student's own subscription inbox --
+                      never meaningful for staff, preview or not, so it's
+                      left off this row entirely for them rather than shown
+                      and rendering nothing (see the !isStaffUser guard
+                      further down where its panel is actually rendered). */}
+                  {(isStaffUser ? (["chat", "practice"] as const) : (["chat", "practice", "inbox"] as const)).map((tab) => (
                     <button
                       key={tab}
                       type="button"
@@ -274,7 +301,7 @@ export function DashboardShell({
               {/* All panels stay mounted and toggle via display, not
                   conditional rendering, so switching tabs never discards any
                   panel's state. */}
-              {boardId && gradeId && medium && !isStaffUser && (
+              {boardId && gradeId && medium && (
                 <div className={mainTab === "topics" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
                   <p className="mb-3 text-xs text-foreground/40">
                     Tap a topic to drop its summary into the chat.
@@ -294,17 +321,22 @@ export function DashboardShell({
                   key={selectedSubject.id}
                   subscriptionId={subscriptionId}
                   subject={selectedSubject}
+                  boardId={boardId}
+                  gradeId={gradeId}
                   medium={medium}
                   isStaffUser={isStaffUser}
                   topicClick={topicClick}
                   practiceQuestionClick={practiceQuestionClick}
                 />
               </div>
-              {boardId && gradeId && medium && !isStaffUser && (
+              {boardId && gradeId && medium && (
                 <div className={mainTab === "practice" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                   <PracticePanel
                     key={selectedSubject.id}
                     subjectId={selectedSubject.id}
+                    boardId={boardId}
+                    gradeId={gradeId}
+                    medium={medium}
                     active={mainTab === "practice"}
                     onAskAbout={handleAskAboutPractice}
                   />

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
+import { resolveStaffPreviewScope } from "@/lib/staffPreview";
 import {
   getOrchestratedReply,
   type ChatOrchestrationRequest,
   type ImageAttachment,
   type ImageMediaType,
 } from "@/lib/orchestratorClient";
-import type { ChatMessage, Medium } from "@/lib/supabase/types";
+import type { ChatMessage, Database, Medium } from "@/lib/supabase/types";
 
 // The one subject where "respond in the student's native medium" isn't
 // always what the student wants -- English is a language-learning subject
@@ -48,6 +50,67 @@ function parseImageField(raw: unknown): { image?: ImageAttachment; error?: strin
     return { error: "image is too large" };
   }
   return { image: { mediaType: mediaType as ImageMediaType, base64 } };
+}
+
+// Shared by a real student's subscription-derived scope and a staff
+// member's preview-derived scope (see resolveStaffPreviewScope) -- both
+// resolve to the exact same board/grade/medium/topics/contentMedium/
+// responseLanguage derivation, just sourced from a different place. Kept as
+// one function so the two never drift out of sync with each other.
+async function buildStudentOrchestrationRequest(
+  supabase: SupabaseClient<Database>,
+  params: {
+    userId: string;
+    subjectId: string;
+    subjectName: string;
+    subjectCode: string;
+    boardId: string;
+    gradeId: string;
+    medium: Medium;
+    preferEnglish: boolean;
+    message: string;
+    image?: ImageAttachment;
+  }
+): Promise<ChatOrchestrationRequest> {
+  const isEnglishSubject = params.subjectCode === ENGLISH_SUBJECT_CODE;
+
+  // See the matching comments in the original single-branch version of this
+  // route (still accurate): contentMedium decides what's in scope to ask
+  // about (syllabus/RAG/cache), responseLanguage only decides what language
+  // the reply is written in.
+  const contentMedium: Medium = isEnglishSubject ? "English" : params.medium;
+  const responseLanguage: Medium =
+    params.preferEnglish && isEnglishSubject && params.medium !== "English" ? "English" : params.medium;
+
+  const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
+    supabase.from("boards").select("name").eq("id", params.boardId).single(),
+    supabase.from("grades").select("name").eq("id", params.gradeId).single(),
+    supabase
+      .from("syllabus_topics")
+      .select("chapter, topic")
+      .eq("board_id", params.boardId)
+      .eq("grade_id", params.gradeId)
+      .eq("subject_id", params.subjectId)
+      .eq("medium", contentMedium)
+      .order("sort_order"),
+  ]);
+
+  return {
+    mode: "student",
+    userId: params.userId,
+    subjectId: params.subjectId,
+    subjectName: params.subjectName,
+    boardId: params.boardId,
+    boardName: board?.name ?? "",
+    gradeId: params.gradeId,
+    gradeName: grade?.name ?? "",
+    medium: contentMedium,
+    responseLanguage,
+    topics: topics ?? [],
+    message: params.message,
+    image: params.image,
+    history: [],
+  };
 }
 
 export async function POST(request: Request) {
@@ -111,23 +174,62 @@ async function handleChatRequest(request: Request) {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
 
   let subscriptionId: string | null = null;
+  // Set only for a staff member actively previewing a specific
+  // board/grade/medium (see resolveStaffPreviewScope) -- used below to
+  // scope/persist their chat_messages rows separately per preview, instead
+  // of mixing them into one thread the way unrestricted staff chat always
+  // has (see 0036_chat_messages_staff_preview_scope.sql).
+  let previewBoardId: string | null = null;
+  let previewGradeId: string | null = null;
+  let previewMedium: Medium | null = null;
   let orchestrationRequest: ChatOrchestrationRequest;
 
   if (isStaff(profile?.role)) {
     // Staff never subscribe: only requirement is that the subject exists.
-    const { data: subject } = await supabase.from("subjects").select("name").eq("id", subjectId).single();
+    const { data: subject } = await supabase.from("subjects").select("name, code").eq("id", subjectId).single();
     if (!subject) {
       return NextResponse.json({ error: "Unknown subject" }, { status: 404 });
     }
-    orchestrationRequest = {
-      mode: "staff",
-      userId: user.id,
-      subjectId,
-      subjectName: subject.name,
-      message,
-      image,
-      history: [],
-    };
+
+    // A staff member can optionally preview a specific board/grade/medium
+    // to see exactly what a student under that combination experiences --
+    // resolved/validated the same way onboarding validates a real
+    // student's own selection (see resolveStaffPreviewScope). Absent or
+    // invalid falls through to the unrestricted "ask anything" mode staff
+    // chat has always been.
+    const preview = await resolveStaffPreviewScope(supabase, subjectId, {
+      boardId: body?.previewBoardId,
+      gradeId: body?.previewGradeId,
+      medium: body?.previewMedium,
+    });
+
+    if (preview) {
+      previewBoardId = preview.boardId;
+      previewGradeId = preview.gradeId;
+      previewMedium = preview.medium;
+      orchestrationRequest = await buildStudentOrchestrationRequest(supabase, {
+        userId: user.id,
+        subjectId,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+        boardId: preview.boardId,
+        gradeId: preview.gradeId,
+        medium: preview.medium,
+        preferEnglish,
+        message,
+        image,
+      });
+    } else {
+      orchestrationRequest = {
+        mode: "staff",
+        userId: user.id,
+        subjectId,
+        subjectName: subject.name,
+        message,
+        image,
+        history: [],
+      };
+    }
   } else {
     const { data: subscription } = await supabase
       .from("subscriptions")
@@ -155,64 +257,20 @@ async function handleChatRequest(request: Request) {
     }
 
     const subjectRow = (subjectLink as unknown as { subjects: { name: string; code: string } | null }).subjects;
-    const subjectName = subjectRow?.name ?? "the subject";
-    const isEnglishSubject = subjectRow?.code === ENGLISH_SUBJECT_CODE;
-
-    // English is the one subject where the syllabus itself is always in
-    // English, regardless of what medium the rest of the student's board/
-    // grade is taught in -- it teaches the English language, so its
-    // chapters/poems/prose are inherently written in English, the same
-    // single syllabus an English-medium student would see (see
-    // "Medium-scoped syllabus storage" in the README, and
-    // dashboard-shell.tsx's identical syllabusMediumFor). Every other
-    // subject's syllabus stays scoped to the student's own subscribed
-    // medium, since that content genuinely is authored per-medium.
-    const contentMedium: Medium = isEnglishSubject ? "English" : subscription.medium;
-
-    // Only English-subject chat offers this toggle at all -- every other
-    // subject's syllabus/chapter content only ever exists in the student's
-    // own medium, so there'd be nothing for "English" to switch to.
-    // Deliberately independent of contentMedium above: contentMedium
-    // decides which syllabus/RAG/cache scope a question is answered
-    // against (what's actually in scope to ask about), while
-    // responseLanguage only decides what language the model replies in --
-    // a Bengali-medium student's default (toggle off) is still an
-    // explanation in Bengali even though English's own syllabus content is
-    // always in English, and switching it on to "English" doesn't change
-    // what's in scope, just how the answer reads.
-    const responseLanguage: Medium =
-      preferEnglish && isEnglishSubject && subscription.medium !== "English" ? "English" : subscription.medium;
-
-    const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
-      supabase.from("boards").select("name").eq("id", subscription.board_id).single(),
-      supabase.from("grades").select("name").eq("id", subscription.grade_id).single(),
-      supabase
-        .from("syllabus_topics")
-        .select("chapter, topic")
-        .eq("board_id", subscription.board_id)
-        .eq("grade_id", subscription.grade_id)
-        .eq("subject_id", subjectId)
-        .eq("medium", contentMedium)
-        .order("sort_order"),
-    ]);
 
     subscriptionId = subscription.id;
-    orchestrationRequest = {
-      mode: "student",
+    orchestrationRequest = await buildStudentOrchestrationRequest(supabase, {
       userId: user.id,
       subjectId,
-      subjectName,
+      subjectName: subjectRow?.name ?? "the subject",
+      subjectCode: subjectRow?.code ?? "",
       boardId: subscription.board_id,
-      boardName: board?.name ?? "",
       gradeId: subscription.grade_id,
-      gradeName: grade?.name ?? "",
-      medium: contentMedium,
-      responseLanguage,
-      topics: topics ?? [],
+      medium: subscription.medium,
+      preferEnglish,
       message,
       image,
-      history: [],
-    };
+    });
   }
 
   // When regenerating, the history the model should see is exactly what it
@@ -223,6 +281,14 @@ async function handleChatRequest(request: Request) {
   // that doesn't belong to this user/subject/subscription, or isn't an
   // assistant row, is rejected outright rather than silently regenerating
   // nothing or someone else's conversation.
+  // Three distinct threads a chat_messages row can belong to -- applied
+  // identically below wherever a query needs to land in exactly one of
+  // them: a real student's subscription; a staff preview of one specific
+  // board/grade/medium (kept separate from every other preview, and from
+  // unrestricted mode, by 0036_chat_messages_staff_preview_scope.sql); or
+  // unrestricted staff mode (today's original behavior, unchanged).
+  const isPreview = Boolean(previewBoardId && previewGradeId && previewMedium);
+
   let regenerateCutoff: string | null = null;
   if (regenerateMessageId) {
     let targetQuery = supabase
@@ -232,9 +298,17 @@ async function handleChatRequest(request: Request) {
       .eq("user_id", user.id)
       .eq("subject_id", subjectId)
       .eq("role", "assistant");
-    targetQuery = subscriptionId
-      ? targetQuery.eq("subscription_id", subscriptionId)
-      : targetQuery.is("subscription_id", null);
+    if (subscriptionId) {
+      targetQuery = targetQuery.eq("subscription_id", subscriptionId);
+    } else if (isPreview) {
+      targetQuery = targetQuery
+        .is("subscription_id", null)
+        .eq("board_id", previewBoardId as string)
+        .eq("grade_id", previewGradeId as string)
+        .eq("medium", previewMedium as Medium);
+    } else {
+      targetQuery = targetQuery.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+    }
     const { data: target } = await targetQuery.maybeSingle();
     if (!target) {
       return NextResponse.json({ error: "That message can't be regenerated." }, { status: 404 });
@@ -247,9 +321,17 @@ async function handleChatRequest(request: Request) {
     .select("role, content")
     .eq("user_id", user.id)
     .eq("subject_id", subjectId);
-  historyQuery = subscriptionId
-    ? historyQuery.eq("subscription_id", subscriptionId)
-    : historyQuery.is("subscription_id", null);
+  if (subscriptionId) {
+    historyQuery = historyQuery.eq("subscription_id", subscriptionId);
+  } else if (isPreview) {
+    historyQuery = historyQuery
+      .is("subscription_id", null)
+      .eq("board_id", previewBoardId as string)
+      .eq("grade_id", previewGradeId as string)
+      .eq("medium", previewMedium as Medium);
+  } else {
+    historyQuery = historyQuery.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+  }
   if (regenerateCutoff) historyQuery = historyQuery.lt("created_at", regenerateCutoff);
   const { data: history } = await historyQuery.order("created_at", { ascending: false }).limit(HISTORY_LIMIT);
 
@@ -295,6 +377,14 @@ async function handleChatRequest(request: Request) {
     return NextResponse.json({ assistantMessage: updated as ChatMessage });
   }
 
+  // Null for a real student (subscription_id already identifies their
+  // board/grade/medium) and for unrestricted staff mode -- set only for a
+  // staff row written while previewing a specific board/grade/medium, so
+  // that preview keeps its own thread (see scoping comment above).
+  const rowBoardId = isPreview ? previewBoardId : null;
+  const rowGradeId = isPreview ? previewGradeId : null;
+  const rowMedium = isPreview ? previewMedium : null;
+
   const { data: inserted, error: insertError } = await admin
     .from("chat_messages")
     .insert([
@@ -302,6 +392,9 @@ async function handleChatRequest(request: Request) {
         user_id: user.id,
         subscription_id: subscriptionId,
         subject_id: subjectId,
+        board_id: rowBoardId,
+        grade_id: rowGradeId,
+        medium: rowMedium,
         role: "user",
         // The image itself is never persisted (not written to storage, only
         // passed through to the LLM for this one exchange) -- content is
@@ -313,6 +406,9 @@ async function handleChatRequest(request: Request) {
         user_id: user.id,
         subscription_id: subscriptionId,
         subject_id: subjectId,
+        board_id: rowBoardId,
+        grade_id: rowGradeId,
+        medium: rowMedium,
         role: "assistant",
         content: assistantText,
       },

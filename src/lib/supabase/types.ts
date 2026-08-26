@@ -129,6 +129,13 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   created_at: string;
+  // Set only for a staff row written while previewing a specific
+  // board/grade/medium (see 0036_chat_messages_staff_preview_scope.sql) --
+  // null for every real student row (subscription_id already identifies
+  // their board/grade/medium) and for staff rows in unrestricted mode.
+  board_id: string | null;
+  grade_id: string | null;
+  medium: Medium | null;
 };
 
 export type AnswerValidationStatus = "auto_approved" | "pending_review" | "admin_approved" | "rejected";

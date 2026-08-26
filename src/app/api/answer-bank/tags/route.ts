@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isStaff } from "@/lib/auth";
 import { resolveStudentSubjectScope } from "@/lib/studentScope";
+import { resolveStaffPreviewScope } from "@/lib/staffPreview";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -39,7 +41,16 @@ async function handleGetTags(request: Request) {
     return NextResponse.json({ error: "subjectId is required" }, { status: 400 });
   }
 
-  const scope = await resolveStudentSubjectScope(supabase, user.id, subjectId);
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const staffPreview = isStaff(profile?.role)
+    ? await resolveStaffPreviewScope(supabase, subjectId, {
+        boardId: url.searchParams.get("boardId"),
+        gradeId: url.searchParams.get("gradeId"),
+        medium: url.searchParams.get("medium"),
+      })
+    : null;
+
+  const scope = await resolveStudentSubjectScope(supabase, user.id, subjectId, staffPreview);
   if (!scope) {
     return NextResponse.json({ error: "That subject is not part of your subscription" }, { status: 403 });
   }

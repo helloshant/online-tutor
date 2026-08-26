@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Medium } from "@/lib/supabase/types";
+import type { StaffPreviewScope } from "@/lib/staffPreview";
 
 export type StudentSubjectScope = {
   boardId: string;
@@ -17,11 +18,21 @@ export type StudentSubjectScope = {
 // client-facing RLS policies (see supabase/migrations/0005_answer_bank.sql)
 // and must not be queryable for a board/grade/subject a student never paid
 // for, even read-only.
+//
+// staffPreview, when given, short-circuits straight to that scope instead
+// of looking up a subscription -- staff never have one. The caller is
+// responsible for actually being staff and for validating the preview
+// itself (see resolveStaffPreviewScope in src/lib/staffPreview.ts); this
+// function just trusts whatever it's handed here, same as it trusts a real
+// subscription row once found.
 export async function resolveStudentSubjectScope(
   supabase: SupabaseClient<Database>,
   userId: string,
-  subjectId: string
+  subjectId: string,
+  staffPreview?: StaffPreviewScope | null
 ): Promise<StudentSubjectScope | null> {
+  if (staffPreview) return staffPreview;
+
   const { data: subscription } = await supabase
     .from("subscriptions")
     .select("id, board_id, grade_id, medium, status")
