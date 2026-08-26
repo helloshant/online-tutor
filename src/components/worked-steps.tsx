@@ -1,3 +1,4 @@
+import { MathText } from "@/components/math-text";
 import { DiagramText } from "@/components/diagram-text";
 
 // buildTutorSystemPrompt's rule 5 asks the model to wrap each distinct step
@@ -71,7 +72,13 @@ export function WorkedSteps({ text }: { text: string }) {
               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[10px]">
                 {segment.number}
               </span>
-              {segment.title}
+              {/* MathText, not the full DiagramText/CitationText stack --
+                  a step title is a short concept label (e.g. "Isolate
+                  \( h^2 \)"), never expected to carry a citation or a
+                  diagram of its own, but it does routinely carry inline
+                  LaTeX (observed in real output), which rendered as raw
+                  text otherwise -- \( \), $ $ etc. showing up literally. */}
+              <MathText text={segment.title} />
             </p>
             <div className="whitespace-pre-wrap text-sm">
               <DiagramText text={segment.content} />
