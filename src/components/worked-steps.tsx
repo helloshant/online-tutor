@@ -1,21 +1,22 @@
-import { CitationText } from "@/components/citation-text";
+import { DiagramText } from "@/components/diagram-text";
 
 // buildTutorSystemPrompt's rule 5 asks the model to wrap each distinct step
 // of a multi-step solution as [STEP: <concept/rule this step applies>]...
 // [/STEP], only for a problem that genuinely takes multiple steps -- a
 // short factual answer has no step markers at all and falls straight
-// through to CitationText unchanged below. This finds those blocks and
+// through to DiagramText unchanged below. This finds those blocks and
 // renders each one as its own visually distinct card labeled with the
 // concept it's teaching, not just the raw arithmetic -- the point being
 // that a student stuck on one step can see *which idea* it's using at a
 // glance, not just reread the whole answer looking for it.
 //
-// Deliberately a step above CitationText in the rendering stack (parses
+// Deliberately a step above DiagramText in the rendering stack (parses
 // [STEP] blocks first, then hands each block's own text -- and any
-// non-step text before/after them -- to CitationText, which in turn
+// non-step text before/after them -- to DiagramText, which finds any
+// [DIAGRAM] block before deferring the rest to CitationText, which in turn
 // delegates non-citation text to MathText): each layer owns exactly one
-// concern, so a step's content still gets full LaTeX/citation rendering
-// for free, with nothing duplicated here.
+// concern, so a step's content still gets full diagram/LaTeX/citation
+// rendering for free, with nothing duplicated here.
 const STEP_PATTERN = /\[STEP:\s*([^\]]+)\]\s*([\s\S]*?)\s*\[\/STEP\]/g;
 
 type Segment = { kind: "text"; content: string } | { kind: "step"; title: string; content: string; number: number };
@@ -47,9 +48,9 @@ export function WorkedSteps({ text }: { text: string }) {
   const hasSteps = segments.some((s) => s.kind === "step");
 
   // No step markers at all -- the overwhelmingly common case for a short
-  // factual answer -- renders exactly as it always has, via CitationText.
+  // factual answer -- renders exactly as it always has, via DiagramText.
   if (!hasSteps) {
-    return <CitationText text={text} />;
+    return <DiagramText text={text} />;
   }
 
   return (
@@ -61,7 +62,7 @@ export function WorkedSteps({ text }: { text: string }) {
           // that opens straight into [STEP: ...] leaves nothing here.
           segment.content.trim() && (
             <p key={i} className="whitespace-pre-wrap">
-              <CitationText text={segment.content} />
+              <DiagramText text={segment.content} />
             </p>
           )
         ) : (
@@ -73,7 +74,7 @@ export function WorkedSteps({ text }: { text: string }) {
               {segment.title}
             </p>
             <div className="whitespace-pre-wrap text-sm">
-              <CitationText text={segment.content} />
+              <DiagramText text={segment.content} />
             </div>
           </div>
         )

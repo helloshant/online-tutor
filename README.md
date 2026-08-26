@@ -1339,10 +1339,10 @@ ordinary prose with no markers at all, exactly as before this existed.
 
 `src/components/worked-steps.tsx` (`WorkedSteps`) parses that convention client-side and renders
 each block as its own labeled card instead of a flat paragraph; a message with no `[STEP: ...]`
-markers (the common case) falls straight through to `CitationText` unchanged. Deliberately layered
-*above* `CitationText`/`MathText`, not a replacement for either — each step's own content is handed
-to `CitationText`, which still finds `(Source: ...)` citations and hands the rest to `MathText` for
-LaTeX, so a step gets full citation/math rendering for free with nothing duplicated. Wired into
+markers (the common case) falls straight through to `DiagramText` unchanged (see "Worked-example
+diagrams" below). Deliberately layered *above* `DiagramText`/`CitationText`/`MathText`, not a
+replacement for any of them — each step's own content is handed down through that same stack, so a
+step gets full diagram/citation/math rendering for free with nothing duplicated. Wired into
 `chat-panel.tsx` for assistant replies only (a student's own typed message always renders through
 plain `CitationText` instead, so nothing they type could be misread as step structure) — the format
 is plain text stored exactly as any other reply (`chat_messages.content`, and the answer bank's
@@ -1354,6 +1354,46 @@ exercises are parsed by a strict `Q:`/`A:`/`---` convention server-side that thi
 against, and a summary isn't a worked solution to begin with — a natural next step, not a gap in
 this one.
 
+### Worked-example diagrams — geometry, graphs, and number lines, computed not drawn by the model
+
+A step that involves a shape or a graph is far clearer with a picture than with prose alone, but
+letting the model emit raw SVG directly is both a reliability and a security problem: an LLM is
+inconsistent at exact coordinate/angle math (a "right triangle" often doesn't actually render with
+a right angle), won't match this app's theme, and raw model-generated markup would need
+`dangerouslySetInnerHTML` to render at all — a real XSS surface (`<script>`, `on*` handlers,
+`<foreignObject>`) for content this app doesn't otherwise trust that way anywhere else.
+
+Instead, `buildTutorSystemPrompt`'s rule 6 asks the model for *logical data only* — point
+coordinates, which points a segment connects, an angle to mark — as a `[DIAGRAM]{...json...}
+[/DIAGRAM]` block inside a step, in one of three narrow shapes (`type: "geometry" | "graph" |
+"numberline"`; see the rule's own inline examples for the exact fields). `src/lib/diagramSchema.ts`
+(`parseDiagramSpec`) validates that JSON thoroughly against the schema — unknown shape, a segment
+referencing a point label that doesn't exist, an oversized array, anything malformed — and returns
+`null` rather than throwing; `src/components/diagram-text.tsx` (`DiagramText`) is the layer that
+finds `[DIAGRAM]` blocks and either renders `<Diagram>` for a valid one or drops it silently (never
+shown as raw JSON, never blocks the rest of the message), the same fail-open posture as every other
+layer in this rendering stack. Everything else passes through to `CitationText` unchanged, same as
+before this existed.
+
+`src/components/diagram.tsx` (`Diagram`) does every bit of the actual geometry itself from that
+logical data — a shared, aspect-preserving scale maps logical coordinates onto a fixed `viewBox` (so
+a shape is never stretched, which would ruin the very angles it exists to show correctly), angle
+arcs/right-angle markers are computed from real vector math on the point positions, and colors are
+plain CSS custom properties (`var(--foreground)`, `var(--brand)`, `var(--border)`) so every diagram
+automatically matches the app's light/dark theme — no `dangerouslySetInnerHTML` anywhere in this
+path, every SVG element is one this component itself renders. This is *why* the model only ever
+supplies data, never markup: correctness of what's actually drawn (a labeled right angle really is
+90°) comes from this renderer's own math, not from trusting the model's numbers to be exact.
+
+Deliberately narrow for v1, not a general diagram/graphics language — geometry (points, segments,
+angle marks, light region shading), coordinate graphs (axes with auto-computed "nice" tick steps,
+plotted points/lines), and number lines (ticks, labeled points, highlighted ranges) — covering the
+bulk of what Grade 6–10 geometry/coordinate-geometry/algebra content actually needs. Physics circuit
+diagrams, chemistry structures, and anything else with its own visual vocabulary are out of scope
+for this pass. Same plain-text storage story as worked-example steps above: a `[DIAGRAM]` block is
+just more text inside a step, so a cached/banked reply containing one needs no schema changes and
+renders identically on reuse.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since
@@ -1361,7 +1401,8 @@ that's how an LLM naturally writes math — rendered as plain text that shows up
 backslashes and braces instead of the notation it's meant to be. `src/components/math-text.tsx`
 (`MathText`) splits a string on those four delimiter styles and renders each math segment with
 [KaTeX](https://katex.org/), leaving everything else as plain text; chat message bubbles
-(`chat-panel.tsx`, via `CitationText`/`WorkedSteps` — see "Worked-example steps" above), topic
+(`chat-panel.tsx`, via `WorkedSteps`/`DiagramText`/`CitationText` — see "Worked-example steps" and
+"Worked-example diagrams" above), topic
 summaries/exercises (`topic-summary-message.tsx`), the Practice panel's search results
 (`practice-panel.tsx`), and the admin Answer Bank list (`admin/answer-bank/page.tsx`) all render
 their content through it instead of directly interpolating the raw string.
