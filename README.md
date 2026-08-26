@@ -823,6 +823,18 @@ versus the model's own general knowledge.
   `buildExerciseGenerationPrompt` never grounds on chapter notes in the first place — there's nothing
   for a citation pattern to ever match there.
 
+  `CitationText` also unwraps hard-wrapped prose before anything else runs (`unwrapHardWrappedText`):
+  some model-generated text (topic summaries especially) comes back with a literal `\n` roughly every
+  60-80 characters, mid-sentence, not just at real paragraph breaks. Every caller renders with
+  `white-space: pre-wrap`, so each of those was a forced line break the container's own width could
+  never override — confirmed directly in real output: a topic-summary card widened to its full
+  available width, with the paragraph inside it still wrapping at roughly half of that, because the
+  text's own embedded newlines don't reflow with the container the way ordinary word-wrap would. A
+  single newline not part of a blank-line pair is treated as a mid-paragraph wrap and replaced with a
+  space; an actual blank line (a genuine paragraph break) is left as one. Verified by rendering a mock
+  hard-wrapped paragraph through headless Chromium before/after this change — the text now reflows to
+  its real container width instead of wrapping at a fixed character count regardless of it.
+
 - **Per-answer 👍/👎.** The review-gate model (`topic_summaries`/`answered_questions`'
   `validation_status`) governs whether a *generated* row gets reused across students, but nothing let
   the one student actually looking at an answer flag it as wrong, in the moment. `answer_feedback`
