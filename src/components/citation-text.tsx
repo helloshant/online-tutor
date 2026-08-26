@@ -38,8 +38,23 @@ function unwrapHardWrappedText(text: string): string {
     .join("\n\n");
 }
 
+// Markdown heading markers (### Given Information:, ## Solution, ...) --
+// observed directly in real output showing up as literal "###" text, since
+// nothing in this stack interprets markdown headings (only **bold**/
+// *italic*, see math-text.tsx's renderEmphasis). Not rendered as an actual
+// heading here -- the model routinely writes one inline, with no line
+// break of its own before it ("...the ground. ### Given Information: ..."),
+// so there's no reliable line-start boundary to detect one at safely. The
+// heading text itself already reads fine as plain prose (these are always
+// followed by a colon, which already provides the visual break), so this
+// just strips the marker syntax -- 1-6 #s followed by a space, which real
+// markdown headings always have -- rather than trying to style it.
+function stripHeadingMarkers(text: string): string {
+  return text.replace(/#{1,6} +/g, "");
+}
+
 export function CitationText({ text }: { text: string }) {
-  const unwrapped = unwrapHardWrappedText(text);
+  const unwrapped = unwrapHardWrappedText(stripHeadingMarkers(text));
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let key = 0;

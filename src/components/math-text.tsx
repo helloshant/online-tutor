@@ -133,19 +133,23 @@ export function MathText({ text }: { text: string }) {
     let precedingText = text.slice(lastIndex, index);
     // A display equation renders as its own display:block box (KaTeX's
     // .katex-display, with its own CSS margin -- see globals.css) -- it
-    // already forces a line break before/after itself in the layout. A
-    // newline immediately adjacent to it in the model's own source text
-    // (very common: it naturally writes "...values:\n\[ ... \]\n...") is
-    // therefore redundant, and rendered under white-space: pre-wrap that
-    // redundant newline doesn't just get absorbed -- it adds a *second*,
-    // visibly separate line break on top of the block's own, which is
-    // what produced the oversized gaps seen in real output (measured and
-    // confirmed: stripping it demonstrably shrinks the gap, not just a
-    // guess). Trimmed only immediately adjacent to the match, not deeper
-    // into the surrounding text, so a genuine blank line further back
-    // (already collapsed to one by worked-steps.tsx anyway) is untouched.
+    // already forces a line break before/after itself in the layout. Any
+    // whitespace immediately adjacent to it in the source text -- a
+    // newline (very common: the model naturally writes
+    // "...values:\n\[ ... \]\n...") or, after CitationText's
+    // unwrapHardWrappedText has already turned that newline into a plain
+    // space by the time it reaches here, just a space -- is therefore
+    // redundant. Originally this only stripped a trailing/leading newline
+    // specifically, which missed exactly that already-a-space case: a lone
+    // space character sandwiched between two adjacent display:block spans
+    // still forces its own anonymous block box under normal flow, with the
+    // *same* full line-height as an actual line break -- confirmed by
+    // tracing the real text through both transforms and measuring the
+    // rendered gap before/after widening this to match any whitespace, not
+    // only \n. Trimmed only immediately adjacent to the match, not deeper
+    // into the surrounding text, so real prose further back is untouched.
     if (displayMode) {
-      precedingText = precedingText.replace(/[ \t]*\n[ \t]*$/, "");
+      precedingText = precedingText.replace(/[ \t\n]+$/, "");
     }
     if (precedingText) {
       parts.push(...renderEmphasis(precedingText, nextKey));
@@ -178,7 +182,7 @@ export function MathText({ text }: { text: string }) {
       // Same reasoning, mirrored for whatever comes right after -- see
       // above.
       const rest = text.slice(nextIndex);
-      const stripped = rest.replace(/^[ \t]*\n[ \t]*/, "");
+      const stripped = rest.replace(/^[ \t\n]+/, "");
       nextIndex += rest.length - stripped.length;
     }
     lastIndex = nextIndex;

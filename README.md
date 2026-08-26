@@ -835,6 +835,30 @@ versus the model's own general knowledge.
   hard-wrapped paragraph through headless Chromium before/after this change — the text now reflows to
   its real container width instead of wrapping at a fixed character count regardless of it.
 
+  `CitationText` also strips markdown heading markers (`stripHeadingMarkers`) before anything else runs
+  — `### Given Information:` showed up as literal `###` text in real output, since nothing in this
+  stack interpreted markdown headings (only `**bold**`/`*italic*`, see `MathText`'s `renderEmphasis`).
+  Not rendered as an actual heading — the model routinely writes one inline with no line break of its
+  own before it, so there's no reliable line-start boundary to detect one at safely — just the `#`
+  marker syntax stripped, since the heading text already reads fine as plain prose (always followed by
+  a colon, which provides its own visual break).
+
+  `MathText`'s display-equation-adjacent whitespace stripping (see "Worked-example steps" above) also
+  had a real interaction bug with `unwrapHardWrappedText`, found by tracing the actual text through
+  both transforms rather than assuming the earlier fix still applied: `unwrapHardWrappedText` runs
+  first (it's the outer layer) and turns *every* newline into a space, including ones that were
+  structurally separating an equation from its surrounding text — so by the time `MathText` looked for
+  a newline to strip next to a display match, there was never one left to find; it had already become
+  a lone space character. That single space, sandwiched between two `display:block` KaTeX spans, still
+  forces its own anonymous block box under normal CSS flow with the *same* full line-height as an
+  actual line break would have had — which is exactly the oversized gap that survived the first fix.
+  Widened from stripping only `\n` to stripping any adjacent `[ \t\n]+`, so it no longer matters which
+  transform ran first or what character ended up between them. Verified the same way: traced the exact
+  text through the real `collapseBlankLines` → `unwrapHardWrappedText` → `MathText` pipeline, then
+  re-rendered the full worked-steps example through headless Chromium and confirmed the gap actually
+  closed (not just reasoned about), rather than trusting an earlier, narrower test case that happened
+  not to exercise this exact interaction.
+
 - **Per-answer 👍/👎.** The review-gate model (`topic_summaries`/`answered_questions`'
   `validation_status`) governs whether a *generated* row gets reused across students, but nothing let
   the one student actually looking at an answer flag it as wrong, in the moment. `answer_feedback`
