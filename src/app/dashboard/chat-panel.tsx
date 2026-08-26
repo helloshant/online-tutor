@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CitationText } from "@/components/citation-text";
+import { WorkedSteps } from "@/components/worked-steps";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
@@ -494,7 +495,17 @@ export function ChatPanel({
                     <LoadingIndicator label="Translating…" />
                   </span>
                 ) : (
-                  entry.message.content !== "[Image]" && <CitationText text={entry.message.content} />
+                  entry.message.content !== "[Image]" &&
+                  // Only the assistant is ever prompted to produce [STEP: ...]
+                  // markers (buildTutorSystemPrompt's rule 5) -- a student's
+                  // own message goes straight through CitationText, same as
+                  // before, so nothing they type could coincidentally be
+                  // misread as step structure.
+                  (entry.message.role === "assistant" ? (
+                    <WorkedSteps text={entry.message.content} />
+                  ) : (
+                    <CitationText text={entry.message.content} />
+                  ))
                 )}
               </div>
               {/* Only a real, settled assistant reply -- not the optimistic

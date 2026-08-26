@@ -1328,6 +1328,32 @@ admin-approved question should be able to see its figures.
   route, and `topic-summary-message.tsx` for the banked-only half wasn't judged worth it yet. The
   Practice panel is the one place banked images reliably show up today.
 
+### Worked-example steps — naming the concept behind each step, not just the arithmetic
+
+A wall-of-text answer to a multi-step problem makes a student re-read the whole thing to find
+*which idea* a given step leans on. `buildTutorSystemPrompt`'s rule 5 (`services/orchestrator/src/
+prompts.ts`) asks the model to format each distinct step of a genuinely multi-step solution as
+`[STEP: <concept/rule this step applies>]\n<the step's own reasoning>\n[/STEP]` — naming the actual
+concept (e.g. "Zero product rule", not "Step 3") — while a short single-fact answer is written as
+ordinary prose with no markers at all, exactly as before this existed.
+
+`src/components/worked-steps.tsx` (`WorkedSteps`) parses that convention client-side and renders
+each block as its own labeled card instead of a flat paragraph; a message with no `[STEP: ...]`
+markers (the common case) falls straight through to `CitationText` unchanged. Deliberately layered
+*above* `CitationText`/`MathText`, not a replacement for either — each step's own content is handed
+to `CitationText`, which still finds `(Source: ...)` citations and hands the rest to `MathText` for
+LaTeX, so a step gets full citation/math rendering for free with nothing duplicated. Wired into
+`chat-panel.tsx` for assistant replies only (a student's own typed message always renders through
+plain `CitationText` instead, so nothing they type could be misread as step structure) — the format
+is plain text stored exactly as any other reply (`chat_messages.content`, and the answer bank's
+`answer` column when it gets banked), so a cached or answer-bank-served reply full of `[STEP: ...]`
+markers renders identically to a fresh one, with zero storage or caching changes needed.
+
+Not yet extended to topic-exercises answers (`buildExerciseGenerationPrompt`) or topic summaries —
+exercises are parsed by a strict `Q:`/`A:`/`---` convention server-side that this wasn't checked
+against, and a summary isn't a worked solution to begin with — a natural next step, not a gap in
+this one.
+
 ### Math rendering
 
 Claude routinely answers in LaTeX (`\( \sqrt{25} \)`, `\[ \frac{1}{3} \]`, `$...$`, `$$...$$`) since
@@ -1335,9 +1361,10 @@ that's how an LLM naturally writes math — rendered as plain text that shows up
 backslashes and braces instead of the notation it's meant to be. `src/components/math-text.tsx`
 (`MathText`) splits a string on those four delimiter styles and renders each math segment with
 [KaTeX](https://katex.org/), leaving everything else as plain text; chat message bubbles
-(`chat-panel.tsx`), topic summaries/exercises (`topic-summary-message.tsx`), the Practice panel's
-search results (`practice-panel.tsx`), and the admin Answer Bank list (`admin/answer-bank/page.tsx`)
-all render their content through it instead of directly interpolating the raw string.
+(`chat-panel.tsx`, via `CitationText`/`WorkedSteps` — see "Worked-example steps" above), topic
+summaries/exercises (`topic-summary-message.tsx`), the Practice panel's search results
+(`practice-panel.tsx`), and the admin Answer Bank list (`admin/answer-bank/page.tsx`) all render
+their content through it instead of directly interpolating the raw string.
 `katex.renderToString`'s output is inserted via `dangerouslySetInnerHTML` — the standard, intended
 way to use KaTeX; it does not permit arbitrary HTML injection through its LaTeX parser, so this is
 safe even though the string being rendered is LLM-generated. `throwOnError: false` renders a parse
