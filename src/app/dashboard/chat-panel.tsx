@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CitationText } from "@/components/citation-text";
 import { WorkedSteps } from "@/components/worked-steps";
@@ -21,7 +21,17 @@ import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 // instance -- see the `key` passed at the call site below for how a
 // regenerated (translated) reply, which reuses the same message id, still
 // gets a fresh instance rather than trying to re-animate over live state.
-function AssistantMessageContent({
+// Wrapped in memo() for the same reason MessageBubble below is: without
+// it, every re-render of ChatPanel (e.g. a keystroke in the message
+// input, which touches state that lives well above this in the tree)
+// re-renders this too, and this is genuinely expensive to re-render --
+// WorkedSteps re-parses the whole markdown tree and, via MathText,
+// re-typesets every KaTeX equation in it from scratch (see math-text.tsx:
+// katex.renderToString per match, not cached). memo's default shallow
+// prop comparison skips all of that whenever content/animate/onProgress
+// haven't actually changed, which for an already-settled reply is every
+// single time a keystroke elsewhere causes ChatPanel to re-render.
+const AssistantMessageContent = memo(function AssistantMessageContent({
   content,
   animate,
   onProgress,
@@ -81,7 +91,7 @@ function AssistantMessageContent({
 
   const display = useMemo(() => buildRevealedText(units, revealedWeight), [units, revealedWeight]);
   return <WorkedSteps text={display} />;
-}
+});
 
 interface SubjectSummary {
   id: string;
@@ -148,6 +158,83 @@ function readImageFile(file: File): Promise<SelectedImage> {
     reader.readAsDataURL(file);
   });
 }
+
+// One "message"-kind timeline row (as opposed to a "topic"-kind row, still
+// rendered inline in ChatPanel below since TopicSummaryMessage already
+// manages its own async state and doesn't carry this same re-render cost).
+// Pulled out and wrapped in memo() for the same reason as
+// AssistantMessageContent above: without it, typing a single character
+// into the message input re-renders ChatPanel, which re-renders every row
+// in the whole timeline -- including every already-settled reply's full
+// markdown/diagram/KaTeX tree -- for no reason at all, since none of that
+// depends on the input's value. `entry` stays referentially the same
+// object across a ChatPanel re-render unless it's the one actually being
+// added/replaced (see performSend/regenerateLastReply), so memo's default
+// shallow prop comparison correctly skips re-rendering every other row.
+const MessageBubble = memo(function MessageBubble({
+  entry,
+  subjectId,
+  isRegenerating,
+  onRevealProgress,
+}: {
+  entry: Extract<TimelineEntry, { kind: "message" }>;
+  subjectId: string;
+  isRegenerating: boolean;
+  onRevealProgress: () => void;
+}) {
+  const { message, previewImageUrl } = entry;
+  return (
+    <div className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
+      <div
+        className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
+          message.role === "user" ? "bg-brand text-white" : "border border-border bg-surface text-foreground"
+        }`}
+      >
+        {previewImageUrl && (
+          // A transient client-side data URL, never persisted, so
+          // next/image's remote-loader/optimization machinery doesn't apply.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={previewImageUrl} alt="Attached" className="mb-2 max-h-48 rounded-lg border border-white/20" />
+        )}
+        {isRegenerating ? (
+          <span className="text-foreground/40">
+            <LoadingIndicator label="Translating…" />
+          </span>
+        ) : (
+          message.content !== "[Image]" &&
+          // Only the assistant is ever prompted to produce [STEP: ...]
+          // markers (buildTutorSystemPrompt's rule 5) -- a student's own
+          // message goes straight through CitationText, same as before, so
+          // nothing they type could coincidentally be misread as step
+          // structure.
+          (message.role === "assistant" ? (
+            <AssistantMessageContent
+              // Re-keyed on content length, not just the message id:
+              // regenerateLastReply overwrites `message` in place (same
+              // id, new content) when the language toggle re-answers the
+              // last reply, and that new text deserves its own fresh
+              // reveal rather than reusing a mounted instance already
+              // sitting at its old, now-stale revealedWeight/totalWeight.
+              key={`${message.id}:${message.content.length}`}
+              content={message.content}
+              animate={!!entry.revealOnMount}
+              onProgress={onRevealProgress}
+            />
+          ) : (
+            <CitationText text={message.content} />
+          ))
+        )}
+      </div>
+      {/* Only a real, settled assistant reply -- not the optimistic user
+          bubble, and not while this exact reply is still being re-answered
+          in another language (nothing stable to attach feedback to
+          mid-regeneration). */}
+      {message.role === "assistant" && !isRegenerating && !message.id.startsWith("optimistic-") && (
+        <FeedbackButtons kind="chat_message" targetId={message.id} subjectId={subjectId} contentSnapshot={message.content} />
+      )}
+    </div>
+  );
+});
 
 export function ChatPanel({
   subscriptionId,
@@ -264,6 +351,14 @@ export function ChatPanel({
   useEffect(() => {
     scrollToBottom();
   }, [timeline, scrollToBottom]);
+
+  // Stable identity (scrollToBottom itself never changes -- see its own
+  // useCallback above) so it can be passed as a MessageBubble prop without
+  // defeating that component's memo(): an inline `() => scrollToBottom(...)`
+  // here would be a brand-new function every ChatPanel render, which would
+  // make every bubble's shallow prop comparison see a "changed" prop and
+  // re-render anyway, silently undoing the whole point of memoizing them.
+  const handleRevealProgress = useCallback(() => scrollToBottom("instant"), [scrollToBottom]);
 
   // Shared by the form's Send button and the practiceQuestionClick effect
   // below, which sends a composed message with no user-typed text or image
@@ -570,72 +665,13 @@ export function ChatPanel({
               onSummaryLoaded={scrollToBottom}
             />
           ) : (
-            <div
+            <MessageBubble
               key={entry.message.id}
-              className={`flex flex-col ${entry.message.role === "user" ? "items-end" : "items-start"}`}
-            >
-              <div
-                className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
-                  entry.message.role === "user"
-                    ? "bg-brand text-white"
-                    : "border border-border bg-surface text-foreground"
-                }`}
-              >
-                {entry.previewImageUrl && (
-                  // A transient client-side data URL, never persisted, so
-                  // next/image's remote-loader/optimization machinery doesn't apply.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={entry.previewImageUrl}
-                    alt="Attached"
-                    className="mb-2 max-h-48 rounded-lg border border-white/20"
-                  />
-                )}
-                {entry.message.id === regeneratingMessageId ? (
-                  <span className="text-foreground/40">
-                    <LoadingIndicator label="Translating…" />
-                  </span>
-                ) : (
-                  entry.message.content !== "[Image]" &&
-                  // Only the assistant is ever prompted to produce [STEP: ...]
-                  // markers (buildTutorSystemPrompt's rule 5) -- a student's
-                  // own message goes straight through CitationText, same as
-                  // before, so nothing they type could coincidentally be
-                  // misread as step structure.
-                  (entry.message.role === "assistant" ? (
-                    <AssistantMessageContent
-                      // Re-keyed on content length, not just the message
-                      // id: regenerateLastReply overwrites `message` in
-                      // place (same id, new content) when the language
-                      // toggle re-answers the last reply, and that new
-                      // text deserves its own fresh reveal rather than
-                      // reusing a mounted instance already sitting at its
-                      // old, now-stale revealedWeight/totalWeight.
-                      key={`${entry.message.id}:${entry.message.content.length}`}
-                      content={entry.message.content}
-                      animate={!!entry.revealOnMount}
-                      onProgress={() => scrollToBottom("instant")}
-                    />
-                  ) : (
-                    <CitationText text={entry.message.content} />
-                  ))
-                )}
-              </div>
-              {/* Only a real, settled assistant reply -- not the optimistic
-                  user bubble, and not while this exact reply is still being
-                  re-answered in another language (nothing stable to attach
-                  feedback to mid-regeneration). */}
-              {entry.message.role === "assistant" &&
-                entry.message.id !== regeneratingMessageId &&
-                !entry.message.id.startsWith("optimistic-") && (
-                  <FeedbackButtons
-                    kind="chat_message"
-                    targetId={entry.message.id}
-                    subjectId={subject.id}
-                    contentSnapshot={entry.message.content}
-                  />
-                )}
-            </div>
+              entry={entry}
+              subjectId={subject.id}
+              isRegenerating={entry.message.id === regeneratingMessageId}
+              onRevealProgress={handleRevealProgress}
+            />
           )
         )}
         {sending && (
