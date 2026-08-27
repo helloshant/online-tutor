@@ -21,7 +21,25 @@ type ExerciseItem = { question: string; answer: string };
 // toggle isn't even visible from the Topics tab a click originates from
 // (it's up in ChatPanel's header, a different screen), and re-clicking an
 // already-selected sidebar item to "try again" isn't a discoverable action.
-export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusTopic; preferEnglish: boolean }) {
+export function TopicSummaryMessage({
+  topic,
+  preferEnglish,
+  onSummaryLoaded,
+}: {
+  topic: SyllabusTopic;
+  preferEnglish: boolean;
+  // Fired once the summary fetch settles (success or error), i.e. right
+  // when this bubble grows from a small loading placeholder to its real,
+  // often much taller, content. ChatPanel's own auto-scroll only re-runs
+  // when its `timeline` array changes -- adding this bubble fires it once,
+  // at the placeholder's height, but the fetch here that swaps in the
+  // actual summary is internal state a parent effect has no way to see.
+  // Observed directly: the chat window would stop short of a summary's
+  // real bottom, having already auto-scrolled before there was anything
+  // there to scroll to. Optional so this component still works standalone
+  // (e.g. in isolation/tests) without a parent wired up to it.
+  onSummaryLoaded?: () => void;
+}) {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
@@ -70,6 +88,22 @@ export function TopicSummaryMessage({ topic, preferEnglish }: { topic: SyllabusT
       cancelled = true;
     };
   }, [topic.id, preferEnglish]);
+
+  // Fires onSummaryLoaded once the placeholder-to-real-content swap above
+  // has actually committed to the DOM (an effect, not called inline in the
+  // fetch itself, specifically so it runs after React has re-rendered with
+  // the new height -- calling it synchronously alongside setLoadingSummary
+  // would fire before that commit, which is exactly the "asked too early"
+  // problem this exists to fix in the first place). Boxed in a ref so a
+  // new inline callback identity from the parent on every render doesn't
+  // also re-fire this -- only an actual loadingSummary transition should.
+  const onSummaryLoadedRef = useRef(onSummaryLoaded);
+  useEffect(() => {
+    onSummaryLoadedRef.current = onSummaryLoaded;
+  });
+  useEffect(() => {
+    if (!loadingSummary) onSummaryLoadedRef.current?.();
+  }, [loadingSummary]);
 
   // A language flip after exercises were already shown invalidates them --
   // reset to the "Relevant Exercises" button rather than silently

@@ -165,9 +165,18 @@ export function ChatPanel({
     };
   }, [subscriptionId, subject.id, boardId, gradeId, medium]);
 
-  useEffect(() => {
+  // Shared with TopicSummaryMessage's onSummaryLoaded below -- its summary
+  // fetch grows this bubble well after `timeline` itself last changed
+  // (adding the bubble only drops in a small loading placeholder), so the
+  // effect below alone always scrolled to where the placeholder's bottom
+  // used to be, not the real summary's.
+  const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [timeline]);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [timeline, scrollToBottom]);
 
   // Shared by the form's Send button and the practiceQuestionClick effect
   // below, which sends a composed message with no user-typed text or image
@@ -467,7 +476,12 @@ export function ChatPanel({
         )}
         {timeline.map((entry) =>
           entry.kind === "topic" ? (
-            <TopicSummaryMessage key={entry.entryId} topic={entry.topic} preferEnglish={entry.preferEnglish} />
+            <TopicSummaryMessage
+              key={entry.entryId}
+              topic={entry.topic}
+              preferEnglish={entry.preferEnglish}
+              onSummaryLoaded={scrollToBottom}
+            />
           ) : (
             <div
               key={entry.message.id}
