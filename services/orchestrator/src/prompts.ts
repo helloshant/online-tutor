@@ -2,6 +2,17 @@ import type { RetrievedChunk } from "./chapterRag.js";
 import { selectRelevantTopics } from "./syllabusFilter.js";
 import type { Medium, SyllabusTopic } from "./types.js";
 
+// Reported directly: a reply laying out data as a table (standard trig
+// ratios across several angles) came back "jumbled" in the chat window --
+// the model already writes valid GFM pipe-table markdown for this, the gap
+// was entirely on the rendering side (see src/components/markdown-table.tsx,
+// which now parses exactly this syntax into a real table). Shared verbatim
+// across every prompt below that can produce a reply routed through that
+// renderer, so the exact syntax it needs to detect a table stays the one
+// thing the model is told to produce for one.
+const TABLE_FORMAT_RULE =
+  'When presenting tabular data (e.g. standard values across several angles/cases, a comparison of properties, a formula reference table), format it as a standard markdown table: a header row ("| Column A | Column B |"), a separator row directly below it using only dashes/colons ("|---|---|"), then one data row per line -- every row, including the separator, needs the same number of "|"-delimited cells as the header. This is parsed into an actual table for the student, so it is the ONLY layout that renders correctly for this kind of data -- never approximate a table with spaces/dashes as plain text, or a table appears broken even though the underlying data is fine.';
+
 export function buildTutorSystemPrompt(params: {
   subjectName: string;
   boardName: string;
@@ -119,6 +130,7 @@ Hard rules, in order of priority:
    - Number line: {"type":"numberline","range":[-5,5],"points":[{"value":2,"label":"x"}],"highlight":[{"from":0,"to":2}]}
    Most steps need no diagram at all -- only include one when it genuinely helps, never as decoration.
 7. If reference material is provided below, use it if it actually helps answer accurately; ignore it if it doesn't apply. Where it does apply, ground your answer in it rather than filling gaps with outside knowledge presented as fact -- if it only partly covers the question, say plainly which part you can't confirm rather than guessing. Never quote long passages, poem lines, or dialogue verbatim from it; paraphrase and explain in your own words instead. When you rely on a specific piece of reference material, name its source in parentheses using the citation given with it, e.g. "(Source: ...)" -- if a chunk has no citation attached, name the chapter/topic it came from instead.${referenceSection}${fewShotSection}
+8. ${TABLE_FORMAT_RULE}
 
 Keep responses focused and appropriately concise for a chat interface.`;
 }
@@ -141,7 +153,9 @@ export function buildTopicSummaryPrompt(params: {
 Chapter: "${chapter}"
 Topic: "${topic}"
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Explain the core concept(s) clearly, state any key formulas/definitions/rules the student must remember, and keep it to a few short paragraphs -- this is a revision summary, not a full lesson, and it must not include practice questions or exercises.`;
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Explain the core concept(s) clearly, state any key formulas/definitions/rules the student must remember, and keep it to a few short paragraphs -- this is a revision summary, not a full lesson, and it must not include practice questions or exercises.
+
+${TABLE_FORMAT_RULE}`;
 }
 
 const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
@@ -214,6 +228,7 @@ Guidelines:
 2. You may draw on the full breadth of ${subjectName} across all school grade levels and boards (CBSE, ICSE, state boards, etc.) — there is no syllabus restriction.
 3. Respond in whichever language they write in.
 4. Be clear and precise; when relevant, note which grade level or curriculum a topic is typically associated with, since staff may be evaluating syllabus coverage.
+5. ${TABLE_FORMAT_RULE}
 
 Keep responses focused and appropriately concise for a chat interface.`;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
-import { CitationText } from "@/components/citation-text";
+import { TableText } from "@/components/markdown-table";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import type { SyllabusTopic } from "@/lib/supabase/types";
@@ -200,7 +200,7 @@ export function TopicSummaryMessage({
         ) : (
           <>
             <p className="whitespace-pre-wrap text-foreground/80">
-              <CitationText text={summary ?? ""} />
+              <TableText text={summary ?? ""} />
             </p>
             {/* target_id is the topic itself, not a topic_summaries row --
                 see 0031_answer_feedback.sql's comment on why: a summary

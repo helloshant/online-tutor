@@ -1,5 +1,5 @@
-import { CitationText } from "@/components/citation-text";
 import { Diagram } from "@/components/diagram";
+import { TableText } from "@/components/markdown-table";
 import { parseDiagramSpec } from "@/lib/diagramSchema";
 
 // buildTutorSystemPrompt's diagram rule asks the model to include an
@@ -16,7 +16,8 @@ import { parseDiagramSpec } from "@/lib/diagramSchema";
 // nothing logged at all, which means the model never attempted one).
 // Everything outside a matched block -- the overwhelming majority of
 // replies, which never include a diagram at all -- passes straight through
-// to CitationText unchanged.
+// to TableText unchanged, which finds any markdown table(s) before handing
+// the rest on to CitationText, same as before TableText existed.
 const DIAGRAM_PATTERN = /\[DIAGRAM\]\s*([\s\S]*?)\s*\[\/DIAGRAM\]/g;
 
 // A specific, recurring, real production mistake: the model writes an
@@ -86,7 +87,7 @@ export function DiagramText({ text }: { text: string }) {
 
     const precedingText = spec ? text.slice(lastIndex, index) : stripOrphanedHeading(text.slice(lastIndex, index));
     if (precedingText) {
-      parts.push(<CitationText key={key++} text={precedingText} />);
+      parts.push(<TableText key={key++} text={precedingText} />);
     }
     if (spec) {
       parts.push(<Diagram key={key++} spec={spec} />);
@@ -105,7 +106,7 @@ export function DiagramText({ text }: { text: string }) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(<CitationText key={key++} text={text.slice(lastIndex)} />);
+    parts.push(<TableText key={key++} text={text.slice(lastIndex)} />);
   }
 
   return <>{parts}</>;
