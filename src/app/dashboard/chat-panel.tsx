@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CitationText } from "@/components/citation-text";
 import { WorkedSteps } from "@/components/worked-steps";
@@ -53,10 +53,22 @@ function AssistantMessageContent({
     const TARGET_TICKS = 70;
     const perTick = Math.max(1, Math.round(totalWeight / TARGET_TICKS));
     const id = setInterval(() => {
-      setRevealedWeight((prev) => {
-        const next = Math.min(totalWeight, prev + perTick);
-        if (next >= totalWeight) clearInterval(id);
-        return next;
+      // Marked low-priority: re-rendering the revealed slice re-typesets
+      // every KaTeX equation and re-parses the whole markdown tree in it,
+      // which is real work -- at 70-ish ticks over ~2s, doing that as an
+      // ordinary (synchronous-priority) update was blocking the input box
+      // from echoing keystrokes typed while a reply was still revealing,
+      // since React had no reason to prefer the keystroke over the next
+      // tick. startTransition tells React this update can be interrupted
+      // by/deferred behind anything more urgent -- a keystroke's own state
+      // update -- so typing stays responsive even mid-reveal; the reveal
+      // itself just continues a beat later, imperceptibly.
+      startTransition(() => {
+        setRevealedWeight((prev) => {
+          const next = Math.min(totalWeight, prev + perTick);
+          if (next >= totalWeight) clearInterval(id);
+          return next;
+        });
       });
       onProgressRef.current?.();
     }, TICK_MS);
