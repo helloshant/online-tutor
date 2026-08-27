@@ -53,6 +53,44 @@ function parseImageField(raw: unknown): { image?: ImageAttachment; error?: strin
   return { image: { mediaType: mediaType as ImageMediaType, base64 } };
 }
 
+const MAX_TOPIC_LABEL_LENGTH = 200;
+const MAX_TOPIC_SUMMARY_LENGTH = 4000;
+
+// Reported: asking a follow-up right after clicking a syllabus topic (e.g.
+// "What is the theme of the poem?" right after the "Autumn" topic summary
+// was shown) made the tutor ask which poem, as if the summary had never
+// been shown at all. Root cause: TopicSummaryMessage's bubble is a local,
+// never-persisted timeline entry (see chat-panel.tsx's own comment on
+// TimelineEntry) -- the `history` this route builds further below comes
+// entirely from chat_messages rows in the DB, which a topic bubble was
+// never written into, so the orchestrator genuinely had zero information
+// about it. This is the client's side of the fix: chat-panel.tsx sends
+// the topic (and its already-loaded summary text) it's currently showing,
+// ONLY when that bubble is still the very last thing in the timeline --
+// same "still what the student is looking at" criterion the language-
+// toggle sync already uses for a topic bubble elsewhere in that file.
+// Soft-validated (a malformed/oversized value is just dropped, not a 400)
+// since this only ever enriches context a request would otherwise work
+// fine without.
+function parseTopicContext(raw: unknown): { chapter: string; topic: string; summary: string } | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { chapter, topic, summary } = raw as { chapter?: unknown; topic?: unknown; summary?: unknown };
+  if (
+    typeof chapter !== "string" ||
+    typeof topic !== "string" ||
+    typeof summary !== "string" ||
+    !chapter.trim() ||
+    !topic.trim() ||
+    !summary.trim() ||
+    chapter.length > MAX_TOPIC_LABEL_LENGTH ||
+    topic.length > MAX_TOPIC_LABEL_LENGTH ||
+    summary.length > MAX_TOPIC_SUMMARY_LENGTH
+  ) {
+    return undefined;
+  }
+  return { chapter, topic, summary };
+}
+
 // Shared by a real student's subscription-derived scope and a staff
 // member's preview-derived scope (see resolveStaffPreviewScope) -- both
 // resolve to the exact same board/grade/medium/topics/contentMedium/
@@ -156,6 +194,7 @@ async function handleChatRequest(request: Request) {
   // other id a client passes into a mutating endpoint.
   const regenerateMessageId = typeof body?.regenerateMessageId === "string" ? body.regenerateMessageId : "";
   const { image, error: imageError } = parseImageField(body?.image);
+  const topicContext = parseTopicContext(body?.topicContext);
 
   if (!subjectId) {
     return NextResponse.json({ error: "subjectId is required" }, { status: 400 });
@@ -387,6 +426,25 @@ async function handleChatRequest(request: Request) {
     .slice()
     .reverse()
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+  // Splices the currently-shown topic summary in as the most recent prior
+  // exchange -- as if the student had just asked for it and the tutor had
+  // just given it -- so a follow-up like "what is the theme of the poem?"
+  // resolves against real content instead of the model having no idea what
+  // "the poem" refers to (see parseTopicContext's own comment for the full
+  // root cause). Appended after the real history (oldest-first, so this
+  // correctly lands as the most recent thing) and only for student mode --
+  // staff's unrestricted chat has no topic/syllabus concept for this to
+  // attach to in the first place.
+  if (topicContext && orchestrationRequest.mode === "student") {
+    orchestrationRequest.history.push(
+      {
+        role: "user",
+        content: `Please give me a summary of the topic "${topicContext.topic}" from the chapter "${topicContext.chapter}".`,
+      },
+      { role: "assistant", content: topicContext.summary }
+    );
+  }
 
   let assistantText: string;
   try {

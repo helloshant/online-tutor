@@ -38,7 +38,13 @@ export function TopicSummaryMessage({
   // real bottom, having already auto-scrolled before there was anything
   // there to scroll to. Optional so this component still works standalone
   // (e.g. in isolation/tests) without a parent wired up to it.
-  onSummaryLoaded?: () => void;
+  //
+  // Also hands back the loaded summary text itself (null on a failed
+  // fetch) -- ChatPanel stores it on this bubble's own timeline entry so a
+  // follow-up question can be sent with real context about what was just
+  // shown (see chat-panel.tsx's handleTopicSummaryLoaded and
+  // /api/chat/route.ts's parseTopicContext).
+  onSummaryLoaded?: (summary: string | null) => void;
 }) {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -102,7 +108,22 @@ export function TopicSummaryMessage({
     onSummaryLoadedRef.current = onSummaryLoaded;
   });
   useEffect(() => {
-    if (!loadingSummary) onSummaryLoadedRef.current?.();
+    // `summary`/`summaryError` are read here, not listed as deps -- both
+    // settle in the same batched update as loadingSummary turning false
+    // (see the fetch effect above: setSummary/setSummaryError always run
+    // before the finally block's setLoadingSummary(false)), so this effect
+    // already sees their final values whenever it's `loadingSummary` itself
+    // that changed. Depending on them too would double-fire this on the
+    // (harmless but pointless) render where they first settle.
+    //
+    // Explicitly null on error, rather than just passing `summary` as-is:
+    // a re-fetch (preferEnglish flip) never resets `summary` back to null
+    // before it runs, so a fetch that fails on its second-or-later attempt
+    // would otherwise report the PREVIOUS language's stale summary text as
+    // if it had just loaded successfully, even while the UI itself is
+    // showing summaryError instead of it.
+    if (!loadingSummary) onSummaryLoadedRef.current?.(summaryError ? null : summary);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingSummary]);
 
   // A language flip after exercises were already shown invalidates them --

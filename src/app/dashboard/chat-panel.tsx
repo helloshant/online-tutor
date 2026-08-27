@@ -122,9 +122,19 @@ interface SubjectSummary {
 // rather than something recomputed from render state (which would risk
 // flipping mid-animation and freezing it, since AssistantMessageContent
 // keys its interval effect on this value -- see its own comment).
+//
+// summary on a topic entry is filled in once TopicSummaryMessage's own
+// fetch resolves (see handleTopicSummaryLoaded below) -- undefined while
+// still loading or on error. performSend reads it off the LAST timeline
+// entry to give a follow-up question real context about what the student
+// was just shown (see /api/chat/route.ts's parseTopicContext) -- without
+// this, a question like "what is the theme of the poem?" right after
+// clicking a topic had nothing to resolve "the poem" against, since a
+// topic bubble is never persisted to chat_messages the way an ordinary
+// exchange is.
 type TimelineEntry =
   | { kind: "message"; message: ChatMessage; previewImageUrl?: string; revealOnMount?: boolean }
-  | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean };
+  | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean; summary?: string };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
 // actual enforcement point -- this copy only decides whether to render the
@@ -290,6 +300,16 @@ export function ChatPanel({
   const lastPracticeClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  // Lets performSend read the LATEST timeline (to check whether a loaded
+  // topic summary is still the last thing shown, see its own comment)
+  // without needing `timeline` in its own dependency array -- adding it
+  // there would recreate performSend on every single message exchange,
+  // which the practiceQuestionClick effect below also depends on and has
+  // no reason to re-evaluate that often.
+  const timelineRef = useRef<TimelineEntry[]>(timeline);
+  useEffect(() => {
+    timelineRef.current = timeline;
+  }, [timeline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -360,6 +380,23 @@ export function ChatPanel({
   // re-render anyway, silently undoing the whole point of memoizing them.
   const handleRevealProgress = useCallback(() => scrollToBottom("instant"), [scrollToBottom]);
 
+  // Stores a topic bubble's summary text back onto its own timeline entry
+  // once TopicSummaryMessage's fetch resolves (see that component's
+  // onSummaryLoaded prop) -- also still triggers the scroll-to-bottom the
+  // old plain `onSummaryLoaded={scrollToBottom}` used to (see scrollToBottom's
+  // own comment on why this needs a real content-height commit first).
+  // `summary` is null on a failed fetch -- stored as undefined either way
+  // (TimelineEntry's own `summary?: string`), same as it starting out.
+  const handleTopicSummaryLoaded = useCallback(
+    (entryId: string, summary: string | null) => {
+      scrollToBottom();
+      setTimeline((prev) =>
+        prev.map((entry) => (entry.kind === "topic" && entry.entryId === entryId ? { ...entry, summary: summary ?? undefined } : entry))
+      );
+    },
+    [scrollToBottom]
+  );
+
   // Shared by the form's Send button and the practiceQuestionClick effect
   // below, which sends a composed message with no user-typed text or image
   // of its own. useCallback (rather than a plain function) so the effect
@@ -373,6 +410,23 @@ export function ChatPanel({
       setInput("");
       setSelectedImage(null);
       setSending(true);
+
+      // Gives the tutor real context for a follow-up about a topic summary
+      // the student was just shown -- read from timelineRef (not `timeline`
+      // directly, see its own comment) and only when that topic bubble is
+      // STILL the very last thing in the timeline, mirroring the same
+      // "still what the student is looking at" criterion the language-
+      // toggle sync elsewhere in this file already uses for a topic bubble.
+      // Once anything else is sent, it goes back to being ordinary history
+      // (or nothing, if it's not the last exchange), same as any other
+      // earlier turn -- this is only for the immediate "I was just shown
+      // this, ask about it" case /api/chat/route.ts's parseTopicContext
+      // exists for.
+      const lastEntry = timelineRef.current[timelineRef.current.length - 1];
+      const topicContext =
+        lastEntry && lastEntry.kind === "topic" && lastEntry.summary
+          ? { chapter: lastEntry.topic.chapter, topic: lastEntry.topic.topic, summary: lastEntry.summary }
+          : undefined;
 
       const optimisticMessage: ChatMessage = {
         id: `optimistic-${Date.now()}`,
@@ -409,6 +463,7 @@ export function ChatPanel({
             previewBoardId: boardId ?? undefined,
             previewGradeId: gradeId ?? undefined,
             previewMedium: medium ?? undefined,
+            topicContext,
           }),
         });
         const body = await res.json();
@@ -662,7 +717,7 @@ export function ChatPanel({
               key={entry.entryId}
               topic={entry.topic}
               preferEnglish={entry.preferEnglish}
-              onSummaryLoaded={scrollToBottom}
+              onSummaryLoaded={(summary) => handleTopicSummaryLoaded(entry.entryId, summary)}
             />
           ) : (
             <MessageBubble
