@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { resolveStaffPreviewScope } from "@/lib/staffPreview";
+import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import {
   getOrchestratedReply,
   type ChatOrchestrationRequest,
@@ -273,6 +274,53 @@ async function handleChatRequest(request: Request) {
     });
   }
 
+  // Written with the service-role client: RLS deliberately allows no
+  // client-side inserts on chat_messages (see migration 0002), so this is
+  // the only path a conversation turn can be persisted through. Created
+  // here (rather than right before its first use, further down) because
+  // the usage-quota check right below also needs it, to read a student's
+  // admin-set override and call the token-usage RPC -- both service-role
+  // only (see supabase/migrations/0037_student_token_usage_limits.sql).
+  const admin = createAdminClient();
+
+  // Usage-based pricing enforcement -- gated on subscriptionId, which is
+  // only ever set in the real-student branch just above: staff, whether
+  // unrestricted or previewing a specific board/grade, stays unmetered,
+  // same "unrestricted" posture staff already gets from every other
+  // syllabus/scope check in this route. Checked before the orchestrator is
+  // ever called (further below), so an over-quota request never spends
+  // anything on a fresh LLM call in the first place -- and before the
+  // regenerate-lookup/history queries just below too, so a blocked request
+  // does the least possible work.
+  if (subscriptionId) {
+    const { data: override } = await admin
+      .from("student_usage_limits")
+      .select("monthly_token_limit")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const { unlimited, limit } = resolveMonthlyTokenLimit(override);
+
+    if (!unlimited) {
+      const { data: usedTokens, error: usageError } = await admin.rpc("monthly_llm_tokens_for_user", {
+        p_user_id: user.id,
+        p_since: startOfCurrentMonthIso(),
+      });
+      if (usageError) {
+        // Fail OPEN on a metering error (e.g. a transient DB issue):
+        // blocking every student's ability to ask a question because the
+        // usage lookup itself failed would be a far worse outage than
+        // occasionally under-enforcing a cap for one request.
+        console.error("Failed to check monthly token usage, allowing the request:", usageError);
+      } else if ((usedTokens ?? 0) >= limit) {
+        return NextResponse.json(
+          { error: "You've reached this month's AI tutoring usage limit. It resets at the start of next month." },
+          { status: 429 }
+        );
+      }
+    }
+  }
+
   // When regenerating, the history the model should see is exactly what it
   // saw the *first* time this exchange was answered -- everything strictly
   // before it, not including the question/reply pair being redone. Looking
@@ -350,11 +398,6 @@ async function handleChatRequest(request: Request) {
       { status: 502 }
     );
   }
-
-  // Written with the service-role client: RLS deliberately allows no
-  // client-side inserts on chat_messages (see migration 0002), so this is
-  // the only path a conversation turn can be persisted through.
-  const admin = createAdminClient();
 
   if (regenerateMessageId) {
     // Overwrite the existing assistant row in place -- the paired user

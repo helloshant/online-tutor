@@ -224,6 +224,17 @@ export type ChatEvent = {
   created_at: string;
 };
 
+// Admin-settable override of a student's monthly LLM token allowance -- see
+// supabase/migrations/0037_student_token_usage_limits.sql for why this is
+// its own table (never a plain profiles column) and what
+// monthly_token_limit's 0/N values mean. No row for a user == the platform
+// default applies (DEFAULT_MONTHLY_TOKEN_LIMIT in src/app/api/chat/route.ts).
+export type StudentUsageLimit = {
+  user_id: string;
+  monthly_token_limit: number;
+  updated_at: string;
+};
+
 export type AdminPageKey =
   | "users"
   | "catalog"
@@ -661,9 +672,23 @@ export interface Database {
           { foreignKeyName: "answer_feedback_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
         ];
       };
+      student_usage_limits: {
+        Row: StudentUsageLimit;
+        Insert: Partial<StudentUsageLimit>;
+        Update: Partial<StudentUsageLimit>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
+      // Sums a student's LLM-sourced chat_events.total_tokens since
+      // p_since -- service_role only (see the migration). /api/chat calls
+      // this via the admin client with the start of the current calendar
+      // month before spending anything on a new LLM call.
+      monthly_llm_tokens_for_user: {
+        Args: { p_user_id: string; p_since: string };
+        Returns: number;
+      };
       // admin.auth.admin.listUsers()/getUserById() don't reliably populate
       // each user's `identities` array -- this queries auth.identities
       // directly. See 0014_email_identity_check.sql.

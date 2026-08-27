@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import {
   activateSubscriptionWithoutPayment,
   cancelSubscription,
@@ -12,6 +13,7 @@ import {
   updateSubscriptionBoardGrade,
   updateSubscriptionSubjects,
   updateUserProfile,
+  updateUserUsageLimit,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SetPasswordForm } from "./set-password-form";
@@ -32,25 +34,40 @@ export default async function AdminUserDetailPage({
   const { id } = await params;
   const admin = createAdminClient();
 
-  const [{ data: authUser }, { data: profile }, { data: subscriptions }, { data: identityRows }, { data: boards }, { data: grades }] =
-    await Promise.all([
-      admin.auth.admin.getUserById(id),
-      admin.from("profiles").select("*").eq("id", id).single(),
-      admin
-        .from("subscriptions")
-        .select("*, boards(name), grades(name), subscription_subjects(subjects(id, name))")
-        .eq("user_id", id)
-        .order("created_at", { ascending: false }),
-      // admin.auth.admin.getUserById() doesn't reliably populate the
-      // returned user's `identities` array -- query the real table via RPC
-      // instead (see 0014_email_identity_check.sql).
-      admin.rpc("get_users_with_email_identity", { p_user_ids: [id] }),
-      // Flat, board-agnostic lists (same ones onboarding itself offers) --
-      // fed to BoardGradeEditor below so it can offer every board/grade,
-      // not just the subscription's current one.
-      admin.from("boards").select("id, name").order("name"),
-      admin.from("grades").select("id, name").order("level"),
-    ]);
+  const [
+    { data: authUser },
+    { data: profile },
+    { data: subscriptions },
+    { data: identityRows },
+    { data: boards },
+    { data: grades },
+    { data: usageLimitOverride },
+    { data: monthlyTokensUsed },
+  ] = await Promise.all([
+    admin.auth.admin.getUserById(id),
+    admin.from("profiles").select("*").eq("id", id).single(),
+    admin
+      .from("subscriptions")
+      .select("*, boards(name), grades(name), subscription_subjects(subjects(id, name))")
+      .eq("user_id", id)
+      .order("created_at", { ascending: false }),
+    // admin.auth.admin.getUserById() doesn't reliably populate the
+    // returned user's `identities` array -- query the real table via RPC
+    // instead (see 0014_email_identity_check.sql).
+    admin.rpc("get_users_with_email_identity", { p_user_ids: [id] }),
+    // Flat, board-agnostic lists (same ones onboarding itself offers) --
+    // fed to BoardGradeEditor below so it can offer every board/grade,
+    // not just the subscription's current one.
+    admin.from("boards").select("id, name").order("name"),
+    admin.from("grades").select("id, name").order("level"),
+    // Usage-based pricing (see supabase/migrations/0037_student_token_usage_limits.sql)
+    // -- fetched unconditionally alongside everything else above (cheap,
+    // one extra indexed query each) even though the section below only
+    // renders it for a plain 'user' role; staff is unmetered so there's
+    // nothing student-specific to branch the fetch itself on beforehand.
+    admin.from("student_usage_limits").select("monthly_token_limit").eq("user_id", id).maybeSingle(),
+    admin.rpc("monthly_llm_tokens_for_user", { p_user_id: id, p_since: startOfCurrentMonthIso() }),
+  ]);
 
   if (!authUser?.user) notFound();
 
@@ -208,6 +225,14 @@ export default async function AdminUserDetailPage({
         )}
       </div>
 
+      {targetRole === "user" && (
+        <UsageLimitCard
+          userId={id}
+          override={usageLimitOverride ?? null}
+          usedThisMonth={monthlyTokensUsed ?? 0}
+        />
+      )}
+
       {canDeleteTarget && (
         <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-5">
           <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
@@ -225,6 +250,78 @@ export default async function AdminUserDetailPage({
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+// Usage-based pricing enforcement: displays this student's current-
+// calendar-month LLM token usage (see monthly_llm_tokens_for_user) against
+// their effective monthly cap -- the platform default, or their own
+// override row if one exists -- and lets an admin set/clear that override.
+// Only ever rendered for a plain 'user' role (see the call site) -- staff
+// is unmetered, so there's no limit here to show or edit for them.
+function UsageLimitCard({
+  userId,
+  override,
+  usedThisMonth,
+}: {
+  userId: string;
+  override: { monthly_token_limit: number } | null;
+  usedThisMonth: number;
+}) {
+  const { unlimited, limit } = resolveMonthlyTokenLimit(override);
+  const pctUsed = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((usedThisMonth / limit) * 100));
+  const overLimit = !unlimited && usedThisMonth >= limit;
+
+  return (
+    <div className="mt-8 rounded-xl border border-border bg-surface p-6">
+      <h2 className="text-sm font-semibold">Usage-based pricing</h2>
+      <p className="mt-1 text-sm text-foreground/60">
+        This month:{" "}
+        <span className={overLimit ? "font-medium text-red-600" : "font-medium"}>
+          {usedThisMonth.toLocaleString()} tokens
+        </span>{" "}
+        {unlimited ? (
+          "used, no limit set for this student."
+        ) : (
+          <>
+            of {limit.toLocaleString()} allowed
+            {override ? "" : " (platform default)"}
+            {overLimit && " — further questions are blocked until next calendar month, or until this is raised."}
+          </>
+        )}
+      </p>
+
+      {!unlimited && (
+        <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-foreground/10">
+          <div
+            className={`h-full rounded-full ${overLimit ? "bg-red-500" : "bg-brand"}`}
+            style={{ width: `${pctUsed}%` }}
+          />
+        </div>
+      )}
+
+      <form action={updateUserUsageLimit.bind(null, userId)} className="mt-4 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          Monthly token limit override
+          <input
+            name="monthlyTokenLimit"
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={override?.monthly_token_limit ?? ""}
+            placeholder="Platform default"
+            className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          />
+        </label>
+        <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
+          Save
+        </button>
+        <p className="w-full text-xs text-foreground/40">
+          Leave blank to use the platform default. Enter 0 for unlimited. Any other number replaces the
+          default with this student&apos;s own monthly cap.
+        </p>
+      </form>
     </div>
   );
 }
