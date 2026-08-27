@@ -1,13 +1,75 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CitationText } from "@/components/citation-text";
 import { WorkedSteps } from "@/components/worked-steps";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
+import { buildRevealUnits, buildRevealedText, totalRevealWeight } from "@/lib/messageReveal";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
+
+// Renders an assistant message's content, optionally animating it in
+// word-by-word (see lib/messageReveal.ts) instead of dropping the whole
+// reply in at once. `animate` is only ever true for a reply that just
+// arrived this session (see performSend/regenerateLastReply below) --
+// chat history loaded on mount always renders fully immediately, same as
+// before this existed.
+//
+// `content` is expected to stay fixed for the lifetime of a given mounted
+// instance -- see the `key` passed at the call site below for how a
+// regenerated (translated) reply, which reuses the same message id, still
+// gets a fresh instance rather than trying to re-animate over live state.
+function AssistantMessageContent({
+  content,
+  animate,
+  onProgress,
+}: {
+  content: string;
+  animate: boolean;
+  onProgress?: () => void;
+}) {
+  const units = useMemo(() => buildRevealUnits(content), [content]);
+  const totalWeight = useMemo(() => totalRevealWeight(units), [units]);
+  const [revealedWeight, setRevealedWeight] = useState(() => (animate ? 0 : totalWeight));
+
+  // Boxed the same way TopicSummaryMessage's onSummaryLoadedRef is --
+  // fires every tick of the interval below, so it always needs the LATEST
+  // onProgress the parent passed without being a dependency that would
+  // tear down and restart the interval itself.
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  });
+
+  useEffect(() => {
+    if (!animate || totalWeight === 0) return;
+    // Paced to take roughly the same ~2s to fully reveal regardless of
+    // reply length (perTick scales up for a longer reply) rather than
+    // taking proportionally longer the more the model wrote -- a short
+    // answer still flows in quickly, a long worked solution doesn't drag.
+    const TICK_MS = 28;
+    const TARGET_TICKS = 70;
+    const perTick = Math.max(1, Math.round(totalWeight / TARGET_TICKS));
+    const id = setInterval(() => {
+      setRevealedWeight((prev) => {
+        const next = Math.min(totalWeight, prev + perTick);
+        if (next >= totalWeight) clearInterval(id);
+        return next;
+      });
+      onProgressRef.current?.();
+    }, TICK_MS);
+    return () => clearInterval(id);
+    // onProgress is deliberately read via the ref above, not listed here --
+    // it changes identity on every parent render, and this effect must NOT
+    // restart on that (it would reset setInterval but not revealedWeight,
+    // just losing the natural cadence, not real progress -- still avoided).
+  }, [animate, totalWeight]);
+
+  const display = useMemo(() => buildRevealedText(units, revealedWeight), [units, revealedWeight]);
+  return <WorkedSteps text={display} />;
+}
 
 interface SubjectSummary {
   id: string;
@@ -31,8 +93,15 @@ interface SubjectSummary {
 // further toggle flips, everything earlier in a lengthy conversation stays
 // frozen at whatever it was last displaying, so flipping the switch never
 // re-fetches every topic summary ever opened in this conversation at once.
+// revealOnMount is set only on an assistant message entry constructed
+// right when its reply arrives (performSend, regenerateLastReply) -- never
+// on chat history loaded from Supabase on mount, and never mutated
+// afterward, so it's a stable, one-time flag for "animate this one in"
+// rather than something recomputed from render state (which would risk
+// flipping mid-animation and freezing it, since AssistantMessageContent
+// keys its interval effect on this value -- see its own comment).
 type TimelineEntry =
-  | { kind: "message"; message: ChatMessage; previewImageUrl?: string }
+  | { kind: "message"; message: ChatMessage; previewImageUrl?: string; revealOnMount?: boolean }
   | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
@@ -170,8 +239,14 @@ export function ChatPanel({
   // (adding the bubble only drops in a small loading placeholder), so the
   // effect below alone always scrolled to where the placeholder's bottom
   // used to be, not the real summary's.
-  const scrollToBottom = useCallback(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  // `instant`, not "smooth", for the per-tick follow during a reply's
+  // reveal animation below -- re-triggering a smooth scroll roughly every
+  // 28ms fights its own still-in-flight animation and reads as jittery,
+  // where a plain instant scroll just keeps pace invisibly. The coarser
+  // triggers (a new timeline entry, a topic summary finishing its own
+  // async load) keep the smooth scroll, since those are one-off jumps.
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior });
   }, []);
 
   useEffect(() => {
@@ -238,7 +313,7 @@ export function ChatPanel({
         setTimeline((prev) => [
           ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
           { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
-          { kind: "message", message: body.assistantMessage as ChatMessage },
+          { kind: "message", message: body.assistantMessage as ChatMessage, revealOnMount: true },
         ]);
       } catch (err) {
         setTimeline((prev) =>
@@ -287,7 +362,7 @@ export function ChatPanel({
         setTimeline((prev) =>
           prev.map((entry) =>
             entry.kind === "message" && entry.message.id === assistantMessageId
-              ? { ...entry, message: body.assistantMessage as ChatMessage }
+              ? { ...entry, message: body.assistantMessage as ChatMessage, revealOnMount: true }
               : entry
           )
         );
@@ -516,7 +591,19 @@ export function ChatPanel({
                   // before, so nothing they type could coincidentally be
                   // misread as step structure.
                   (entry.message.role === "assistant" ? (
-                    <WorkedSteps text={entry.message.content} />
+                    <AssistantMessageContent
+                      // Re-keyed on content length, not just the message
+                      // id: regenerateLastReply overwrites `message` in
+                      // place (same id, new content) when the language
+                      // toggle re-answers the last reply, and that new
+                      // text deserves its own fresh reveal rather than
+                      // reusing a mounted instance already sitting at its
+                      // old, now-stale revealedWeight/totalWeight.
+                      key={`${entry.message.id}:${entry.message.content.length}`}
+                      content={entry.message.content}
+                      animate={!!entry.revealOnMount}
+                      onProgress={() => scrollToBottom("instant")}
+                    />
                   ) : (
                     <CitationText text={entry.message.content} />
                   ))
