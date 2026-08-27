@@ -197,6 +197,115 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
   return { type: "geometry", points, segments, angles, shadeRegion, title: parseTitle(raw.title) };
 }
 
+const MAX_TARGETS = 3;
+
+function parseAngleDeg(raw: unknown): number | null {
+  if (isFiniteNumber(raw)) return raw;
+  if (typeof raw === "string") {
+    const match = raw.match(/-?\d+(\.\d+)?/);
+    if (match) {
+      const n = Number(match[0]);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+// "angleFromHorizontal" -- a template, not a general shape -- exists
+// because every single bug this app's diagram feature has ever had traced
+// back to the same root: the model choosing its own point coordinates for
+// an elevation/depression problem. A helper point reused from elsewhere in
+// the scene, coordinates wildly out of proportion to the real numbers, a
+// "to" that names the vertex itself -- five distinct real production
+// failures, all upstream of anything diagram.tsx's rendering math could
+// fix, because by the time a coordinate reaches the renderer the actual
+// mistake has already happened.
+//
+// This input shape has NO coordinates at all -- only a vertex label, a
+// direction, and each target's actual angle (as a number or a "30°"
+// string) and label. parseAngleFromHorizontal computes every point's
+// position itself via real trigonometry (tan of the given angle), so the
+// arithmetic is guaranteed geometrically consistent with the labeled
+// angle every time, not just usually. The OUTPUT is a plain GeometrySpec
+// -- identical to what a hand-written [DIAGRAM] block already produces --
+// so every downstream consumer (diagram.tsx's rendering, its collision
+// avoidance, fromHorizontal support) needs no changes at all; only the
+// INPUT shape recognized here is new. buildTutorSystemPrompt now teaches
+// this as the preferred way to describe this specific, extremely common
+// pattern, with the general "geometry" shape kept for anything else (a
+// ladder against a wall, a general triangle) that doesn't fit it.
+function parseAngleFromHorizontal(raw: Record<string, unknown>): GeometrySpec | null {
+  const { vertexLabel, direction, targets: rawTargets, baseLabel, baseSegmentLabel, connectingSegmentLabel } = raw;
+  if (!isNonEmptyString(vertexLabel, MAX_LABEL_LENGTH)) return null;
+  if (direction !== "up" && direction !== "down") return null;
+  if (!Array.isArray(rawTargets) || rawTargets.length < 1 || rawTargets.length > MAX_TARGETS) return null;
+
+  const labels = new Set<string>([vertexLabel]);
+  const targets: { label: string; angleDeg: number; segmentLabel?: string }[] = [];
+  for (const t of rawTargets) {
+    if (typeof t !== "object" || t === null) return null;
+    const { label, angleDeg: rawAngle, segmentLabel } = t as Record<string, unknown>;
+    if (!isNonEmptyString(label, MAX_LABEL_LENGTH) || labels.has(label)) return null;
+    const angleDeg = parseAngleDeg(rawAngle);
+    // Must be a real acute angle -- 0 or 90 (or anything past it) isn't a
+    // meaningful elevation/depression angle and would degenerate the
+    // trig below (a horizontal or vertical sight line).
+    if (angleDeg === null || angleDeg <= 0 || angleDeg >= 90) return null;
+    labels.add(label);
+    targets.push({ label, angleDeg, segmentLabel: isNonEmptyString(segmentLabel, MAX_LABEL_LENGTH) ? segmentLabel : undefined });
+  }
+
+  // The vertex's own base -- e.g. the foot of the building it stands atop
+  // -- only makes sense for a depression angle (an elevation angle's
+  // vertex is already at ground level, so there's nothing below it to
+  // draw), and only paired with a label for that segment (the building's
+  // own height); a bare foot point with nothing labeling it isn't worth
+  // the extra point.
+  let baseLbl: string | undefined;
+  if (baseLabel !== undefined) {
+    if (direction !== "down") return null;
+    if (!isNonEmptyString(baseLabel, MAX_LABEL_LENGTH) || labels.has(baseLabel)) return null;
+    if (!isNonEmptyString(baseSegmentLabel, MAX_LABEL_LENGTH)) return null;
+    baseLbl = baseLabel;
+    labels.add(baseLbl);
+  }
+
+  // Fixed "nice" units, not real-world scale -- the model never supplies
+  // (and this was never meant to convey) actual distances, only the
+  // labeled angle values need to be geometrically real, and they are:
+  // each target's y is computed directly from its own angleDeg via
+  // tan(), not approximated or copied from an illustrative example.
+  const VERTEX_Y = direction === "down" ? 100 : 0;
+  const TARGET_X = 100;
+  const sign = direction === "down" ? -1 : 1;
+
+  const points: (DiagramPoint & { label: string })[] = [{ label: vertexLabel, x: 0, y: VERTEX_Y }];
+  const segments: GeometrySpec["segments"] = [];
+  const angles: NonNullable<GeometrySpec["angles"]> = [];
+
+  for (const t of targets) {
+    const y = VERTEX_Y + sign * TARGET_X * Math.tan((t.angleDeg * Math.PI) / 180);
+    points.push({ label: t.label, x: TARGET_X, y });
+    segments.push({ from: vertexLabel, to: t.label, label: t.segmentLabel });
+    angles.push({ at: vertexLabel, to: t.label, fromHorizontal: true, label: `${t.angleDeg}°` });
+  }
+
+  // Consecutive targets connected in the order given -- the model lists
+  // them in a sensible order (nearest to horizontal first is typical),
+  // and this is only meaningful for exactly two targets (e.g. a tower's
+  // top and bottom, both sighted from the same vertex).
+  if (targets.length === 2 && isNonEmptyString(connectingSegmentLabel, MAX_LABEL_LENGTH)) {
+    segments.push({ from: targets[0].label, to: targets[1].label, label: connectingSegmentLabel });
+  }
+
+  if (baseLbl) {
+    points.push({ label: baseLbl, x: 0, y: 0 });
+    segments.push({ from: vertexLabel, to: baseLbl, label: baseSegmentLabel as string });
+  }
+
+  return { type: "geometry", points, segments, angles, title: parseTitle(raw.title) };
+}
+
 function parsePoints(raw: unknown): DiagramPoint[] | null {
   if (!Array.isArray(raw) || raw.length > MAX_POINTS) return null;
   const points: DiagramPoint[] = [];
@@ -282,6 +391,8 @@ export function parseDiagramSpec(raw: unknown): DiagramSpec | null {
   switch (obj.type) {
     case "geometry":
       return parseGeometry(obj);
+    case "angleFromHorizontal":
+      return parseAngleFromHorizontal(obj);
     case "graph":
       return parseGraph(obj);
     case "numberline":
