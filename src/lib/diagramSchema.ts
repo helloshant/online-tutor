@@ -96,52 +96,48 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
   if (!Array.isArray(raw.points) || raw.points.length === 0 || raw.points.length > MAX_POINTS) return null;
   const points: (DiagramPoint & { label: string })[] = [];
   const labels = new Set<string>();
-  // A single malformed point (most often: a coordinate the sanitizer in
-  // diagram-text.tsx turned into null, because the model wrote an unknown's
-  // name -- e.g. "h", the very thing a problem is solving for -- into a
-  // coordinate field, which isn't valid JSON to begin with) is skipped, not
-  // treated as a reason to drop the whole diagram. Any segment/angle that
-  // referenced this point's label will already fail its own `labels.has`
-  // check further down and get skipped in turn -- letting whatever OTHER
-  // points/segments/angles in the scene were fine still render, the same
-  // "one bad entry doesn't sink an otherwise-good diagram" principle
-  // already applied to angles below.
+  // Strict, all-or-nothing -- deliberately reverted from an earlier,
+  // more lenient version that skipped an individual bad point (or
+  // segment/angle) and rendered whatever was left. Requested explicitly:
+  // a diagram silently missing a point it should have shown is worse than
+  // no diagram at all, since a student has no way to tell "this was never
+  // part of the problem" apart from "this failed to render." One
+  // malformed point -- most often the model writing an unknown's name
+  // (e.g. "h", the very thing a problem is solving for) into a coordinate
+  // field; diagram-text.tsx's sanitizer turns that into null before this
+  // ever runs, but null still isn't a valid coordinate -- now rejects the
+  // WHOLE diagram, not just that point.
   for (const p of raw.points) {
-    if (typeof p !== "object" || p === null) continue;
+    if (typeof p !== "object" || p === null) return null;
     const { label, x, y } = p as Record<string, unknown>;
-    if (!isNonEmptyString(label, MAX_LABEL_LENGTH) || !isFiniteNumber(x) || !isFiniteNumber(y)) continue;
-    if (labels.has(label)) continue; // duplicate point label -- ambiguous, drop rather than guess
+    if (!isNonEmptyString(label, MAX_LABEL_LENGTH) || !isFiniteNumber(x) || !isFiniteNumber(y)) return null;
+    if (labels.has(label)) return null; // duplicate point label -- ambiguous, reject rather than guess
     labels.add(label);
     points.push({ label, x, y });
   }
-  if (points.length === 0) return null; // nothing left to draw at all
 
-  if (!Array.isArray(raw.segments)) return null;
+  if (!Array.isArray(raw.segments) || raw.segments.length > MAX_SEGMENTS) return null;
   const segments: GeometrySpec["segments"] = [];
-  // Skipped individually, same reasoning as points above -- most often hit
-  // when a segment references a point that was just dropped for having a
-  // bad coordinate (a segment naming a point that never existed is a
-  // structural problem worth rejecting the whole diagram over; naming one
-  // that existed in the model's OWN JSON but didn't survive validation is
-  // exactly the cascade this is meant to allow).
-  for (const s of raw.segments.slice(0, MAX_SEGMENTS)) {
-    if (typeof s !== "object" || s === null) continue;
+  for (const s of raw.segments) {
+    if (typeof s !== "object" || s === null) return null;
     const { from, to, label } = s as Record<string, unknown>;
-    if (typeof from !== "string" || typeof to !== "string" || !labels.has(from) || !labels.has(to)) continue;
+    if (typeof from !== "string" || typeof to !== "string" || !labels.has(from) || !labels.has(to)) return null;
     segments.push({ from, to, label: isNonEmptyString(label, MAX_LABEL_LENGTH) ? label : undefined });
   }
 
   let angles: GeometrySpec["angles"];
   if (raw.angles !== undefined) {
-    if (!Array.isArray(raw.angles)) return null;
-    const rawAngles = raw.angles.slice(0, MAX_ANGLES);
+    if (!Array.isArray(raw.angles) || raw.angles.length > MAX_ANGLES) return null;
 
     // First pass: which "to" targets are already legitimately spoken for
     // at each vertex, considering only entries that are valid on their own
     // (a self-referential "to" doesn't count as claiming anything). Used
-    // below to recover a broken angle -- never to guess at one.
+    // below to recover a broken angle's target when it's unambiguous --
+    // kept even under the stricter all-or-nothing policy above, since a
+    // mechanically-deduced target makes that angle fully correct, not
+    // merely present-but-incomplete; it's a repair, not a partial result.
     const usedTargetsByVertex = new Map<string, Set<string>>();
-    for (const entry of rawAngles) {
+    for (const entry of raw.angles) {
       if (typeof entry !== "object" || entry === null) continue;
       const { at, to } = entry as Record<string, unknown>;
       if (typeof at !== "string" || typeof to !== "string") continue;
@@ -151,21 +147,14 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
     }
 
     const parsedAngles: NonNullable<GeometrySpec["angles"]> = [];
-    // A malformed individual angle is skipped, not treated as a reason to
-    // drop the whole diagram -- observed directly in production: one
-    // angle entry with "to" set to the SAME point as "at" (a real mistake,
-    // not a hypothetical one), among an otherwise perfectly good diagram
-    // with a valid 30° angle, working points, and segments. Rejecting
-    // outright over that one bad entry would have thrown away everything
-    // that was actually fine. Points and segments stay strict (an unknown
-    // point reference there means the shape itself is broken), but an
-    // angle is closer to a decorative annotation on an already-valid
-    // shape -- worth keeping the rest even when one entry is bad.
-    for (const a of rawAngles) {
-      if (typeof a !== "object" || a === null) continue;
+    // Strict again, same reasoning as points/segments above: one malformed
+    // angle now rejects the whole diagram rather than being dropped with
+    // everything else left standing.
+    for (const a of raw.angles) {
+      if (typeof a !== "object" || a === null) return null;
       const { at, from, to: rawTo, label, rightAngle, fromHorizontal } = a as Record<string, unknown>;
-      if (typeof at !== "string" || typeof rawTo !== "string") continue;
-      if (!labels.has(at) || !labels.has(rawTo)) continue;
+      if (typeof at !== "string" || typeof rawTo !== "string") return null;
+      if (!labels.has(at) || !labels.has(rawTo)) return null;
 
       let to = rawTo;
       if (to === at) {
@@ -178,10 +167,10 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
         // bottom) -- if there's exactly one point in the scene that isn't
         // the vertex and isn't already another angle's target here, that
         // is a mechanical deduction, not a guess among several
-        // candidates, so use it instead of losing the angle entirely.
+        // candidates, so use it instead of rejecting the diagram.
         const used = usedTargetsByVertex.get(at) ?? new Set<string>();
         const candidates = points.map((p) => p.label).filter((l) => l !== at && !used.has(l));
-        if (candidates.length !== 1) continue; // ambiguous or no candidate -- drop, don't guess
+        if (candidates.length !== 1) return null; // ambiguous or no candidate -- don't guess, and don't show a partial diagram either
         to = candidates[0];
         used.add(to);
         usedTargetsByVertex.set(at, used);
@@ -190,7 +179,7 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
       // `from` is still required (and must name a real, distinct point)
       // unless the horizontal ray is computed instead -- an angle needs
       // two rays one way or the other.
-      if (!usesHorizontal && (typeof from !== "string" || !labels.has(from) || from === at)) continue;
+      if (!usesHorizontal && (typeof from !== "string" || !labels.has(from) || from === at)) return null;
       parsedAngles.push({
         at,
         from: typeof from === "string" && labels.has(from) ? from : undefined,

@@ -25,20 +25,48 @@ const DIAGRAM_PATTERN = /\[DIAGRAM\]\s*([\s\S]*?)\s*\[\/DIAGRAM\]/g;
 // problem is solving for (e.g. {"label":"D","x":12,"y":h}, "h" being the
 // tower height the steps below go on to calculate). A bare, unquoted
 // identifier there isn't valid JSON at all, so JSON.parse throws before
-// parseDiagramSpec's own per-field validation ever gets a chance to run --
-// dropping the ENTIRE diagram over one bad field, even when every other
-// point/segment/angle in it is fine. Rewriting a bare identifier (never
-// `true`/`false`/`null`, which are legitimate unquoted JSON values) to
-// `null` first makes the JSON itself always parseable; parseDiagramSpec's
-// own isFiniteNumber checks then correctly reject just that one field (a
-// point with a null coordinate is skipped, not the point's segments/
-// angles dragging the rest of a valid scene down with it -- see
-// diagramSchema.ts's own comments on that cascade).
+// parseDiagramSpec's own per-field validation ever gets a chance to run.
+// Rewriting a bare identifier (never `true`/`false`/`null`, which are
+// legitimate unquoted JSON values) to `null` first makes the JSON itself
+// always parseable, so the failure becomes an ordinary, expected
+// isFiniteNumber rejection -- parseDiagramSpec then rejects the WHOLE
+// diagram on it (see diagramSchema.ts: deliberately all-or-nothing, no
+// partial diagram), the same outcome as any other malformed field, rather
+// than a raw, uncaught JSON syntax error.
 function sanitizeAlmostJson(raw: string): string {
   return raw.replace(/:(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=[,}\]])/g, (match, pre, ident, post) => {
     if (ident === "true" || ident === "false" || ident === "null") return match;
     return `:${pre}null${post}`;
   });
+}
+
+// When a diagram fails to parse, also strips a trailing heading-only line
+// (or a short run of them -- e.g. "### Geometry Setup:" immediately
+// followed by an empty "#### " right before the [DIAGRAM] tag, both
+// observed directly in production) from the text immediately preceding
+// it. Such a heading exists only to introduce the diagram that's about to
+// silently vanish; left behind, it reads as an obviously broken response
+// (a heading with nothing under it) even though the rest of the reply is
+// fine. Only ever strips a heading that's genuinely the LAST thing before
+// the tag -- if there were any other prose under it already, this
+// wouldn't match at the end of the string, so real content is never at
+// risk of being removed by this.
+const TRAILING_HEADING = /(?:^|\n)#{1,6}[ \t]*[^\n]*$/;
+function stripOrphanedHeading(precedingText: string): string {
+  let result = precedingText;
+  for (;;) {
+    // Trailing NEWLINES, not just spaces/tabs: stripping an empty heading
+    // line (e.g. "#### " right before the tag) leaves a dangling blank
+    // line behind it -- without also collapsing that, the next iteration's
+    // match would need to find "#" as the literal last non-whitespace
+    // character, but a blank line sits between it and the real heading
+    // above ("### Geometry Setup:"), so a second, genuinely-orphaned
+    // heading right above an already-removed one would go undetected.
+    const trimmed = result.replace(/\s+$/, "");
+    const match = trimmed.match(TRAILING_HEADING);
+    if (!match || match.index === undefined) return result;
+    result = trimmed.slice(0, match.index);
+  }
 }
 
 export function DiagramText({ text }: { text: string }) {
@@ -56,8 +84,9 @@ export function DiagramText({ text }: { text: string }) {
       spec = null;
     }
 
-    if (index > lastIndex) {
-      parts.push(<CitationText key={key++} text={text.slice(lastIndex, index)} />);
+    const precedingText = spec ? text.slice(lastIndex, index) : stripOrphanedHeading(text.slice(lastIndex, index));
+    if (precedingText) {
+      parts.push(<CitationText key={key++} text={precedingText} />);
     }
     if (spec) {
       parts.push(<Diagram key={key++} spec={spec} />);
