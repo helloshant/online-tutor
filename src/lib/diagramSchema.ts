@@ -96,21 +96,38 @@ function parseGeometry(raw: Record<string, unknown>): GeometrySpec | null {
   if (!Array.isArray(raw.points) || raw.points.length === 0 || raw.points.length > MAX_POINTS) return null;
   const points: (DiagramPoint & { label: string })[] = [];
   const labels = new Set<string>();
+  // A single malformed point (most often: a coordinate the sanitizer in
+  // diagram-text.tsx turned into null, because the model wrote an unknown's
+  // name -- e.g. "h", the very thing a problem is solving for -- into a
+  // coordinate field, which isn't valid JSON to begin with) is skipped, not
+  // treated as a reason to drop the whole diagram. Any segment/angle that
+  // referenced this point's label will already fail its own `labels.has`
+  // check further down and get skipped in turn -- letting whatever OTHER
+  // points/segments/angles in the scene were fine still render, the same
+  // "one bad entry doesn't sink an otherwise-good diagram" principle
+  // already applied to angles below.
   for (const p of raw.points) {
-    if (typeof p !== "object" || p === null) return null;
+    if (typeof p !== "object" || p === null) continue;
     const { label, x, y } = p as Record<string, unknown>;
-    if (!isNonEmptyString(label, MAX_LABEL_LENGTH) || !isFiniteNumber(x) || !isFiniteNumber(y)) return null;
-    if (labels.has(label)) return null; // duplicate point label -- ambiguous, reject rather than guess
+    if (!isNonEmptyString(label, MAX_LABEL_LENGTH) || !isFiniteNumber(x) || !isFiniteNumber(y)) continue;
+    if (labels.has(label)) continue; // duplicate point label -- ambiguous, drop rather than guess
     labels.add(label);
     points.push({ label, x, y });
   }
+  if (points.length === 0) return null; // nothing left to draw at all
 
-  if (!Array.isArray(raw.segments) || raw.segments.length > MAX_SEGMENTS) return null;
+  if (!Array.isArray(raw.segments)) return null;
   const segments: GeometrySpec["segments"] = [];
-  for (const s of raw.segments) {
-    if (typeof s !== "object" || s === null) return null;
+  // Skipped individually, same reasoning as points above -- most often hit
+  // when a segment references a point that was just dropped for having a
+  // bad coordinate (a segment naming a point that never existed is a
+  // structural problem worth rejecting the whole diagram over; naming one
+  // that existed in the model's OWN JSON but didn't survive validation is
+  // exactly the cascade this is meant to allow).
+  for (const s of raw.segments.slice(0, MAX_SEGMENTS)) {
+    if (typeof s !== "object" || s === null) continue;
     const { from, to, label } = s as Record<string, unknown>;
-    if (typeof from !== "string" || typeof to !== "string" || !labels.has(from) || !labels.has(to)) return null;
+    if (typeof from !== "string" || typeof to !== "string" || !labels.has(from) || !labels.has(to)) continue;
     segments.push({ from, to, label: isNonEmptyString(label, MAX_LABEL_LENGTH) ? label : undefined });
   }
 

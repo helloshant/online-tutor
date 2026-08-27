@@ -19,6 +19,28 @@ import { parseDiagramSpec } from "@/lib/diagramSchema";
 // to CitationText unchanged.
 const DIAGRAM_PATTERN = /\[DIAGRAM\]\s*([\s\S]*?)\s*\[\/DIAGRAM\]/g;
 
+// A specific, recurring, real production mistake: the model writes an
+// unknown's own name into a numeric field -- most often a coordinate whose
+// value it doesn't actually know yet because it's the very thing the
+// problem is solving for (e.g. {"label":"D","x":12,"y":h}, "h" being the
+// tower height the steps below go on to calculate). A bare, unquoted
+// identifier there isn't valid JSON at all, so JSON.parse throws before
+// parseDiagramSpec's own per-field validation ever gets a chance to run --
+// dropping the ENTIRE diagram over one bad field, even when every other
+// point/segment/angle in it is fine. Rewriting a bare identifier (never
+// `true`/`false`/`null`, which are legitimate unquoted JSON values) to
+// `null` first makes the JSON itself always parseable; parseDiagramSpec's
+// own isFiniteNumber checks then correctly reject just that one field (a
+// point with a null coordinate is skipped, not the point's segments/
+// angles dragging the rest of a valid scene down with it -- see
+// diagramSchema.ts's own comments on that cascade).
+function sanitizeAlmostJson(raw: string): string {
+  return raw.replace(/:(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=[,}\]])/g, (match, pre, ident, post) => {
+    if (ident === "true" || ident === "false" || ident === "null") return match;
+    return `:${pre}null${post}`;
+  });
+}
+
 export function DiagramText({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
@@ -29,7 +51,7 @@ export function DiagramText({ text }: { text: string }) {
 
     let spec = null;
     try {
-      spec = parseDiagramSpec(JSON.parse(match[1]));
+      spec = parseDiagramSpec(JSON.parse(sanitizeAlmostJson(match[1])));
     } catch {
       spec = null;
     }
