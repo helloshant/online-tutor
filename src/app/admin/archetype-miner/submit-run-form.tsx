@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { submitRunAction, type SubmitRunState } from "./actions";
+import type { ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
 
 const initialState: SubmitRunState = {};
 
@@ -12,8 +13,16 @@ const initialState: SubmitRunState = {};
 // or couldn't reach the request) renders as real text on the form instead
 // of Next's generic, message-free crash screen that a plain
 // <form action={serverAction}> falls back to when the action throws.
-export function SubmitRunForm() {
+export function SubmitRunForm({ llmProvider }: { llmProvider: ArchetypeMinerLlmProvider | null }) {
   const [state, formAction, pending] = useActionState(submitRunAction, initialState);
+  // Native PDF input only exists on the Anthropic path (see
+  // anthropicProvider.ts) -- the service rejects a PDF outright when it's
+  // running on Azure OpenAI (azureOpenAIProvider.ts), so disable it here
+  // rather than let an admin discover that by submitting and reading a
+  // form error. llmProvider is null when the health check itself couldn't
+  // reach the service -- default to allowing the upload rather than
+  // guessing, same as before this check existed.
+  const pdfDisabled = llmProvider === "azure-openai";
 
   return (
     <form action={formAction} encType="multipart/form-data" className="space-y-4 border-t border-border p-4">
@@ -158,13 +167,23 @@ export function SubmitRunForm() {
           className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs"
         />
         <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
-          Or upload the paper as a PDF instead of pasting text above (input kind: raw paper text) — Stage 0 reads it
-          directly, including scanned/photographed papers with no text layer at all. Up to 15MB.
+          {pdfDisabled ? (
+            <>
+              PDF upload isn&apos;t available — this service is currently running on Azure OpenAI, which has no
+              equivalent to Anthropic&apos;s native PDF reading. Extract the text yourself and paste it above instead.
+            </>
+          ) : (
+            <>
+              Or upload the paper as a PDF instead of pasting text above (input kind: raw paper text) — Stage 0 reads
+              it directly, including scanned/photographed papers with no text layer at all. Up to 15MB.
+            </>
+          )}
           <input
             type="file"
             name="paperPdf"
             accept="application/pdf"
-            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand"
+            disabled={pdfDisabled}
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand disabled:cursor-not-allowed disabled:opacity-50"
           />
         </label>
 

@@ -75,6 +75,32 @@ export async function submitPipelineRun(request: SubmitPipelineRunRequest): Prom
   return { runId: responseBody.runId };
 }
 
+export type ArchetypeMinerLlmProvider = "anthropic" | "azure-openai";
+
+// Used by the submit-run page to know whether a PDF paper upload will
+// actually work before an admin tries one -- only the Anthropic provider
+// supports Stage 0 reading a PDF's pages directly (see
+// anthropicProvider.ts); the service rejects a PDF outright when it's
+// running on Azure OpenAI (see azureOpenAIProvider.ts). No shared-secret
+// header -- /health is deliberately unauthenticated, same as the
+// docker-compose healthcheck that already calls it. Returns null (rather
+// than throwing) when the service can't be reached at all, so a page
+// render never breaks over this -- the caller falls back to assuming PDF
+// upload is available, the same as before this existed.
+export async function getArchetypeMinerHealth(): Promise<{ llmProvider: ArchetypeMinerLlmProvider } | null> {
+  try {
+    const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/health`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null);
+    if (body?.llmProvider !== "anthropic" && body?.llmProvider !== "azure-openai") return null;
+    return { llmProvider: body.llmProvider };
+  } catch (err) {
+    console.error("Failed to check archetype-miner service health:", err);
+    return null;
+  }
+}
+
 export async function mineArchetypeFamilies(subjectOrCourse: string): Promise<{ familyCount: number }> {
   const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/archetype-families/mine`;
   const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;

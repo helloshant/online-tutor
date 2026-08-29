@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getArchetypeMinerHealth } from "@/lib/archetypeMinerClient";
 import { SubmitRunForm } from "./submit-run-form";
 import type { PipelineRunRow } from "@/lib/archetypeMinerTypes";
 
@@ -20,16 +21,11 @@ export default async function ArchetypeMinerPage() {
   await requireAdminPage("archetype_miner");
   const admin = createAdminClient();
 
-  const { data: runs } = await admin
-    .from("archetype_pipeline_runs")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  const { count: pendingReviewCount } = await admin
-    .from("archetype_review_queue")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "pending");
+  const [{ data: runs }, { count: pendingReviewCount }, health] = await Promise.all([
+    admin.from("archetype_pipeline_runs").select("*").order("created_at", { ascending: false }).limit(50),
+    admin.from("archetype_review_queue").select("*", { count: "exact", head: true }).eq("status", "pending"),
+    getArchetypeMinerHealth(),
+  ]);
 
   const rows = (runs ?? []) as PipelineRunRow[];
 
@@ -64,7 +60,7 @@ export default async function ArchetypeMinerPage() {
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
           Submit a new pipeline run
         </summary>
-        <SubmitRunForm />
+        <SubmitRunForm llmProvider={health?.llmProvider ?? null} />
       </details>
 
       <div className="mt-6 rounded-xl border border-border bg-surface">
