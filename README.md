@@ -13,7 +13,7 @@ cache/knowledge-base pipeline in front of the LLM.
 
 ## Architecture
 
-Six containers:
+Seven containers:
 
 ```
                        HTTP (internal only)     ┌──────────────────┐
@@ -51,6 +51,15 @@ Six containers:
          test -- go through this service; drafting/listing/reading
          an inbox/submitting feedback are plain CRUD `web` does
          itself, straight against Supabase, like coupon_codes)
+
+  archetype-miner (4400, Express) -- not yet wired into the diagram above:
+  no admin UI calls it yet, so `web` has no depends_on/environment entry
+  for it (see docker-compose.yml's own comment on the service). Talks
+  directly to Supabase (archetype_* tables), Claude/Azure OpenAI, and
+  Voyage (embeddings) the same way orchestrator does, entirely on its own
+  -- submit a run with `POST /v1/pipeline/runs` against it directly (e.g.
+  from an internal script, or `docker compose exec` + curl) until a real
+  integration exists.
 ```
 
 - **`web`** (repo root) owns everything about *who can ask what*: auth, onboarding,
@@ -149,11 +158,32 @@ Six containers:
   `coupon_codes`/`answered_questions`/`topic_summaries` already are, rather than routing every read
   through yet another HTTP hop. See "Broadcasts (announcements, promotions, feedback, tests)" below
   for the full design.
+- **`services/archetype-miner`** owns the question-archetype mining pipeline: turning a historical
+  question corpus (exam papers, or already-segmented questions) into a reusable taxonomy of
+  *archetypes* — fundamentally distinct reasoning patterns, not wording templates — that a future
+  question generator could vary the parameters of. Five stages, each a fixed JSON contract: **Stage
+  0 (Segmenter)** splits raw paper text into the smallest independently-gradable question records;
+  **Stage 1 (Analyzer)** converts each into a `QuestionSignature` (learning objective, reasoning
+  pattern, abstract structure, difficulty — always stated *relative to a named education level*,
+  never as an absolute); an algorithmic **embedding + clustering** step (Voyage embeddings, cosine-
+  similarity union-find, scoped so a grade-9 question and a Bachelor's question can never land in
+  the same cluster) groups signatures before any LLM judges similarity; **Stage 2 (Miner)** decides
+  whether a cluster is one archetype, several, or incomplete; **Stage 3 (Critic)** audits the whole
+  candidate catalogue against a strict decision vocabulary (KEEP/MERGE/SPLIT/REVISE/REVIEW/ADD/
+  REMOVE) that never defaults to KEEP when uncertain. Every education-level classification
+  (`EducationContext`: school board or university program, subject/course, grade or year) is scoped
+  explicitly end to end, so archetypes from different levels/boards/courses are never silently
+  merged just because they read similarly. Runs entirely in the background from
+  `POST /v1/pipeline/runs` (no queue infra — same "no Redis job queue" posture as every other
+  service here besides the orchestrator's own answer cache) — a submission returns immediately with
+  a run id to poll; every low-confidence or ambiguous judgment anywhere in the pipeline lands in a
+  human review queue rather than a dead end. No admin UI yet — see the service's own README section
+  below for its current scope and what's still a follow-up.
 
 This split means the orchestration/prompt/pipeline layer, the usage-accounting layer, the payment
-layer, and the broadcast-audience/test-scoring layer can each be redeployed, scaled, or replaced
-(e.g. swapping in a real observability backend, or a different payment gateway, later) without
-touching the web app or each other.
+layer, the broadcast-audience/test-scoring layer, and the archetype-mining layer can each be
+redeployed, scaled, or replaced (e.g. swapping in a real observability backend, or a different
+payment gateway, later) without touching the web app or each other.
 
 ## How it works
 
@@ -1901,6 +1931,97 @@ question-by-question, against the uploaded sheet.
   regrade can't drift out of sync. `status` becomes `'graded'` once every question on that
   submission has a mark; until then it's `'submitted'`, shown to the student as "awaiting grading".
 
+### Question Archetype Miner (`services/archetype-miner`)
+
+A backend pipeline, not yet a student- or admin-facing feature: turns a historical question corpus
+into a taxonomy of *archetypes* — fundamentally distinct reasoning patterns a question tests, never
+a wording template, specific number, or one particular historical question — so a future question
+generator could vary an archetype's parameters instead of a human inventing a new pattern from
+scratch each time. Built from a researched pipeline design (schema-first: every stage's input/
+output is a fixed JSON contract in `services/archetype-miner/src/types.ts`, referenced by every
+stage's prompt in `prompts.ts` rather than restated per call).
+
+**The five stages, run per submitted batch ("pipeline run"):**
+
+1. **Segmenter** — splits raw exam-paper text into `SegmentedQuestion` records at the smallest
+   independently-gradable unit (sub-parts testing different reasoning become siblings sharing a
+   `parent_question_id`; sub-parts that are trivial continuations of one reasoning thread, or an
+   undergraduate derivation/lab-report/case-study spanning many steps, stay one record). Skipped
+   entirely for a run submitted as already-segmented questions.
+2. **Analyzer** — converts each `SegmentedQuestion` into a `QuestionSignature`: curriculum
+   classification, an *observable* learning objective, the ordered reasoning steps a competent
+   student takes (never copied solution arithmetic), an abstract structure stripped of names/
+   numbers, and a difficulty rating that always carries `difficulty_reference_frame` — what level
+   the rating is relative to, since a "Hard" grade-9 question and a "Hard" Bachelor's question are
+   never comparable in absolute terms.
+3. **Embedding + clustering** (`clustering.ts`, algorithmic, not an LLM judgment) — embeds each
+   signature's learning objective + reasoning pattern + abstract structure (Voyage, same
+   `voyage-4`/1024-dim the rest of this app already standardized on) and groups them by cosine-
+   similarity union-find. Scoped hard: two signatures only ever cluster together if their
+   `education_context` (school board or university program, subject/course — see below) matches
+   exactly, enforced in the grouping code itself, not just as a prompt instruction, so a grade-9 and
+   a Bachelor's question can never land in the same cluster no matter how similar their embeddings.
+4. **Miner** — judges each cluster: one archetype, several, incomplete, or ambiguous, weighting
+   Stage 1's own structured fields (reasoning pattern shape, reasoning direction) over raw wording.
+   Flags a suspected split-across-clusters case (`possible_duplicate_of`) for the Critic to verify.
+5. **Critic** — audits the whole run's candidate catalogue against a strict decision vocabulary that
+   maps 1:1 onto every review responsibility: `KEEP`, `MERGE` (two archetypes are really one),
+   `SPLIT` (one archetype bundles materially different reasoning — including when two questions
+   share an abstract structure but require different rigor/tools at different education levels),
+   `REVISE` (grouping is right, articulation is wrong), `REVIEW` (genuinely ambiguous — never
+   defaults to `KEEP` when uncertain), `ADD` (a real gap in the catalogue), `REMOVE` (zero
+   supporting evidence). Every decision requires cited evidence (`critic_evidence`); the Critic is
+   explicitly forbidden from drafting/predicting a question at any point, including while judging
+   whether an archetype is "generator-usable."
+
+**`EducationContext`** (carried by every `SegmentedQuestion`/`QuestionSignature`/`Archetype`, and
+by a whole pipeline run) is what makes this general-purpose rather than CBSE-Class-10-specific:
+`education_stage` (secondary/senior_secondary/undergraduate), `grade_or_year`, `curriculum_source`
+(school board or university program — with `taxonomy_supplied` telling Stage 1 whether it has a
+real curriculum taxonomy to match against, or must classify from its own subject-matter knowledge
+at capped confidence, the expected default for most university courses), and `subject_or_course`.
+Archetypes are scoped to this tuple by default — never silently merged across levels/boards/courses
+just because they read similarly.
+
+**Human review queue** (`archetype_review_queue`) — the defined destination for every "I'm not
+sure" state in the pipeline, so none of them are a dead end: a Stage 1 signature below the
+confidence threshold (`ARCHETYPE_REVIEW_CONFIDENCE_THRESHOLD`, default 0.5), a question that failed
+to embed or that Stage 2 flagged as not belonging to any archetype it proposed, and every Stage 3
+`critic_decision: REVIEW`.
+
+**API** (internal only, `x-internal-api-key` shared secret, same pattern as every other service
+here):
+- `POST /v1/pipeline/runs` — submit a run. Body: `education_context`, `input_kind`
+  (`"raw_papers"` with a `papers: [{paper, raw_text}]` array, or `"pre_segmented"` with a
+  `questions` array already shaped like `SegmentedQuestion`), and an optional
+  `curriculum_taxonomy_text` for Stage 1 to match against. Returns `{ runId }` immediately —
+  the pipeline runs in the background (no queue infra, same as every other service here besides the
+  orchestrator's own Redis answer cache), often taking minutes to hours depending on corpus size,
+  since Stage 1 alone is one LLM call per question.
+- `GET /v1/pipeline/runs/:id` — poll status (`pending` → `segmenting` → `analyzing` → `embedding` →
+  `clustering` → `mining` → `critiquing` → `completed`/`failed`) and running stats.
+- `GET /v1/pipeline/runs/:id/archetypes` — the mined catalogue so far (every status/decision, not
+  just a filtered "final" view — `status`/`critic_decision` query params narrow it down).
+- `GET /v1/review-queue` (optional `run_id`, `status` query params) / `POST /v1/review-queue/:id/resolve`
+  — read and resolve escalated items.
+
+**Current scope, deliberately** (see the service's own code comments for the reasoning behind each):
+- **No admin UI yet.** This PR is the microservice itself, per what was asked — submit/poll runs and
+  resolve review-queue items via the API directly (or `docker compose exec archetype-miner` + curl)
+  until a `/admin/archetype-miner` page exists to do that visually. Not wired into `web`'s
+  `docker-compose.yml` depends_on/environment for the same reason — nothing calls it yet.
+  Natural next step if this is going into real use.
+- **`ArchetypeFamily`** (the researched design's own optional cross-level progression layer — e.g.
+  relating "solve for an unknown from a stated condition" across grade 9 through Bachelor's) is
+  typed in `types.ts` but not built — explicitly flagged as a future extension in the source
+  design, not something to build into Stage 2/3 yet.
+  Every merge/split reflected in the catalogue today waits for the model itself to have proposed
+  it — no periodic re-clustering job exists yet.
+- **Curriculum taxonomy sourcing is a data problem, not a code one** — pass
+  `curriculum_taxonomy_text` per run for boards/courses you have a real syllabus document for;
+  everything else classifies at capped confidence from the model's own knowledge, exactly as the
+  design intends.
+
 ## Local setup
 
 You can run this either with Docker Compose (one command, all services) or by running the web app,
@@ -1913,6 +2034,7 @@ steps 1–3 below (Supabase) are the same.
 npm install
 cd services/orchestrator && npm install && cd ../..
 cd services/observability && npm install && cd ../..
+cd services/archetype-miner && npm install && cd ../..
 ```
 
 (Not needed if you're only going to run via Docker Compose — the images install their own
@@ -1942,7 +2064,7 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
-There are **five** env files — one per service:
+There are **six** env files — one per service:
 
 ```bash
 cp .env.example .env.local
@@ -1950,6 +2072,7 @@ cp services/orchestrator/.env.example services/orchestrator/.env.local
 cp services/observability/.env.example services/observability/.env.local
 cp services/payment/.env.example services/payment/.env.local
 cp services/broadcast/.env.example services/broadcast/.env.local
+cp services/archetype-miner/.env.example services/archetype-miner/.env.local
 ```
 
 **Root `.env.local`** (the web app):
@@ -2027,9 +2150,26 @@ cp services/broadcast/.env.example services/broadcast/.env.local
   `broadcasts`/`broadcast_recipients`/`test_questions`/`test_attempts`/`test_answers`; the
   service-role key is required since none of those tables has a client-facing RLS policy.
 
+**`services/archetype-miner/.env.local`** (the question-archetype mining pipeline — see its own
+README section above): not called by `web` yet, so nothing to add to the root `.env.local` for it.
+
+- `ARCHETYPE_MINER_SHARED_SECRET` — any random string; only matters once something calls this
+  service (there's no counterpart variable in the root env file yet — see above).
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project again. Used to read/write the
+  `archetype_*` tables (`supabase/migrations/0038_archetype_miner.sql`); the service-role key is
+  required since none of those tables has a client-facing insert/update policy (except
+  `archetype_review_queue`, resolvable by an admin session directly).
+- `LLM_PROVIDER` / Anthropic / Azure OpenAI — same shape and defaults as the orchestrator's own
+  (see above), but configured independently — mining can run on a different provider/model than the
+  one answering live student chat.
+- `VOYAGE_API_KEY` — same Voyage account the orchestrator's chapter-notes RAG uses (or a separate
+  one); used to embed each mined question signature before clustering. Required for Stage 2/3 to run
+  at all — without it, every question in a run ends up in the review queue instead of being
+  clustered.
+
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs all six containers, including Redis):
+**Option A — Docker Compose** (builds and runs all seven containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build
@@ -2046,11 +2186,12 @@ If you forget the flag, the build now fails immediately with a clear message rat
 producing a broken image.
 
 Open [http://localhost:3000](http://localhost:3000). None of the orchestrator, observability,
-payment, or broadcast services are published to your host — they're only reachable from other
-containers over the Compose network — so you won't see them on
-`localhost:4000`/`4100`/`4200`/`4300`; that's intentional. To check one directly: `docker compose
-exec orchestrator wget -qO- localhost:4000/health` (swap `orchestrator`/`4000` for
-`observability`/`4100`, `payment`/`4200`, or `broadcast`/`4300` for the others).
+payment, broadcast, or archetype-miner services are published to your host — they're only
+reachable from other containers over the Compose network — so you won't see them on
+`localhost:4000`/`4100`/`4200`/`4300`/`4400`; that's intentional. To check one directly: `docker
+compose exec orchestrator wget -qO- localhost:4000/health` (swap `orchestrator`/`4000` for
+`observability`/`4100`, `payment`/`4200`, `broadcast`/`4300`, or `archetype-miner`/`4400` for the
+others).
 
 The orchestrator's `/health` response includes non-secret configuration presence for its three
 optional dependencies (`answerBank`, `cache`, `observability` — each `{ configured: boolean }`,
