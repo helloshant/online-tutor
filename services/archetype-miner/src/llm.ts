@@ -1,6 +1,6 @@
 import { getAnthropicCompletion } from "./anthropicProvider.js";
 import { getAzureOpenAICompletion } from "./azureOpenAIProvider.js";
-import type { LlmReply } from "./llmTypes.js";
+import type { LlmReply, PdfAttachment } from "./llmTypes.js";
 
 export type LlmProvider = "anthropic" | "azure-openai";
 
@@ -14,6 +14,7 @@ export async function getCompletion(params: {
   systemPrompt: string;
   message: string;
   maxTokens: number;
+  pdf?: PdfAttachment | null;
 }): Promise<LlmReply> {
   return getActiveLlmProvider() === "azure-openai"
     ? getAzureOpenAICompletion(params)

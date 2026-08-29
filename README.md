@@ -1992,8 +1992,13 @@ to embed or that Stage 2 flagged as not belonging to any archetype it proposed, 
 **API** (internal only, `x-internal-api-key` shared secret, same pattern as every other service
 here):
 - `POST /v1/pipeline/runs` — submit a run. Body: `education_context`, `input_kind`
-  (`"raw_papers"` with a `papers: [{paper, raw_text}]` array, or `"pre_segmented"` with a
-  `questions` array already shaped like `SegmentedQuestion`), and an optional
+  (`"raw_papers"` with a `papers: [{paper, raw_text}]` array — each paper sets exactly one of
+  `raw_text` or `pdf_base64` (a base64-encoded PDF; Stage 0 reads it directly via Anthropic's
+  native document understanding rather than a lossy text-extraction step, deliberately not
+  repeating the `unpdf`-based PDF path the answer-bank bulk import removed — see its own README
+  entry — since exam papers are routinely scanned/photographed with no real text layer at all;
+  unsupported when `LLM_PROVIDER=azure-openai`, see `azureOpenAIProvider.ts`), or `"pre_segmented"`
+  with a `questions` array already shaped like `SegmentedQuestion`), and an optional
   `curriculum_taxonomy_text` for Stage 1 to match against. Returns `{ runId }` immediately —
   the pipeline runs in the background (no queue infra, same as every other service here besides the
   orchestrator's own Redis answer cache), often taking minutes to hours depending on corpus size,

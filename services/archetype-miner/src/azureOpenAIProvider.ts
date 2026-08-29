@@ -1,5 +1,5 @@
 import { AzureOpenAI } from "openai";
-import type { LlmReply } from "./llmTypes.js";
+import type { LlmReply, PdfAttachment } from "./llmTypes.js";
 
 const DEFAULT_DEPLOYMENT = "gpt-4o";
 const DEFAULT_API_VERSION = "2024-08-01-preview";
@@ -29,9 +29,21 @@ export async function getAzureOpenAICompletion(params: {
   systemPrompt: string;
   message: string;
   maxTokens: number;
+  pdf?: PdfAttachment | null;
 }): Promise<LlmReply> {
-  const { systemPrompt, message, maxTokens } = params;
+  const { systemPrompt, message, maxTokens, pdf } = params;
   const client = getClient();
+
+  // Chat Completions doesn't take a raw PDF content part the way Anthropic's
+  // Messages API does (see anthropicProvider.ts) -- failing loudly here
+  // beats silently ignoring the PDF and segmenting an empty/near-empty
+  // message, which would look like a Stage 0 bug rather than an
+  // unsupported-input error.
+  if (pdf) {
+    throw new Error(
+      "PDF paper input isn't supported when LLM_PROVIDER=azure-openai -- extract the text and submit it as raw_text instead."
+    );
+  }
 
   const completion = await client.chat.completions.create({
     model: AZURE_OPENAI_DEPLOYMENT,

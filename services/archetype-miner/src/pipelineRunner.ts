@@ -135,6 +135,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
       for (const paperInput of params.papers) {
         const result = await runSegmenter({
           rawText: paperInput.raw_text,
+          pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
           paper: paperInput.paper,
           educationContext,
         });

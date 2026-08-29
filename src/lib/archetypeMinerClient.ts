@@ -31,7 +31,10 @@ type RawPaperInput = {
     source_url: string;
     extraction_method: "native_text" | "ocr";
   };
-  raw_text: string;
+  // Exactly one of these -- see the archetype-miner service's own
+  // types.ts (RawPaperInput) and server.ts for the runtime check.
+  raw_text?: string;
+  pdf_base64?: string;
 };
 
 export type SubmitPipelineRunRequest = {

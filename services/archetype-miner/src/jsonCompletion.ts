@@ -1,5 +1,5 @@
 import { getCompletion } from "./llm.js";
-import type { TokenUsage } from "./llmTypes.js";
+import type { PdfAttachment, TokenUsage } from "./llmTypes.js";
 
 // Every stage prompt ends with "Return ONLY valid JSON ... No markdown, no
 // explanatory prose" -- but a model occasionally wraps its answer in a
@@ -42,6 +42,7 @@ export async function getJsonCompletion(params: {
   systemPrompt: string;
   message: string;
   maxTokens: number;
+  pdf?: PdfAttachment | null;
 }): Promise<{ data: unknown; model: string; usage: TokenUsage }> {
   let lastError: unknown;
   let lastRawText = "";

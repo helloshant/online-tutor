@@ -357,10 +357,18 @@ export type PipelineRun = {
 // already-segmented question (Stage 0 is skipped for these) -- a run's
 // input_kind determines which shape the API expects, checked once at
 // submission time (see server.ts).
+//
+// raw_text and pdf_base64 are both optional here at the type level, but
+// server.ts requires exactly one non-empty value at submission time: a
+// paper is either pre-extracted text, or an actual PDF Stage 0 reads
+// directly (Anthropic's native document understanding -- see
+// anthropicProvider.ts), never both and never neither.
 export type RawPaperInput = {
   // Echoed onto every SegmentedQuestion this paper produces.
   paper: PaperMeta;
-  raw_text: string;
+  raw_text?: string;
+  // Base64-encoded PDF bytes, no "data:" URL prefix.
+  pdf_base64?: string;
 };
 
 export type PreSegmentedInput = Omit<SegmentedQuestion, "education_context">;

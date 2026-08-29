@@ -64,7 +64,11 @@ export default async function ArchetypeMinerPage() {
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
           Submit a new pipeline run
         </summary>
-        <form action={submitRunAction} className="space-y-4 border-t border-border p-4">
+        <form
+          action={submitRunAction}
+          encType="multipart/form-data"
+          className="space-y-4 border-t border-border p-4"
+        >
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/50">
               Education context
@@ -221,6 +225,17 @@ export default async function ArchetypeMinerPage() {
               placeholder="Paste the raw extracted paper text here (for input kind: raw paper text)"
               className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs"
             />
+            <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
+              Or upload the paper as a PDF instead of pasting text above (input kind: raw paper
+              text) — Stage 0 reads it directly, including scanned/photographed papers with no
+              text layer at all
+              <input
+                type="file"
+                name="paperPdf"
+                accept="application/pdf"
+                className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand"
+              />
+            </label>
 
             <textarea
               name="preSegmentedJson"

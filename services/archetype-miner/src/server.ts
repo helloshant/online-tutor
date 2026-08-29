@@ -18,8 +18,10 @@ if (!SHARED_SECRET) {
 
 const app = express();
 // Larger than the other services' 256kb: a single raw_papers submission can
-// legitimately carry many full exam papers' worth of text in one request.
-app.use(express.json({ limit: "20mb" }));
+// legitimately carry many full exam papers' worth of text in one request --
+// or one PDF (base64 runs ~33% larger than the source bytes; the web app
+// caps a single PDF upload at 15MB, see admin/archetype-miner/actions.ts).
+app.use(express.json({ limit: "25mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -85,6 +87,21 @@ app.post("/v1/pipeline/runs", requireSharedSecret, async (req: Request, res: Res
   if (body.input_kind === "raw_papers") {
     if (!Array.isArray(body.papers) || body.papers.length === 0) {
       res.status(400).json({ error: "papers must be a non-empty array when input_kind is 'raw_papers'" });
+      return;
+    }
+    // Exactly one of raw_text/pdf_base64 per paper -- see types.ts's own
+    // comment on RawPaperInput for why this is a runtime check rather than
+    // enforced by the type alone (both are legitimately optional at the
+    // type level since a batch can mix text-based and PDF-based papers).
+    const badPaperIndex = body.papers.findIndex((p) => {
+      const hasText = typeof p.raw_text === "string" && p.raw_text.trim().length > 0;
+      const hasPdf = typeof p.pdf_base64 === "string" && p.pdf_base64.trim().length > 0;
+      return hasText === hasPdf; // true when both or neither are set
+    });
+    if (badPaperIndex !== -1) {
+      res.status(400).json({
+        error: `papers[${badPaperIndex}] must set exactly one of raw_text or pdf_base64, not both or neither`,
+      });
       return;
     }
     const params: SubmitRunParams = {

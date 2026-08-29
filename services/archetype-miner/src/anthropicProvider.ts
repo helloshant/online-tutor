@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { LlmReply } from "./llmTypes.js";
+import type { LlmReply, PdfAttachment } from "./llmTypes.js";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 
@@ -26,15 +26,29 @@ export async function getAnthropicCompletion(params: {
   systemPrompt: string;
   message: string;
   maxTokens: number;
+  pdf?: PdfAttachment | null;
 }): Promise<LlmReply> {
-  const { systemPrompt, message, maxTokens } = params;
+  const { systemPrompt, message, maxTokens, pdf } = params;
   const client = getClient();
+
+  // Same shape as the orchestrator's own image attachment (see its
+  // anthropicProvider.ts): the document block first, then the JSON
+  // envelope (education_context/paper metadata, no raw_text field) as a
+  // trailing text block -- Claude reads the PDF's pages directly rather
+  // than working from a pre-extracted text layer, so this also covers
+  // scanned/OCR-quality papers a text-extraction library would mangle.
+  const userContent: Anthropic.MessageParam["content"] = pdf
+    ? [
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.base64 } },
+        { type: "text", text: message },
+      ]
+    : message;
 
   const response = await client.messages.create({
     model: ANTHROPIC_MODEL,
     max_tokens: maxTokens,
     system: systemPrompt,
-    messages: [{ role: "user", content: message }],
+    messages: [{ role: "user", content: userContent }],
   });
   const textBlock = response.content.find((block) => block.type === "text");
   return {

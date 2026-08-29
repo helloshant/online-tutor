@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildSegmenterPrompt } from "./prompts.js";
+import type { PdfAttachment } from "./llmTypes.js";
 import type { EducationContext, PaperMeta, SegmentedQuestion } from "./types.js";
 
 const MAX_TOKENS = 8000;
@@ -40,23 +41,31 @@ export type SegmenterResult = {
 // education_context is fixed for the whole batch this paper belongs to and
 // stamped onto every record here (not left to the model to infer or
 // possibly drift across records within one paper).
+//
+// Exactly one of rawText/pdf is expected (pipelineRunner.ts enforces this
+// at the call site, mirroring server.ts's own submission-time check) --
+// when pdf is set, the paper's own text is never embedded in the JSON
+// envelope below; the model reads it directly off the attached document
+// (see anthropicProvider.ts).
 export async function runSegmenter(params: {
-  rawText: string;
+  rawText?: string;
+  pdf?: PdfAttachment;
   paper: PaperMeta;
   educationContext: EducationContext;
 }): Promise<SegmenterResult> {
-  const { rawText, paper, educationContext } = params;
+  const { rawText, pdf, paper, educationContext } = params;
 
   const message = JSON.stringify({
     education_context: educationContext,
     paper,
-    raw_text: rawText,
+    ...(pdf ? { raw_text: "(see attached PDF document)" } : { raw_text: rawText }),
   });
 
   const { data, model, usage } = await getJsonCompletion({
     systemPrompt: buildSegmenterPrompt(),
     message,
     maxTokens: MAX_TOKENS,
+    pdf,
   });
 
   if (!Array.isArray(data)) {

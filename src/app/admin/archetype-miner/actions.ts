@@ -12,6 +12,11 @@ const EDUCATION_STAGES: EducationStage[] = ["secondary", "senior_secondary", "un
 const CURRICULUM_SOURCE_TYPES: CurriculumSourceType[] = ["school_board", "university_program"];
 const PAPER_TYPES = ["board_exam", "sample_paper", "compartment"] as const;
 const EXTRACTION_METHODS = ["native_text", "ocr"] as const;
+// Same cap the exam-answer-sheet upload uses (see
+// api/broadcasts/[id]/exam/submit/route.ts) -- comfortably under both
+// Anthropic's own PDF limits and, base64-encoded, this service's 25mb JSON
+// body limit (see services/archetype-miner/src/server.ts).
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
 
 function readEducationContext(formData: FormData): EducationContext | null {
   const educationStage = formData.get("educationStage") as string | null;
@@ -92,7 +97,32 @@ export async function submitRunAction(formData: FormData): Promise<void> {
     runId = result.runId;
   } else {
     const rawText = ((formData.get("rawText") as string | null) ?? "").trim();
-    if (!rawText) throw new Error("Paste the paper's raw text.");
+    const pdfFile = formData.get("paperPdf");
+    const hasPdf = pdfFile instanceof File && pdfFile.size > 0;
+
+    if (rawText && hasPdf) {
+      throw new Error("Paste the paper's raw text OR upload a PDF, not both.");
+    }
+    if (!rawText && !hasPdf) {
+      throw new Error("Paste the paper's raw text, or upload it as a PDF.");
+    }
+
+    let pdfBase64: string | undefined;
+    if (hasPdf) {
+      const file = pdfFile as File;
+      if (file.type !== "application/pdf") {
+        throw new Error("The paper upload must be a PDF file.");
+      }
+      if (file.size > MAX_PDF_BYTES) {
+        throw new Error(`That PDF is too large (max ${Math.floor(MAX_PDF_BYTES / (1024 * 1024))}MB).`);
+      }
+      // Stage 0 reads the PDF's pages directly (Anthropic's native document
+      // understanding, see anthropicProvider.ts) rather than working from a
+      // pre-extracted text layer -- this also covers scanned/photographed
+      // past-year papers with no real text layer at all, which a plain
+      // text-extraction step would otherwise return empty or garbled.
+      pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    }
 
     const subject = ((formData.get("paperSubject") as string | null) ?? "").trim() || educationContext.subject_or_course;
     const year = Number(formData.get("paperYear"));
@@ -126,7 +156,7 @@ export async function submitRunAction(formData: FormData): Promise<void> {
             source_url: sourceUrl,
             extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
           },
-          raw_text: rawText,
+          ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: rawText }),
         },
       ],
     });
