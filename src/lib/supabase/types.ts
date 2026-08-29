@@ -1,3 +1,19 @@
+// Row shapes for the archetype-miner tables (supabase/migrations/
+// 0038_archetype_miner.sql, 0039_archetype_miner_admin_and_families.sql)
+// live in archetypeMinerTypes.ts, alongside the domain types (Archetype,
+// EducationContext, ...) they're built from -- imported here rather than
+// duplicated a third time (services/archetype-miner/src/types.ts is the
+// original; that file is the web app's own mirror of it; this file just
+// needs the DB row shapes for the Database["public"]["Tables"] entries
+// below).
+import type {
+  ArchetypeCurriculumTaxonomyRow,
+  ArchetypeFamilyRow,
+  ArchetypeRow,
+  PipelineRunRow,
+  ReviewQueueRow,
+} from "../archetypeMinerTypes";
+
 export type Medium = "English" | "Hindi" | "Bengali";
 export type SubscriptionStatus =
   | "pending_payment"
@@ -244,7 +260,8 @@ export type AdminPageKey =
   | "chapter_notes"
   | "topic_summaries"
   | "broadcasts"
-  | "feedback";
+  | "feedback"
+  | "archetype_miner";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -676,6 +693,46 @@ export interface Database {
         Row: StudentUsageLimit;
         Insert: Partial<StudentUsageLimit>;
         Update: Partial<StudentUsageLimit>;
+        Relationships: [];
+      };
+      // The remaining archetype_* tables (archetype_segmented_questions,
+      // archetype_question_signatures, archetype_question_embeddings,
+      // archetype_clusters) are never read or written from this app --
+      // only services/archetype-miner touches them directly -- so they're
+      // deliberately not given entries here, same reasoning as any other
+      // backend-only table this app has no code path into.
+      archetype_pipeline_runs: {
+        Row: PipelineRunRow;
+        Insert: Partial<PipelineRunRow>;
+        Update: Partial<PipelineRunRow>;
+        Relationships: [];
+      };
+      archetypes: {
+        Row: ArchetypeRow;
+        Insert: Partial<ArchetypeRow>;
+        Update: Partial<ArchetypeRow>;
+        Relationships: [
+          { foreignKeyName: "archetypes_run_id_fkey"; columns: ["run_id"]; referencedRelation: "archetype_pipeline_runs"; referencedColumns: ["id"] },
+        ];
+      };
+      archetype_review_queue: {
+        Row: ReviewQueueRow;
+        Insert: Partial<ReviewQueueRow>;
+        Update: Partial<ReviewQueueRow>;
+        Relationships: [
+          { foreignKeyName: "archetype_review_queue_run_id_fkey"; columns: ["run_id"]; referencedRelation: "archetype_pipeline_runs"; referencedColumns: ["id"] },
+        ];
+      };
+      archetype_families: {
+        Row: ArchetypeFamilyRow;
+        Insert: Partial<ArchetypeFamilyRow>;
+        Update: Partial<ArchetypeFamilyRow>;
+        Relationships: [];
+      };
+      archetype_curriculum_taxonomies: {
+        Row: ArchetypeCurriculumTaxonomyRow;
+        Insert: Partial<ArchetypeCurriculumTaxonomyRow>;
+        Update: Partial<ArchetypeCurriculumTaxonomyRow>;
         Relationships: [];
       };
     };

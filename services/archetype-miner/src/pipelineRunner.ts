@@ -4,6 +4,7 @@ import { runAnalyzer } from "./stage1Analyzer.js";
 import { clusterSignatures } from "./clustering.js";
 import { runMiner } from "./stage2Miner.js";
 import { runCritic } from "./stage3Critic.js";
+import { lookupStoredTaxonomy } from "./curriculumTaxonomy.js";
 import { lowConfidenceThreshold, toInsertRow, type ReviewQueueCandidate } from "./reviewQueue.js";
 import type {
   Archetype,
@@ -99,6 +100,31 @@ export async function submitRun(params: SubmitRunParams): Promise<string> {
 async function executeRun(runId: string, params: SubmitRunParams): Promise<void> {
   const supabase = getSupabaseClient();
   try {
+    // Resolve once per run, not per question: an explicitly-supplied
+    // curriculum_taxonomy_text on the submission always wins (lets a
+    // one-off run override or supply a taxonomy that was never saved),
+    // otherwise fall back to whatever's stored for this run's own
+    // curriculum_source (see curriculumTaxonomy.ts) -- undefined either
+    // way just means Stage 1 classifies at capped confidence, same as
+    // before this existed.
+    const curriculumTaxonomyText =
+      params.curriculumTaxonomyText ?? (await lookupStoredTaxonomy(params.educationContext.curriculum_source));
+
+    // Corrected, not the raw submitted value: taxonomy_supplied drives
+    // which branch of Stage 1's own prompt runs (buildAnalyzerPrompt), so
+    // it needs to reflect whether curriculumTaxonomyText actually resolved
+    // to something -- a caller could submit taxonomy_supplied:false while
+    // an admin had already saved a taxonomy for this curriculum_source (or
+    // vice versa), and the PROMPT must agree with what it was actually
+    // given, not what the submission merely claimed.
+    const educationContext: EducationContext = {
+      ...params.educationContext,
+      curriculum_source: {
+        ...params.educationContext.curriculum_source,
+        taxonomy_supplied: Boolean(curriculumTaxonomyText),
+      },
+    };
+
     // ---------------------------------------------------------------
     // Stage 0 -- Segmenter (skipped entirely for pre_segmented input)
     // ---------------------------------------------------------------
@@ -110,7 +136,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
         const result = await runSegmenter({
           rawText: paperInput.raw_text,
           paper: paperInput.paper,
-          educationContext: params.educationContext,
+          educationContext,
         });
         if (result.questions.length > 0) {
           const { error } = await supabase.from("archetype_segmented_questions").insert(
@@ -132,8 +158,8 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
         question_id: q.question_id,
         run_id: runId,
         parent_question_id: q.parent_question_id,
-        education_context: params.educationContext,
-        question: { ...q, education_context: params.educationContext },
+        education_context: educationContext,
+        question: { ...q, education_context: educationContext },
       }));
       if (rows.length > 0) {
         const { error } = await supabase.from("archetype_segmented_questions").insert(rows);
@@ -169,7 +195,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
 
     for (const row of segmentedRows ?? []) {
       const question = row.question as Parameters<typeof runAnalyzer>[0]["question"];
-      const result = await runAnalyzer({ question, curriculumTaxonomyText: params.curriculumTaxonomyText });
+      const result = await runAnalyzer({ question, curriculumTaxonomyText });
 
       if (!result) {
         stage1ReviewCandidates.push({

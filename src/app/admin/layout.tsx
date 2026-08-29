@@ -60,6 +60,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Feedback
               </Link>
             )}
+            {canSee("archetype_miner") && (
+              <Link href="/admin/archetype-miner" className="text-foreground/70 hover:text-foreground">
+                Archetype Miner
+              </Link>
+            )}
             {isSuperadmin && (
               <Link href="/admin/authorization" className="text-foreground/70 hover:text-foreground">
                 Authorization

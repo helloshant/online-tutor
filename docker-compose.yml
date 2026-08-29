@@ -19,17 +19,20 @@ services:
       - .env.local
     environment:
       # Always resolve to the compose-network hostname here, regardless of
-      # whatever ORCHESTRATOR_URL/PAYMENT_URL/BROADCAST_URL a local
-      # (non-Docker) .env.local might have for `npm run dev`.
+      # whatever ORCHESTRATOR_URL/PAYMENT_URL/BROADCAST_URL/ARCHETYPE_MINER_URL
+      # a local (non-Docker) .env.local might have for `npm run dev`.
       ORCHESTRATOR_URL: http://orchestrator:4000
       PAYMENT_URL: http://payment:4200
       BROADCAST_URL: http://broadcast:4300
+      ARCHETYPE_MINER_URL: http://archetype-miner:4400
     depends_on:
       orchestrator:
         condition: service_healthy
       payment:
         condition: service_healthy
       broadcast:
+        condition: service_healthy
+      archetype-miner:
         condition: service_healthy
     restart: unless-stopped
 
@@ -143,14 +146,13 @@ services:
       - ./services/archetype-miner/.env.local
     environment:
       PORT: 4400
-    # Deliberately no `ports:` mapping -- same internal-only pattern as
-    # the other backend services. Not yet in `web`'s own depends_on/
-    # environment: there is no admin UI calling this service yet (see
-    # services/archetype-miner/README section) -- run/test it standalone
-    # via `docker compose up archetype-miner` (or
-    # `docker compose exec archetype-miner wget -qO- localhost:4400/health`)
-    # until that integration exists, at which point it slots in here the
-    # same way orchestrator/payment/broadcast already did.
+    # Deliberately no `ports:` mapping -- same internal-only pattern as the
+    # other backend services. `web`'s admin UI (/admin/archetype-miner)
+    # calls this for the two operations that trigger real LLM work
+    # (submitting a pipeline run, mining archetype families) -- everything
+    # else (listing runs, browsing the catalogue, resolving the review
+    # queue) reads/writes the archetype_* tables directly against Supabase,
+    # the same way chapter_documents/broadcasts already do.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4400/health"]
       interval: 10s

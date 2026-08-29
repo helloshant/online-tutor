@@ -83,6 +83,7 @@ export const ADMIN_PAGES: AdminPageKey[] = [
   "topic_summaries",
   "broadcasts",
   "feedback",
+  "archetype_miner",
 ];
 
 // Which admin pages the current user can see. Superadmins always get every

@@ -2,7 +2,8 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { submitRun, type SubmitRunParams } from "./pipelineRunner.js";
-import type { EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
+import { runFamilyMiner } from "./stage4FamilyMiner.js";
+import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
 const PORT = Number(process.env.PORT) || 4400;
 const SHARED_SECRET = process.env.ARCHETYPE_MINER_SHARED_SECRET;
@@ -217,6 +218,85 @@ app.post("/v1/review-queue/:id/resolve", requireSharedSecret, async (req: Reques
     return;
   }
   res.json({ item: data });
+});
+
+// Stage 4 -- cross-level ArchetypeFamily mining (see stage4FamilyMiner.ts
+// and the source design's own §2.4, deliberately deferred there). Callers
+// must name a subject_or_course explicitly -- this deliberately never runs
+// over the whole catalogue unprompted, both because that could span an
+// unbounded number of unrelated subjects in one LLM call, and because
+// mining families is a genuine analytical judgment an admin should
+// trigger deliberately, not something that happens as a side effect of
+// anything else.
+app.post("/v1/archetype-families/mine", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<{ subject_or_course: string }>;
+  if (typeof body.subject_or_course !== "string" || !body.subject_or_course.trim()) {
+    res.status(400).json({ error: "subject_or_course is required" });
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  // Only archetypes actually accepted into their own catalogue --
+  // reviewed/final status, and a critic_decision that means "this
+  // archetype stands" (KEEP/REVISE/ADD). MERGE/REMOVE archetypes are gone
+  // in all but name; REVIEW ones haven't been settled yet -- none of the
+  // three belong in a cross-level relationship built on top of them.
+  const { data, error } = await supabase
+    .from("archetypes")
+    .select("archetype")
+    .eq("education_context->>subject_or_course", body.subject_or_course)
+    .in("status", ["reviewed", "final"])
+    .in("critic_decision", ["KEEP", "REVISE", "ADD"]);
+
+  if (error) {
+    res.status(502).json({ error: "Failed to load archetypes for family mining" });
+    return;
+  }
+
+  const archetypes = (data ?? []).map((row) => row.archetype as Archetype);
+  if (archetypes.length === 0) {
+    res.json({ families: [] });
+    return;
+  }
+
+  const result = await runFamilyMiner(archetypes);
+  if (!result) {
+    res.status(502).json({ error: "Family mining failed" });
+    return;
+  }
+
+  if (result.families.length > 0) {
+    const { error: insertError } = await supabase.from("archetype_families").insert(
+      result.families.map((f) => ({
+        family_id: f.family_id,
+        family_name: f.family_name,
+        member_archetype_ids: f.member_archetype_ids,
+        progression_notes: f.progression_notes,
+        subject_or_course: body.subject_or_course,
+      }))
+    );
+    if (insertError) {
+      console.error("Failed to persist archetype families:", insertError);
+      res.status(502).json({ error: "Family mining succeeded but failed to save" });
+      return;
+    }
+  }
+
+  res.json({ families: result.families });
+});
+
+app.get("/v1/archetype-families", requireSharedSecret, async (req: Request, res: Response) => {
+  const supabase = getSupabaseClient();
+  let query = supabase.from("archetype_families").select("*");
+  if (typeof req.query.subject_or_course === "string") {
+    query = query.eq("subject_or_course", req.query.subject_or_course);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) {
+    res.status(502).json({ error: "Failed to load archetype families" });
+    return;
+  }
+  res.json({ families: data ?? [] });
 });
 
 app.listen(PORT, () => {
