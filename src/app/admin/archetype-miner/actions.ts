@@ -58,16 +58,27 @@ function readEducationContext(formData: FormData): EducationContext | null {
   };
 }
 
+export type SubmitRunState = { error?: string };
+
 // Submits a new pipeline run and redirects straight to its detail page --
 // the run itself then executes in the background inside the
 // archetype-miner service (see pipelineRunner.ts), this action only ever
 // waits for the POST that creates the run row, never the run itself.
-export async function submitRunAction(formData: FormData): Promise<void> {
+//
+// useActionState-shaped (returns { error } instead of throwing) so a bad
+// upload/validation failure or a submitPipelineRun failure (the
+// archetype-miner service unreachable, rejecting an oversized PDF, etc.)
+// shows up as real text on the form -- SubmitRunForm.tsx is the client
+// component that renders it. Before this, every failure path here threw,
+// and this page had no error boundary of its own, so any of them (not
+// just the new PDF path) surfaced as Next's generic, message-free crash
+// screen instead of something an admin could act on.
+export async function submitRunAction(_prevState: SubmitRunState, formData: FormData): Promise<SubmitRunState> {
   const session = await requireAdminPage("archetype_miner");
 
   const educationContext = readEducationContext(formData);
   if (!educationContext) {
-    throw new Error("All education-context fields (stage, grade/year, curriculum source, subject/course) are required.");
+    return { error: "All education-context fields (stage, grade/year, curriculum source, subject/course) are required." };
   }
 
   const inputKind = formData.get("inputKind") as string | null;
@@ -77,51 +88,61 @@ export async function submitRunAction(formData: FormData): Promise<void> {
 
   if (inputKind === "pre_segmented") {
     const raw = ((formData.get("preSegmentedJson") as string | null) ?? "").trim();
-    if (!raw) throw new Error("Paste at least one pre-segmented question as JSON.");
+    if (!raw) return { error: "Paste at least one pre-segmented question as JSON." };
     let questions: unknown;
     try {
       questions = JSON.parse(raw);
     } catch {
-      throw new Error("Pre-segmented questions must be valid JSON (an array of SegmentedQuestion-shaped objects).");
+      return { error: "Pre-segmented questions must be valid JSON (an array of SegmentedQuestion-shaped objects)." };
     }
     if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error("Pre-segmented questions must be a non-empty JSON array.");
+      return { error: "Pre-segmented questions must be a non-empty JSON array." };
     }
-    const result = await submitPipelineRun({
-      educationContext,
-      curriculumTaxonomyText,
-      createdBy: session.user.id,
-      inputKind: "pre_segmented",
-      questions,
-    });
-    runId = result.runId;
+    try {
+      const result = await submitPipelineRun({
+        educationContext,
+        curriculumTaxonomyText,
+        createdBy: session.user.id,
+        inputKind: "pre_segmented",
+        questions,
+      });
+      runId = result.runId;
+    } catch (err) {
+      console.error("Failed to submit pre-segmented pipeline run:", err);
+      return { error: err instanceof Error ? err.message : "Failed to submit this run. Please try again." };
+    }
   } else {
     const rawText = ((formData.get("rawText") as string | null) ?? "").trim();
     const pdfFile = formData.get("paperPdf");
     const hasPdf = pdfFile instanceof File && pdfFile.size > 0;
 
     if (rawText && hasPdf) {
-      throw new Error("Paste the paper's raw text OR upload a PDF, not both.");
+      return { error: "Paste the paper's raw text OR upload a PDF, not both." };
     }
     if (!rawText && !hasPdf) {
-      throw new Error("Paste the paper's raw text, or upload it as a PDF.");
+      return { error: "Paste the paper's raw text, or upload it as a PDF." };
     }
 
     let pdfBase64: string | undefined;
     if (hasPdf) {
       const file = pdfFile as File;
       if (file.type !== "application/pdf") {
-        throw new Error("The paper upload must be a PDF file.");
+        return { error: "The paper upload must be a PDF file." };
       }
       if (file.size > MAX_PDF_BYTES) {
-        throw new Error(`That PDF is too large (max ${Math.floor(MAX_PDF_BYTES / (1024 * 1024))}MB).`);
+        return { error: `That PDF is too large (max ${Math.floor(MAX_PDF_BYTES / (1024 * 1024))}MB).` };
       }
       // Stage 0 reads the PDF's pages directly (Anthropic's native document
       // understanding, see anthropicProvider.ts) rather than working from a
       // pre-extracted text layer -- this also covers scanned/photographed
       // past-year papers with no real text layer at all, which a plain
       // text-extraction step would otherwise return empty or garbled.
-      pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+      try {
+        pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+      } catch (err) {
+        console.error("Failed to read uploaded PDF:", err);
+        return { error: "Could not read that PDF. Please try again or try a different file." };
+      }
     }
 
     const subject = ((formData.get("paperSubject") as string | null) ?? "").trim() || educationContext.subject_or_course;
@@ -133,34 +154,39 @@ export async function submitRunAction(formData: FormData): Promise<void> {
     const paperType = formData.get("paperType") as string | null;
     const extractionMethod = formData.get("extractionMethod") as string | null;
 
-    if (!Number.isFinite(year) || year <= 0) throw new Error("Paper year must be a valid number.");
-    if (!PAPER_TYPES.includes(paperType as (typeof PAPER_TYPES)[number])) throw new Error("Invalid paper type.");
+    if (!Number.isFinite(year) || year <= 0) return { error: "Paper year must be a valid number." };
+    if (!PAPER_TYPES.includes(paperType as (typeof PAPER_TYPES)[number])) return { error: "Invalid paper type." };
     if (!EXTRACTION_METHODS.includes(extractionMethod as (typeof EXTRACTION_METHODS)[number])) {
-      throw new Error("Invalid extraction method.");
+      return { error: "Invalid extraction method." };
     }
 
-    const result = await submitPipelineRun({
-      educationContext,
-      curriculumTaxonomyText,
-      createdBy: session.user.id,
-      inputKind: "raw_papers",
-      papers: [
-        {
-          paper: {
-            subject,
-            year,
-            board,
-            class: paperClass,
-            set_code: setCode,
-            paper_type: paperType as (typeof PAPER_TYPES)[number],
-            source_url: sourceUrl,
-            extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
+    try {
+      const result = await submitPipelineRun({
+        educationContext,
+        curriculumTaxonomyText,
+        createdBy: session.user.id,
+        inputKind: "raw_papers",
+        papers: [
+          {
+            paper: {
+              subject,
+              year,
+              board,
+              class: paperClass,
+              set_code: setCode,
+              paper_type: paperType as (typeof PAPER_TYPES)[number],
+              source_url: sourceUrl,
+              extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
+            },
+            ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: rawText }),
           },
-          ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: rawText }),
-        },
-      ],
-    });
-    runId = result.runId;
+        ],
+      });
+      runId = result.runId;
+    } catch (err) {
+      console.error("Failed to submit raw_papers pipeline run:", err);
+      return { error: err instanceof Error ? err.message : "Failed to submit this run. Please try again." };
+    }
   }
 
   revalidatePath("/admin/archetype-miner");
