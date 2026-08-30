@@ -399,6 +399,11 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
             mining_confidence: archetype.mining_confidence,
             updated_at: new Date().toISOString(),
           })
+          // archetype_id alone is no longer globally unique (see
+          // 0041_archetype_miner_run_scoped_ids.sql) -- without also
+          // scoping by run_id, this could update another run's own row
+          // that happens to share the same archetype_id.
+          .eq("run_id", runId)
           .eq("archetype_id", archetype.archetype_id);
         if (error) console.error(`Failed to update reviewed archetype ${archetype.archetype_id}:`, error);
       }

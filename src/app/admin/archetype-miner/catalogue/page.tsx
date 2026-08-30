@@ -159,8 +159,12 @@ export default async function ArchetypeCatalogPage({
                         <div className="divide-y divide-border">
                           {subjectRows.map((row) => {
                             const a = row.archetype;
+                            // archetype_id alone can repeat across different runs (each run's
+                            // own id-scoping is per-run, not global -- see
+                            // 0041_archetype_miner_run_scoped_ids.sql), and this list spans
+                            // every run, so the key needs both.
                             return (
-                              <div key={row.archetype_id} className="p-4">
+                              <div key={`${row.run_id}-${row.archetype_id}`} className="p-4">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <h5 className="font-medium">{a.name}</h5>
                                   <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{row.status}</span>
