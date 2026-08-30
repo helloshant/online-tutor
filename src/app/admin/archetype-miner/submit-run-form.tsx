@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { submitRunAction, type SubmitRunState } from "./actions";
 import type { ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
 
@@ -13,16 +13,25 @@ const initialState: SubmitRunState = {};
 // or couldn't reach the request) renders as real text on the form instead
 // of Next's generic, message-free crash screen that a plain
 // <form action={serverAction}> falls back to when the action throws.
-export function SubmitRunForm({ llmProvider }: { llmProvider: ArchetypeMinerLlmProvider | null }) {
+export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: ArchetypeMinerLlmProvider | null }) {
   const [state, formAction, pending] = useActionState(submitRunAction, initialState);
+  // "default" defers to whatever the service's own LLM_PROVIDER resolves
+  // to (defaultLlmProvider, from /health -- null when the health check
+  // itself couldn't reach the service); an explicit choice here overrides
+  // that for this one run, letting an admin with both providers'
+  // credentials configured pick per submission (e.g. Anthropic for a
+  // PDF-based paper, Azure OpenAI otherwise). See pipelineRunner.ts's
+  // SubmitRunParams.llmProvider.
+  const [providerChoice, setProviderChoice] = useState<"default" | ArchetypeMinerLlmProvider>("default");
+  const effectiveProvider = providerChoice === "default" ? defaultLlmProvider : providerChoice;
   // Native PDF input only exists on the Anthropic path (see
-  // anthropicProvider.ts) -- the service rejects a PDF outright when it's
-  // running on Azure OpenAI (azureOpenAIProvider.ts), so disable it here
-  // rather than let an admin discover that by submitting and reading a
-  // form error. llmProvider is null when the health check itself couldn't
-  // reach the service -- default to allowing the upload rather than
-  // guessing, same as before this check existed.
-  const pdfDisabled = llmProvider === "azure-openai";
+  // anthropicProvider.ts) -- the service rejects a PDF outright when the
+  // run resolves to Azure OpenAI (azureOpenAIProvider.ts), so disable it
+  // here rather than let an admin discover that by submitting and reading
+  // a form error. null (health check unreachable, or "default" chosen
+  // with no known default) defaults to allowing the upload rather than
+  // guessing.
+  const pdfDisabled = effectiveProvider === "azure-openai";
 
   return (
     <form action={formAction} encType="multipart/form-data" className="space-y-4 border-t border-border p-4">
@@ -94,6 +103,21 @@ export function SubmitRunForm({ llmProvider }: { llmProvider: ArchetypeMinerLlmP
 
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/50">Input</h3>
+        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
+          LLM provider for this run
+          <select
+            name="llmProvider"
+            value={providerChoice}
+            onChange={(e) => setProviderChoice(e.target.value as "default" | ArchetypeMinerLlmProvider)}
+            className="w-fit rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          >
+            <option value="default">
+              Use service default{defaultLlmProvider ? ` (currently ${defaultLlmProvider})` : ""}
+            </option>
+            <option value="anthropic">Anthropic (required for PDF upload)</option>
+            <option value="azure-openai">Azure OpenAI</option>
+          </select>
+        </label>
         <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
           Input kind
           <select
@@ -169,8 +193,9 @@ export function SubmitRunForm({ llmProvider }: { llmProvider: ArchetypeMinerLlmP
         <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
           {pdfDisabled ? (
             <>
-              PDF upload isn&apos;t available — this service is currently running on Azure OpenAI, which has no
-              equivalent to Anthropic&apos;s native PDF reading. Extract the text yourself and paste it above instead.
+              PDF upload isn&apos;t available for Azure OpenAI, which has no equivalent to Anthropic&apos;s native PDF
+              reading — switch &quot;LLM provider for this run&quot; above to Anthropic, or extract the text yourself
+              and paste it below instead.
             </>
           ) : (
             <>

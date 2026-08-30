@@ -104,6 +104,11 @@ export type PipelineRunRow = {
   id: string;
   education_context: EducationContext;
   input_kind: PipelineInputKind;
+  // Resolved once at submission time (explicit choice, or the service's
+  // own LLM_PROVIDER default) and fixed for the run's whole lifetime --
+  // see supabase/migrations/0040_archetype_miner_llm_provider.sql and
+  // pipelineRunner.ts's submitRun.
+  llm_provider: "anthropic" | "azure-openai";
   status: PipelineStatus;
   stats: PipelineRunStats;
   error: string | null;

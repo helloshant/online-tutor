@@ -1997,10 +1997,14 @@ here):
   native document understanding rather than a lossy text-extraction step, deliberately not
   repeating the `unpdf`-based PDF path the answer-bank bulk import removed — see its own README
   entry — since exam papers are routinely scanned/photographed with no real text layer at all;
-  unsupported when `LLM_PROVIDER=azure-openai`, see `azureOpenAIProvider.ts`), or `"pre_segmented"`
-  with a `questions` array already shaped like `SegmentedQuestion`), and an optional
-  `curriculum_taxonomy_text` for Stage 1 to match against. Returns `{ runId }` immediately —
-  the pipeline runs in the background (no queue infra, same as every other service here besides the
+  requires the run to resolve to the Anthropic provider — a 400 if it doesn't, see below), or
+  `"pre_segmented"` with a `questions` array already shaped like `SegmentedQuestion`), an optional
+  `curriculum_taxonomy_text` for Stage 1 to match against, and an optional `llm_provider`
+  (`"anthropic"` or `"azure-openai"`) overriding the service's own `LLM_PROVIDER` default for this
+  one run only — resolved once at submission and stored on the run row (`llm_provider` column,
+  `0040_archetype_miner_llm_provider.sql`), fixed for every stage call the run makes even if the
+  service default changes while it's still going. Returns `{ runId }` immediately — the pipeline
+  runs in the background (no queue infra, same as every other service here besides the
   orchestrator's own Redis answer cache), often taking minutes to hours depending on corpus size,
   since Stage 1 alone is one LLM call per question.
 - `GET /v1/pipeline/runs/:id` — poll status (`pending` → `segmenting` → `analyzing` → `embedding` →

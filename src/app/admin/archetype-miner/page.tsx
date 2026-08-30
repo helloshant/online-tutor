@@ -60,7 +60,7 @@ export default async function ArchetypeMinerPage() {
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
           Submit a new pipeline run
         </summary>
-        <SubmitRunForm llmProvider={health?.llmProvider ?? null} />
+        <SubmitRunForm defaultLlmProvider={health?.llmProvider ?? null} />
       </details>
 
       <div className="mt-6 rounded-xl border border-border bg-surface">
@@ -86,6 +86,9 @@ export default async function ArchetypeMinerPage() {
                       {run.education_context.curriculum_source.name} · {run.education_context.education_stage} ·{" "}
                       {run.education_context.grade_or_year}
                     </div>
+                    <span className="mt-1 inline-block rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/50">
+                      {run.llm_provider}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span

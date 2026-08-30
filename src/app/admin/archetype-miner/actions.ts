@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { submitPipelineRun, mineArchetypeFamilies } from "@/lib/archetypeMinerClient";
+import { submitPipelineRun, mineArchetypeFamilies, type ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
 import type { EducationContext, EducationStage, CurriculumSourceType } from "@/lib/archetypeMinerTypes";
 
 const EDUCATION_STAGES: EducationStage[] = ["secondary", "senior_secondary", "undergraduate"];
@@ -58,6 +58,15 @@ function readEducationContext(formData: FormData): EducationContext | null {
   };
 }
 
+// Shared by submitRunAction and mineFamiliesAction -- "default" (the
+// select's own default option, see submit-run-form.tsx and
+// families/page.tsx) means "omit llm_provider, let the service fall back
+// to its own LLM_PROVIDER" rather than sending an actual value.
+function readLlmProvider(formData: FormData): ArchetypeMinerLlmProvider | undefined {
+  const raw = formData.get("llmProvider");
+  return raw === "anthropic" || raw === "azure-openai" ? raw : undefined;
+}
+
 export type SubmitRunState = { error?: string };
 
 // Submits a new pipeline run and redirects straight to its detail page --
@@ -83,6 +92,7 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
 
   const inputKind = formData.get("inputKind") as string | null;
   const curriculumTaxonomyText = ((formData.get("curriculumTaxonomyText") as string | null) ?? "").trim() || undefined;
+  const llmProvider = readLlmProvider(formData);
 
   let runId: string;
 
@@ -103,6 +113,7 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
         educationContext,
         curriculumTaxonomyText,
         createdBy: session.user.id,
+        llmProvider,
         inputKind: "pre_segmented",
         questions,
       });
@@ -121,6 +132,12 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
     }
     if (!rawText && !hasPdf) {
       return { error: "Paste the paper's raw text, or upload it as a PDF." };
+    }
+    if (hasPdf && llmProvider === "azure-openai") {
+      return {
+        error:
+          "A PDF paper requires the Anthropic provider -- Azure OpenAI has no native PDF reading. Switch \"LLM provider for this run\" to Anthropic, or paste extracted text instead.",
+      };
     }
 
     let pdfBase64: string | undefined;
@@ -165,6 +182,7 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
         educationContext,
         curriculumTaxonomyText,
         createdBy: session.user.id,
+        llmProvider,
         inputKind: "raw_papers",
         papers: [
           {
@@ -227,7 +245,7 @@ export async function mineFamiliesAction(formData: FormData): Promise<void> {
   const subjectOrCourse = ((formData.get("subjectOrCourse") as string | null) ?? "").trim();
   if (!subjectOrCourse) throw new Error("subjectOrCourse is required.");
 
-  await mineArchetypeFamilies(subjectOrCourse);
+  await mineArchetypeFamilies(subjectOrCourse, readLlmProvider(formData));
   revalidatePath("/admin/archetype-miner/families");
 }
 

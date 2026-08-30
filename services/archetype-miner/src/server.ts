@@ -3,8 +3,12 @@ import type { NextFunction, Request, Response } from "express";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { submitRun, type SubmitRunParams } from "./pipelineRunner.js";
 import { runFamilyMiner } from "./stage4FamilyMiner.js";
-import { getActiveLlmProvider } from "./llm.js";
+import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
+
+function isValidLlmProvider(value: unknown): value is LlmProvider {
+  return value === "anthropic" || value === "azure-openai";
+}
 
 const PORT = Number(process.env.PORT) || 4400;
 const SHARED_SECRET = process.env.ARCHETYPE_MINER_SHARED_SECRET;
@@ -87,11 +91,27 @@ app.post("/v1/pipeline/runs", requireSharedSecret, async (req: Request, res: Res
     papers: RawPaperInput[];
     questions: PreSegmentedInput[];
     created_by: string;
+    llm_provider: string;
   }>;
 
   if (!isValidEducationContext(body.education_context)) {
     res.status(400).json({ error: "education_context is required and must match the EducationContext shape" });
     return;
+  }
+
+  // Undefined (not defaulted here) when the caller doesn't specify one --
+  // submitRun resolves the actual default itself, and stamps whichever
+  // value it lands on onto the run row (see pipelineRunner.ts). Rejected
+  // outright, rather than silently falling back, when present but not one
+  // of the two real values -- a typo here should never quietly run on the
+  // wrong provider.
+  let llmProvider: LlmProvider | undefined;
+  if (body.llm_provider !== undefined) {
+    if (!isValidLlmProvider(body.llm_provider)) {
+      res.status(400).json({ error: "llm_provider must be 'anthropic' or 'azure-openai' when provided" });
+      return;
+    }
+    llmProvider = body.llm_provider;
   }
 
   if (body.input_kind === "raw_papers") {
@@ -114,10 +134,24 @@ app.post("/v1/pipeline/runs", requireSharedSecret, async (req: Request, res: Res
       });
       return;
     }
+    // A PDF paper needs the run's resolved provider (explicit, or the
+    // service default when llmProvider is undefined here) to actually be
+    // Anthropic -- azureOpenAIProvider.ts would reject it anyway once
+    // Stage 0 runs, but catching it here means a bad combination fails
+    // the submission itself (immediate, readable 400) instead of a run
+    // that gets created and only fails once it starts executing.
+    const hasAnyPdf = body.papers.some((p) => typeof p.pdf_base64 === "string" && p.pdf_base64.trim().length > 0);
+    if (hasAnyPdf && (llmProvider ?? getActiveLlmProvider()) !== "anthropic") {
+      res.status(400).json({
+        error: "A PDF paper requires llm_provider 'anthropic' (or omit llm_provider on a service defaulting to it) -- Azure OpenAI has no native PDF reading.",
+      });
+      return;
+    }
     const params: SubmitRunParams = {
       educationContext: body.education_context,
       curriculumTaxonomyText: body.curriculum_taxonomy_text,
       createdBy: body.created_by ?? null,
+      llmProvider,
       inputKind: "raw_papers",
       papers: body.papers,
     };
@@ -140,6 +174,7 @@ app.post("/v1/pipeline/runs", requireSharedSecret, async (req: Request, res: Res
       educationContext: body.education_context,
       curriculumTaxonomyText: body.curriculum_taxonomy_text,
       createdBy: body.created_by ?? null,
+      llmProvider,
       inputKind: "pre_segmented",
       questions: body.questions,
     };
@@ -256,10 +291,18 @@ app.post("/v1/review-queue/:id/resolve", requireSharedSecret, async (req: Reques
 // trigger deliberately, not something that happens as a side effect of
 // anything else.
 app.post("/v1/archetype-families/mine", requireSharedSecret, async (req: Request, res: Response) => {
-  const body = req.body as Partial<{ subject_or_course: string }>;
+  const body = req.body as Partial<{ subject_or_course: string; llm_provider: string }>;
   if (typeof body.subject_or_course !== "string" || !body.subject_or_course.trim()) {
     res.status(400).json({ error: "subject_or_course is required" });
     return;
+  }
+  let llmProvider: LlmProvider | undefined;
+  if (body.llm_provider !== undefined) {
+    if (!isValidLlmProvider(body.llm_provider)) {
+      res.status(400).json({ error: "llm_provider must be 'anthropic' or 'azure-openai' when provided" });
+      return;
+    }
+    llmProvider = body.llm_provider;
   }
 
   const supabase = getSupabaseClient();
@@ -286,7 +329,7 @@ app.post("/v1/archetype-families/mine", requireSharedSecret, async (req: Request
     return;
   }
 
-  const result = await runFamilyMiner(archetypes);
+  const result = await runFamilyMiner(archetypes, llmProvider);
   if (!result) {
     res.status(502).json({ error: "Family mining failed" });
     return;

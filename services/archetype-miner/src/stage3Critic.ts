@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCriticPrompt } from "./prompts.js";
+import type { LlmProvider } from "./llm.js";
 import type { Archetype, CriticDecision } from "./types.js";
 
 const MAX_TOKENS = 16000;
@@ -90,7 +91,7 @@ export type CriticResult = {
 // for one context window should chunk upstream -- not something this
 // service's first version does yet; see the README section for where that
 // would slot in.
-export async function runCritic(candidates: Archetype[]): Promise<CriticResult | null> {
+export async function runCritic(candidates: Archetype[], provider?: LlmProvider): Promise<CriticResult | null> {
   if (candidates.length === 0) return { reviewed: [], model: "", usage: { promptTokens: 0, completionTokens: 0 } };
 
   const byId = new Map(candidates.map((a) => [a.archetype_id, a]));
@@ -100,6 +101,7 @@ export async function runCritic(candidates: Archetype[]): Promise<CriticResult |
       systemPrompt: buildCriticPrompt(),
       message: JSON.stringify(candidates),
       maxTokens: MAX_TOKENS,
+      provider,
     });
 
     if (!Array.isArray(data)) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildFamilyMinerPrompt } from "./familyPrompt.js";
+import type { LlmProvider } from "./llm.js";
 import type { Archetype, ArchetypeFamily } from "./types.js";
 
 const MAX_TOKENS = 8000;
@@ -31,7 +32,7 @@ export type FamilyMinerResult = {
 // (status reviewed/final, critic_decision KEEP/REVISE/ADD) -- the caller's
 // job (see server.ts), not this function's, to have filtered out
 // MERGE/REMOVE/REVIEW archetypes before this ever runs.
-export async function runFamilyMiner(archetypes: Archetype[]): Promise<FamilyMinerResult | null> {
+export async function runFamilyMiner(archetypes: Archetype[], provider?: LlmProvider): Promise<FamilyMinerResult | null> {
   if (archetypes.length === 0) {
     return { families: [], model: "", usage: { promptTokens: 0, completionTokens: 0 } };
   }
@@ -44,6 +45,7 @@ export async function runFamilyMiner(archetypes: Archetype[]): Promise<FamilyMin
       systemPrompt: buildFamilyMinerPrompt(),
       message: JSON.stringify(archetypes),
       maxTokens: MAX_TOKENS,
+      provider,
     });
 
     if (!Array.isArray(data)) {

@@ -41,6 +41,10 @@ export type SubmitPipelineRunRequest = {
   educationContext: EducationContext;
   curriculumTaxonomyText?: string;
   createdBy?: string | null;
+  // Explicit per-run choice -- omit to let the service fall back to its
+  // own LLM_PROVIDER default. See ArchetypeMinerLlmProvider below and
+  // SubmitRunParams.llmProvider's own comment in pipelineRunner.ts.
+  llmProvider?: ArchetypeMinerLlmProvider;
 } & ({ inputKind: "raw_papers"; papers: RawPaperInput[] } | { inputKind: "pre_segmented"; questions: unknown[] });
 
 export async function submitPipelineRun(request: SubmitPipelineRunRequest): Promise<{ runId: string }> {
@@ -52,6 +56,7 @@ export async function submitPipelineRun(request: SubmitPipelineRunRequest): Prom
     curriculum_taxonomy_text: request.curriculumTaxonomyText,
     input_kind: request.inputKind,
     created_by: request.createdBy ?? undefined,
+    llm_provider: request.llmProvider,
   };
   if (request.inputKind === "raw_papers") body.papers = request.papers;
   else body.questions = request.questions;
@@ -101,7 +106,10 @@ export async function getArchetypeMinerHealth(): Promise<{ llmProvider: Archetyp
   }
 }
 
-export async function mineArchetypeFamilies(subjectOrCourse: string): Promise<{ familyCount: number }> {
+export async function mineArchetypeFamilies(
+  subjectOrCourse: string,
+  llmProvider?: ArchetypeMinerLlmProvider
+): Promise<{ familyCount: number }> {
   const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/archetype-families/mine`;
   const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
 
@@ -111,7 +119,7 @@ export async function mineArchetypeFamilies(subjectOrCourse: string): Promise<{ 
       "Content-Type": "application/json",
       ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
     },
-    body: JSON.stringify({ subject_or_course: subjectOrCourse }),
+    body: JSON.stringify({ subject_or_course: subjectOrCourse, llm_provider: llmProvider }),
   });
 
   const body = await res.json().catch(() => null);

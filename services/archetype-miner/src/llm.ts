@@ -26,8 +26,14 @@ export async function getCompletion(params: {
   message: string;
   maxTokens: number;
   pdf?: PdfAttachment | null;
+  // Per-call override -- lets one pipeline run (or one family-mining call)
+  // choose a provider explicitly regardless of the service-wide
+  // LLM_PROVIDER default, so an admin with both Anthropic and Azure OpenAI
+  // credentials configured can pick whichever fits a given submission
+  // (e.g. Anthropic for a PDF-based paper, Azure OpenAI otherwise).
+  // Falls back to getActiveLlmProvider() when omitted.
+  provider?: LlmProvider;
 }): Promise<LlmReply> {
-  return getActiveLlmProvider() === "azure-openai"
-    ? getAzureOpenAICompletion(params)
-    : getAnthropicCompletion(params);
+  const provider = params.provider ?? getActiveLlmProvider();
+  return provider === "azure-openai" ? getAzureOpenAICompletion(params) : getAnthropicCompletion(params);
 }

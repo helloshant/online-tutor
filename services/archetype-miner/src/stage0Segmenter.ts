@@ -1,6 +1,7 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildSegmenterPrompt } from "./prompts.js";
 import type { PdfAttachment } from "./llmTypes.js";
+import type { LlmProvider } from "./llm.js";
 import type { EducationContext, PaperMeta, SegmentedQuestion } from "./types.js";
 
 const MAX_TOKENS = 8000;
@@ -52,8 +53,9 @@ export async function runSegmenter(params: {
   pdf?: PdfAttachment;
   paper: PaperMeta;
   educationContext: EducationContext;
+  provider?: LlmProvider;
 }): Promise<SegmenterResult> {
-  const { rawText, pdf, paper, educationContext } = params;
+  const { rawText, pdf, paper, educationContext, provider } = params;
 
   const message = JSON.stringify({
     education_context: educationContext,
@@ -66,6 +68,7 @@ export async function runSegmenter(params: {
     message,
     maxTokens: MAX_TOKENS,
     pdf,
+    provider,
   });
 
   if (!Array.isArray(data)) {

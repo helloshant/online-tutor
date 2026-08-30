@@ -57,6 +57,8 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
             <p className="mt-1 text-xs text-foreground/40">
               Submitted {new Date(runRow.created_at).toLocaleString()}
               {runRow.completed_at && ` · finished ${new Date(runRow.completed_at).toLocaleString()}`}
+              {" · "}
+              {runRow.llm_provider}
             </p>
           </div>
           <span

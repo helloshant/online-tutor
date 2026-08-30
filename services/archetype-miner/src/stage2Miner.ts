@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildMinerPrompt } from "./prompts.js";
+import type { LlmProvider } from "./llm.js";
 import type { Archetype, ClusterInput } from "./types.js";
 
 const MAX_TOKENS = 8000;
@@ -72,12 +73,13 @@ export type MinerResult = {
 // review queue (source: 'stage2_ambiguous_cluster') rather than losing
 // them silently, matching the "every escalation has a defined destination"
 // design principle.
-export async function runMiner(cluster: ClusterInput): Promise<MinerResult | null> {
+export async function runMiner(cluster: ClusterInput, provider?: LlmProvider): Promise<MinerResult | null> {
   try {
     const { data, model, usage } = await getJsonCompletion({
       systemPrompt: buildMinerPrompt(),
       message: JSON.stringify(cluster),
       maxTokens: MAX_TOKENS,
+      provider,
     });
 
     if (!Array.isArray(data)) {

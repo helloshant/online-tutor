@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildAnalyzerPrompt } from "./prompts.js";
+import type { LlmProvider } from "./llm.js";
 import type { QuestionSignature, SegmentedQuestion } from "./types.js";
 
 const MAX_TOKENS = 2000;
@@ -36,8 +37,9 @@ function isValidQuestionSignature(value: unknown): value is QuestionSignature {
 export async function runAnalyzer(params: {
   question: SegmentedQuestion;
   curriculumTaxonomyText?: string;
+  provider?: LlmProvider;
 }): Promise<{ signature: QuestionSignature; model: string; usage: { promptTokens: number; completionTokens: number } } | null> {
-  const { question, curriculumTaxonomyText } = params;
+  const { question, curriculumTaxonomyText, provider } = params;
   const taxonomySupplied = question.education_context.curriculum_source.taxonomy_supplied;
 
   try {
@@ -45,6 +47,7 @@ export async function runAnalyzer(params: {
       systemPrompt: buildAnalyzerPrompt({ taxonomySupplied, curriculumTaxonomyText }),
       message: JSON.stringify(question),
       maxTokens: MAX_TOKENS,
+      provider,
     });
 
     if (!isValidQuestionSignature(data)) {

@@ -6,6 +6,7 @@ import { runMiner } from "./stage2Miner.js";
 import { runCritic } from "./stage3Critic.js";
 import { lookupStoredTaxonomy } from "./curriculumTaxonomy.js";
 import { lowConfidenceThreshold, toInsertRow, type ReviewQueueCandidate } from "./reviewQueue.js";
+import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type {
   Archetype,
   ClusterInput,
@@ -31,6 +32,14 @@ export type SubmitRunParams = {
   educationContext: EducationContext;
   curriculumTaxonomyText?: string;
   createdBy?: string | null;
+  // Explicit per-run choice (an admin with both providers' credentials
+  // configured can pick whichever fits this submission -- Anthropic for a
+  // PDF-based paper, Azure OpenAI otherwise). Falls back to the service's
+  // own LLM_PROVIDER default when omitted -- resolved once in submitRun,
+  // never re-read mid-run, so a run's provider stays fixed for its whole
+  // lifetime even if the service-wide default changes while it's still
+  // going (a run can take minutes to hours).
+  llmProvider?: LlmProvider;
 } & (
   | { inputKind: "raw_papers"; papers: RawPaperInput[] }
   | { inputKind: "pre_segmented"; questions: PreSegmentedInput[] }
@@ -69,11 +78,17 @@ async function queueForReview(runId: string, candidates: ReviewQueueCandidate[])
 // 1 alone), so this is never meant to be a synchronous request/response.
 export async function submitRun(params: SubmitRunParams): Promise<string> {
   const supabase = getSupabaseClient();
+  // Resolved once, here, not left as undefined for executeRun to resolve
+  // later -- see SubmitRunParams.llmProvider's own comment on why this
+  // needs to be fixed for the run's whole lifetime.
+  const llmProvider = params.llmProvider ?? getActiveLlmProvider();
+
   const { data, error } = await supabase
     .from("archetype_pipeline_runs")
     .insert({
       education_context: params.educationContext,
       input_kind: params.inputKind,
+      llm_provider: llmProvider,
       status: "pending",
       created_by: params.createdBy ?? null,
     })
@@ -90,14 +105,14 @@ export async function submitRun(params: SubmitRunParams): Promise<string> {
   // written to the run row itself (status:'failed', error: message) -- it
   // must never become an unhandled promise rejection that crashes this
   // long-lived service over one bad run.
-  void executeRun(runId, params).catch((err) => {
+  void executeRun(runId, params, llmProvider).catch((err) => {
     console.error(`Unhandled error in pipeline run ${runId}:`, err);
   });
 
   return runId;
 }
 
-async function executeRun(runId: string, params: SubmitRunParams): Promise<void> {
+async function executeRun(runId: string, params: SubmitRunParams, llmProvider: LlmProvider): Promise<void> {
   const supabase = getSupabaseClient();
   try {
     // Resolve once per run, not per question: an explicitly-supplied
@@ -138,6 +153,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
           pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
           paper: paperInput.paper,
           educationContext,
+          provider: llmProvider,
         });
         if (result.questions.length > 0) {
           const { error } = await supabase.from("archetype_segmented_questions").insert(
@@ -196,7 +212,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
 
     for (const row of segmentedRows ?? []) {
       const question = row.question as Parameters<typeof runAnalyzer>[0]["question"];
-      const result = await runAnalyzer({ question, curriculumTaxonomyText });
+      const result = await runAnalyzer({ question, curriculumTaxonomyText, provider: llmProvider });
 
       if (!result) {
         stage1ReviewCandidates.push({
@@ -299,7 +315,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
     const stage2ReviewCandidates: ReviewQueueCandidate[] = [];
 
     for (const cluster of clusters) {
-      const result = await runMiner(cluster);
+      const result = await runMiner(cluster, llmProvider);
       if (!result) {
         stage2ReviewCandidates.push(
           ...cluster.member_signatures.map((s) => ({
@@ -348,7 +364,7 @@ async function executeRun(runId: string, params: SubmitRunParams): Promise<void>
     // ---------------------------------------------------------------
     await updateRun(runId, { status: "critiquing" });
 
-    const criticResult = allCandidates.length > 0 ? await runCritic(allCandidates) : { reviewed: [] };
+    const criticResult = allCandidates.length > 0 ? await runCritic(allCandidates, llmProvider) : { reviewed: [] };
     const reviewed = criticResult?.reviewed ?? [];
 
     const stage3ReviewCandidates: ReviewQueueCandidate[] = reviewed

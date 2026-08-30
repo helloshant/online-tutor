@@ -39,6 +39,16 @@ export default async function ArchetypeFamiliesPage() {
             placeholder="Subject or course, e.g. Mathematics"
             className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
           />
+          <select
+            name="llmProvider"
+            defaultValue="default"
+            title="LLM provider for this family-mining call -- default defers to the archetype-miner service's own LLM_PROVIDER"
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          >
+            <option value="default">Use service default</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="azure-openai">Azure OpenAI</option>
+          </select>
           <button className="shrink-0 rounded-lg bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
             Mine families
           </button>

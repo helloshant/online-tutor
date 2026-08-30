@@ -1,4 +1,4 @@
-import { getCompletion } from "./llm.js";
+import { getCompletion, type LlmProvider } from "./llm.js";
 import type { PdfAttachment, TokenUsage } from "./llmTypes.js";
 
 // Every stage prompt ends with "Return ONLY valid JSON ... No markdown, no
@@ -43,6 +43,7 @@ export async function getJsonCompletion(params: {
   message: string;
   maxTokens: number;
   pdf?: PdfAttachment | null;
+  provider?: LlmProvider;
 }): Promise<{ data: unknown; model: string; usage: TokenUsage }> {
   let lastError: unknown;
   let lastRawText = "";
