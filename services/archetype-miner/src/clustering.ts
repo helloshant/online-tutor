@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { embed } from "./embeddingClient.js";
 import type { ClusterInput, EducationContext, QuestionSignature } from "./types.js";
 
@@ -160,6 +161,15 @@ export async function clusterSignatures(
   const embeddingsByQuestionId = new Map<string, number[]>();
   const unembeddedQuestionIds: string[] = [];
   let clusterCounter = 0;
+  // archetype_clusters.cluster_id is a plain GLOBAL primary key (not
+  // scoped by run_id -- see 0038_archetype_miner.sql), but a bare
+  // per-call counter ("cluster-1", "cluster-2", ...) repeats identically
+  // on every call to this function, i.e. every run. One call here always
+  // corresponds to exactly one run, so a short random prefix generated
+  // once per call makes every cluster_id this function ever returns
+  // unique across every run, not just within the run producing it, while
+  // staying short and still readable.
+  const runScopeId = randomUUID().slice(0, 8);
 
   for (const scopedSignatures of byScope.values()) {
     const texts = scopedSignatures.map(embeddingBasisText);
@@ -198,7 +208,7 @@ export async function clusterSignatures(
       [];
     for (const memberIds of groupsByRoot.values()) {
       clusterCounter++;
-      const cluster_id = `cluster-${clusterCounter}`;
+      const cluster_id = `cluster-${runScopeId}-${clusterCounter}`;
       const memberVectors = memberIds.map((id) => vectorById.get(id) as number[]);
       scopeClusters.push({ cluster_id, memberIds, memberVectors, centroidVec: centroid(memberVectors) });
     }
