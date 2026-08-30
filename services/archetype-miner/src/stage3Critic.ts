@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCriticPrompt } from "./prompts.js";
+import { coerceInvariantReasoningStructure } from "./textCoercion.js";
 import type { LlmProvider } from "./llm.js";
 import type { Archetype, CriticDecision } from "./types.js";
 
@@ -110,7 +111,12 @@ export async function runCritic(candidates: Archetype[], provider?: LlmProvider)
     }
 
     const reviewed: Archetype[] = [];
-    for (const raw of data) {
+    for (const rawItem of data) {
+      // See textCoercion.ts's own comment -- isPlausibleReviewedArchetype
+      // below doesn't check invariant_reasoning_structure's shape at all,
+      // so an uncoerced array would otherwise pass straight through into
+      // normalizeReviewed rather than being caught by any validation.
+      const raw = coerceInvariantReasoningStructure(rawItem);
       if (isPlausibleReviewedArchetype(raw)) {
         reviewed.push(normalizeReviewed(raw, byId.get(raw.archetype_id)));
       } else {

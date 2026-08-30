@@ -1,5 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildMinerPrompt } from "./prompts.js";
+import { coerceInvariantReasoningStructure } from "./textCoercion.js";
 import type { LlmProvider } from "./llm.js";
 import type { Archetype, ClusterInput } from "./types.js";
 
@@ -88,7 +89,8 @@ export async function runMiner(cluster: ClusterInput, provider?: LlmProvider): P
     }
 
     const archetypes: Archetype[] = [];
-    for (const raw of data) {
+    for (const rawItem of data) {
+      const raw = coerceInvariantReasoningStructure(rawItem);
       if (isPlausibleArchetype(raw)) {
         archetypes.push(normalizeCandidate(raw, cluster.education_context));
       } else {

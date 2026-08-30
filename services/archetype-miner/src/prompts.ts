@@ -418,7 +418,7 @@ merge_target_id, or split_result_ids, those are set later, not by you:
   "name": "<see NAMING above>",
   "concept": "<must match a member question's curriculum.concept>",
   "learning_objective": "<observable, same style Stage 1 uses>",
-  "invariant_reasoning_structure": "<the reasoning structure shared by every member/variation>",
+  "invariant_reasoning_structure": "<ONE prose sentence/phrase naming the reasoning structure shared by every member/variation, e.g. Determine an unknown parameter from a stated condition on the roots, via the discriminant. This is NOT an array of steps -- do not reuse the shape of a QuestionSignature's own reasoning_pattern field (that's a list of steps for one question; this is a single descriptive string naming the shared structure across the whole archetype).>",
   "variations": [
     {
       "variation_id": "<id you assign>",
