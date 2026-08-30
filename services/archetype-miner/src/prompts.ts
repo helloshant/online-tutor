@@ -79,9 +79,29 @@ WORKED EXAMPLES
   continuous reasoning thread; marks were not awarded separately in the
   paper).
 
+SCHEMA
+Return each record with EXACTLY these fields, no others -- do not invent
+fields like "type", "options", "stimulus", "context", or "sequence_number",
+and do not omit any of these:
+{
+  "question_id": "<a stable unique id you assign, e.g. CBSE-MATH-2019-SET1-Q17-i>",
+  "parent_question_id": "<the question_id of the shared stem, or null if this record has no parent>",
+  "paper": <copy the "paper" object from the input envelope, unchanged>,
+  "marks": <number, or null -- see the DO NOT rule on inferring split marks>,
+  "raw_text": "<the question exactly as it appears in the source, verbatim>",
+  "cleaned_text": "<raw_text with OCR noise/formatting artifacts cleaned up -- same content, never reworded>",
+  "has_diagram": <true if this question references or requires a diagram/figure>,
+  "has_internal_choice": <true only for a sibling record of an internal OR choice>,
+  "extraction_confidence": <number from 0 to 1>,
+  "extraction_notes": "<free text on anything uncertain/illegible, or null>"
+}
+Do NOT include education_context on your output records -- it is stamped
+on by the caller after your response, so there is nothing to gain by
+adding it and it will be overwritten if you do.
+
 OUTPUT
-Return ONLY a JSON array of SegmentedQuestion objects. No markdown, no
-explanatory prose.`;
+Return ONLY a JSON array of SegmentedQuestion objects, each matching the
+SCHEMA above exactly. No markdown, no explanatory prose.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,9 +244,39 @@ Populate the flags array with any of: ocr_uncertain,
 diagram_required_but_missing, ambiguous_interpretation, or a free-text
 flag if none of these fit.
 
+SCHEMA
+Return EXACTLY these fields, no others:
+{
+  "question_id": "<echo the input SegmentedQuestion's own question_id, unchanged>",
+  "curriculum": {
+    "subject": "<e.g. Mathematics>",
+    "chapter": "<e.g. Quadratic Equations>",
+    "topic": "<e.g. Nature of Roots>",
+    "concept": "<e.g. Discriminant-based root classification>",
+    "sub_concept": "<narrower than concept, or null>",
+    "taxonomy_match": "matched" | "no_match"
+  },
+  "learning_objective": "<one observable-action sentence, see the Learning objective examples above>",
+  "skills": { "primary": "<one skill from the Skills list above>", "secondary": ["<zero or more others>"] },
+  "reasoning_pattern": ["<step 1>", "<step 2>", "..."],
+  "abstract_structure": "<stripped of names/numbers, structure only>",
+  "format": "<one value from the Format list above>",
+  "context": "<one value from the Context list above>",
+  "cognitive_level": "Remember" | "Understand" | "Apply" | "Analyze" | "Evaluate" | "Create",
+  "reasoning_direction": "forward" | "reverse" | "mixed",
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "difficulty_rationale": "<1-2 sentences citing the factors that drove the rating>",
+  "difficulty_reference_frame": "<what level this rating is relative to, see the Difficulty section above>",
+  "confidence": { "curriculum": <0-1>, "reasoning_pattern": <0-1>, "overall": <0-1> },
+  "flags": ["<zero or more of: ocr_uncertain, diagram_required_but_missing, ambiguous_interpretation, or free text>"]
+}
+Do NOT include education_context on your output -- it is stamped on by the
+caller after your response, so there is nothing to gain by adding it and
+it will be overwritten if you do.
+
 OUTPUT
-Return ONLY one QuestionSignature JSON object conforming to the shared
-schema. No markdown, no explanatory prose.`;
+Return ONLY one QuestionSignature JSON object matching the SCHEMA above
+exactly. No markdown, no explanatory prose.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,9 +409,48 @@ Set mining_confidence per archetype: lower it when the cluster shows mixed
 reasoning_direction values, low intra_cluster_cohesion, or borderline
 membership calls in step 5.
 
+SCHEMA
+Return EXACTLY these fields per archetype, no others -- do not include
+status, critic_decision, critic_rationale, critic_evidence,
+merge_target_id, or split_result_ids, those are set later, not by you:
+{
+  "archetype_id": "<a stable id you assign, e.g. a short slug>",
+  "name": "<see NAMING above>",
+  "concept": "<must match a member question's curriculum.concept>",
+  "learning_objective": "<observable, same style Stage 1 uses>",
+  "invariant_reasoning_structure": "<the reasoning structure shared by every member/variation>",
+  "variations": [
+    {
+      "variation_id": "<id you assign>",
+      "description": "<meaningful modifier only, never numbers/names>",
+      "variation_type": "condition" | "reasoning_direction" | "context_type" | "format" | "abstraction_level" | "unknown_count" | "concept_count" | "application_vs_direct" | "other",
+      "supporting_question_ids": ["<question_id>", "..."]
+    }
+  ],
+  "supporting_question_ids": ["<every question_id under this archetype, across all its variations>"],
+  "stats": {
+    "question_count": <number>,
+    "years_observed": [<number>, "..."],
+    "first_observed_year": <number or null>,
+    "last_observed_year": <number or null>,
+    "marks_distribution": { "<marks value as a string key>": <count> },
+    "formats": { "<format value>": <count> },
+    "difficulty_distribution": { "Easy": <number>, "Medium": <number>, "Hard": <number> },
+    "grade_or_year_distribution": { "<grade_or_year value>": <count> }
+  },
+  "generator_usable": <boolean>,
+  "generator_usability_rationale": "<why, or why not>",
+  "mining_confidence": <0-1>,
+  "possible_duplicate_of": ["<cluster_id from cluster_diagnostics.nearest_neighbor_clusters, if any>"]
+}
+Do NOT include education_context -- it is stamped on by the caller after
+your response, so there is nothing to gain by adding it and it will be
+overwritten if you do.
+
 OUTPUT
-Return ONLY valid JSON: an array of Archetype objects conforming to the
-shared schema (status: "candidate"). No markdown, no explanatory prose.`;
+Return ONLY valid JSON: an array of Archetype objects matching the SCHEMA
+above exactly (status: "candidate" is added by the caller, not by you --
+omit it). No markdown, no explanatory prose.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,11 +621,31 @@ WHAT NOT TO DO
   states what its rating is relative to; never imply a "Hard" at one level
   is comparable to a "Hard" at another.
 
+SCHEMA
+For every candidate you were given, return exactly one object with the
+SAME archetype_id (even for KEEP -- echo it back, never omit an untouched
+archetype), carrying the SAME fields Stage 2 produces (archetype_id, name,
+concept, learning_objective, invariant_reasoning_structure, variations,
+supporting_question_ids, stats, generator_usable,
+generator_usability_rationale, mining_confidence, possible_duplicate_of --
+see Stage 2's own SCHEMA for each field's exact shape; unchanged unless
+your decision is REVISE, in which case update whichever of these your
+revision actually changes), PLUS:
+{
+  "critic_decision": "KEEP" | "MERGE" | "SPLIT" | "REVISE" | "REVIEW" | "ADD" | "REMOVE",
+  "critic_rationale": "<plain-language justification, required for every decision>",
+  "critic_evidence": ["<question_id or archetype_id that grounds this decision>"],
+  "merge_target_id": "<archetype_id being merged into, set only when critic_decision is MERGE, else null>",
+  "split_result_ids": ["<new child archetype_id>", "... -- set only when critic_decision is SPLIT, else empty"]
+}
+For a new ADD, assign a fresh archetype_id and return the FULL Archetype
+shape above (Stage 2's fields plus the critic_* fields) with
+critic_decision:"ADD". Do NOT include education_context -- it is stamped
+on by the caller after your response.
+
 OUTPUT
-Return ONLY valid JSON: an array of Archetype objects, each with
-status:"reviewed", critic_decision, critic_rationale, and critic_evidence
-populated, plus any new ADD archetypes as full Archetype objects with
-status:"candidate" and critic_decision:"ADD" (they still need a future
-review pass once questions are attached). No markdown, no explanatory
-prose.`;
+Return ONLY valid JSON: an array of Archetype objects matching the SCHEMA
+above exactly, each with status:"reviewed" (or status:"candidate" for a
+new ADD -- the caller sets status itself based on critic_decision, so it's
+fine to omit it). No markdown, no explanatory prose.`;
 }
