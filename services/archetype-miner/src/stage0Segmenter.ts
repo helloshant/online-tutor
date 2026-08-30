@@ -91,5 +91,33 @@ export async function runSegmenter(params: {
     }
   }
 
+  // archetype_segmented_questions.parent_question_id is a foreign key onto
+  // this same table's own question_id -- despite the SEGMENTATION RULE's
+  // own instruction to always emit a standalone record for a shared stem/
+  // stimulus, a model occasionally sets parent_question_id to a value it
+  // never actually produced a record for (e.g. it stored the stimulus text
+  // inline on each sibling instead of as its own record). Left alone, that
+  // single dangling reference would fail the ENTIRE batch insert for this
+  // paper at once (one Postgres statement, one constraint violation) --
+  // silently losing every other, otherwise-valid record in it. Null out
+  // just the dangling references instead (the record becomes standalone,
+  // its raw_text is unaffected) so this is a per-record data-quality note,
+  // never a whole-paper failure.
+  const questionIds = new Set(questions.map((q) => q.question_id));
+  let orphanedParentCount = 0;
+  for (const q of questions) {
+    if (q.parent_question_id && !questionIds.has(q.parent_question_id)) {
+      console.warn(
+        `SegmentedQuestion ${q.question_id} references parent_question_id ${q.parent_question_id}, which isn't ` +
+          "a question_id in this same batch -- clearing it rather than failing the whole paper's insert."
+      );
+      q.parent_question_id = null;
+      orphanedParentCount++;
+    }
+  }
+  if (orphanedParentCount > 0) {
+    console.warn(`Cleared ${orphanedParentCount} dangling parent_question_id reference(s) from Stage 0 output.`);
+  }
+
   return { questions, droppedCount, model, usage };
 }

@@ -31,7 +31,13 @@ you are not inferring it.
 SEGMENTATION RULE
 Create one record per smallest independently-gradable reasoning unit:
 - A stem with sub-parts (i)/(ii)/(iii) that require DIFFERENT reasoning
-  becomes multiple records sharing one parent_question_id.
+  becomes multiple records sharing one parent_question_id. WHENEVER you set
+  parent_question_id on any record to a value, you MUST ALSO emit exactly
+  one record of your own whose question_id equals that same value, holding
+  the shared stem/stimulus text itself (raw_text/cleaned_text; marks null
+  unless the stem itself was awarded marks separately from its parts). A
+  parent_question_id that doesn't resolve to one of your own records'
+  question_id values is invalid output.
 - A stem where sub-parts are trivial continuations of the same reasoning
   (e.g. "hence, find...") stays as ONE record.
 - Internal "OR" choices become SIBLING records (has_internal_choice: true),
@@ -85,7 +91,7 @@ fields like "type", "options", "stimulus", "context", or "sequence_number",
 and do not omit any of these:
 {
   "question_id": "<a stable unique id you assign, e.g. CBSE-MATH-2019-SET1-Q17-i>",
-  "parent_question_id": "<the question_id of the shared stem, or null if this record has no parent>",
+  "parent_question_id": "<the question_id of the shared stem, or null if this record has no parent -- see the SEGMENTATION RULE above: this MUST match one of your own records' own question_id>",
   "paper": <copy the "paper" object from the input envelope, unchanged>,
   "marks": <number, or null -- see the DO NOT rule on inferring split marks>,
   "raw_text": "<the question exactly as it appears in the source, verbatim>",
