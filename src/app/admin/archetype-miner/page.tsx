@@ -40,6 +40,9 @@ export default async function ArchetypeMinerPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <Link href="/admin/archetype-miner/catalogue" className="text-brand hover:underline">
+            Archetype catalogue
+          </Link>
           <Link href="/admin/archetype-miner/families" className="text-brand hover:underline">
             Archetype families
           </Link>
