@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { submitRun, type SubmitRunParams } from "./pipelineRunner.js";
 import { runFamilyMiner } from "./stage4FamilyMiner.js";
+import { getActiveLlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
 const PORT = Number(process.env.PORT) || 4400;
@@ -15,6 +16,15 @@ if (!SHARED_SECRET) {
       "trusted internal network (e.g. the docker-compose network)."
   );
 }
+
+// Logged once at startup, unconditionally -- LLM_PROVIDER selection has
+// bitten real deployments silently (a value that doesn't exact-match
+// "azure-openai" -- trailing whitespace, wrong case -- falls back to
+// Anthropic with no indication that happened until an API call fails deep
+// in a pipeline run; see getActiveLlmProvider's own comment in llm.ts).
+// Printing the resolved value here means a misconfigured provider is
+// visible in `docker logs` immediately, not just after a failed run.
+console.log(`Active LLM provider: ${getActiveLlmProvider()}`);
 
 const app = express();
 // Larger than the other services' 256kb: a single raw_papers submission can
@@ -30,7 +40,7 @@ app.get("/health", (_req, res) => {
       supabaseUrl: process.env.SUPABASE_URL || null,
       configured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
     },
-    llmProvider: process.env.LLM_PROVIDER === "azure-openai" ? "azure-openai" : "anthropic",
+    llmProvider: getActiveLlmProvider(),
     embeddingsConfigured: Boolean(process.env.VOYAGE_API_KEY),
   });
 });
