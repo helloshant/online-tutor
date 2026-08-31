@@ -75,6 +75,27 @@ export async function runSegmenter(params: {
     throw new Error("Segmenter response was not a JSON array");
   }
 
+  // A genuinely empty array (as opposed to a non-empty array whose records
+  // all failed isValidSegmentedQuestion below, which already logs one
+  // warning per dropped record) produced NO log output at all before this
+  // -- a paper that silently segments to zero questions is exactly the
+  // "No questions were segmented -- nothing to analyze" run outcome, and
+  // with nothing printed anywhere, there was no way to tell that apart
+  // from every other possible cause of that same message after the fact.
+  // Logging the paper's own identity plus the input actually sent (a
+  // snippet of the raw text, or confirmation it was a PDF) turns this into
+  // something diagnosable from `docker logs` alone on the next attempt.
+  if (data.length === 0) {
+    console.warn(
+      `Stage 0 returned zero segmented questions for paper ${paper.board} ${paper.subject} ${paper.year}` +
+        (paper.set_code ? ` (${paper.set_code})` : "") +
+        (pdf
+          ? " -- input was a PDF document."
+          : ` -- input was ${rawText?.length ?? 0} character(s) of raw text, starting: ` +
+            `${JSON.stringify((rawText ?? "").slice(0, 300))}`)
+    );
+  }
+
   const questions: SegmentedQuestion[] = [];
   let droppedCount = 0;
   for (const raw of data) {
