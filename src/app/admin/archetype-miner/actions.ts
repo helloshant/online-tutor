@@ -68,18 +68,39 @@ async function extractPaperFileContent(
   }
 
   if (isDocx) {
-    // Unlike a PDF, a .docx is always digitally-native text (a real XML
-    // document, never a scanned page image), so a plain text-extraction
-    // step here doesn't carry the failure mode that got the answer-bank's
-    // own PDF-via-unpdf path removed (see README) -- there's no "this docx
-    // is secretly a scan with no text layer" case. Works with either LLM
-    // provider, so no provider check needed here.
+    // A .docx is always digitally-native text (a real XML document, never
+    // a scanned page image), so it doesn't carry the "this is secretly a
+    // scan with no text layer at all" failure mode that got the answer-
+    // bank's own PDF-via-unpdf path removed (see README). It CAN still
+    // come out unreadable a different way, though: a .docx produced by
+    // converting a PDF/scan through a tool that used a custom or embedded
+    // font can preserve the WRONG underlying character codes even though
+    // the file displays correctly in Word (font substitution hides the
+    // mismatch visually; mammoth reads the real, wrong codes). Real-world
+    // case that surfaced this: a CBSE paper's extracted text came back as
+    // 25k+ characters, non-empty, that passed straight through to Stage 0
+    // as unreadable garbage (long runs of U+FFFD plus scrambled ASCII/
+    // Devanagari) -- Stage 0 correctly declined to fabricate questions
+    // from it, but that only shows up as an unexplained "zero questions
+    // segmented" after a full run, not a clear error at upload time.
     try {
       const { value } = await mammoth.extractRawText({ buffer: Buffer.from(await file.arrayBuffer()) });
       if (!value.trim()) {
         return {
           ok: false,
           error: `Could not find any text in "${file.name}". Is it empty, or a scanned image pasted into Word?`,
+        };
+      }
+      const replacementCharCount = (value.match(/�/g) ?? []).length;
+      if (replacementCharCount > 20) {
+        return {
+          ok: false,
+          error:
+            `"${file.name}"'s extracted text looks corrupted (${replacementCharCount} unreadable character(s) found) ` +
+            "-- likely produced from a PDF/scan with a custom or embedded font that didn't convert to real Unicode " +
+            'text. If you have the original PDF, upload that instead and set "LLM provider for this run" to ' +
+            "Anthropic -- it reads a PDF's pages directly rather than trusting a text layer that can be broken the " +
+            "same way.",
         };
       }
       return { ok: true, content: { raw_text: value } };
