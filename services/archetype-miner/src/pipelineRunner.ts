@@ -7,6 +7,7 @@ import { runCritic } from "./stage3Critic.js";
 import { lookupStoredTaxonomy } from "./curriculumTaxonomy.js";
 import { lowConfidenceThreshold, toInsertRow, type ReviewQueueCandidate } from "./reviewQueue.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
+import { LlmJsonParseError } from "./jsonCompletion.js";
 import type {
   Archetype,
   ClusterInput,
@@ -205,6 +206,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
     // Stage 0 -- Segmenter (skipped entirely for pre_segmented input)
     // ---------------------------------------------------------------
     let segmentedCount = 0;
+    let papersFailed = 0;
 
     if (params.inputKind === "raw_papers") {
       await updateRun(runId, { status: "segmenting" });
@@ -212,13 +214,38 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       let paperIndex = 0;
       for (const paperInput of params.papers) {
         paperIndex++;
-        const result = await runSegmenter({
-          rawText: paperInput.raw_text,
-          pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
-          paper: paperInput.paper,
-          educationContext,
-          provider: llmProvider,
-        });
+        const paperLabel = `${paperInput.paper.board} ${paperInput.paper.subject} ${paperInput.paper.year}`;
+
+        // Own try/catch per paper -- this whole function's outer one
+        // would otherwise let ONE paper's Segmenter failure (a parse
+        // error from a truncated response, most commonly -- see
+        // stage0Segmenter.ts's own MAX_TOKENS comment) abort the ENTIRE
+        // run, losing every other paper in a multi-file batch that
+        // segmented fine. Every other stage in this pipeline already
+        // fails open per unit of work; Stage 0 needs the same posture at
+        // the paper level now that one run can carry several papers.
+        let result: Awaited<ReturnType<typeof runSegmenter>>;
+        try {
+          result = await runSegmenter({
+            rawText: paperInput.raw_text,
+            pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
+            paper: paperInput.paper,
+            educationContext,
+            provider: llmProvider,
+          });
+        } catch (err) {
+          papersFailed++;
+          console.error(`Stage 0 (Segmenter) failed for paper ${paperIndex} (${paperLabel}) of run ${runId}:`, err);
+          if (err instanceof LlmJsonParseError) {
+            console.warn(
+              `Paper ${paperIndex} (${paperLabel}) looks like it hit MAX_TOKENS -- the model's response was cut ` +
+                "off before it could finish (an unterminated JSON string/array is the usual sign). If this paper " +
+                "is unusually long, splitting it into smaller sections and submitting them as separate files in " +
+                "one multi-file batch (see admin/archetype-miner/actions.ts) usually resolves this."
+            );
+          }
+          continue;
+        }
 
         const { deduped, renamedCount } = dedupeAcrossPapers(result.questions, usedQuestionIds, paperIndex);
         if (renamedCount > 0) {
@@ -259,13 +286,24 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       }
     }
 
-    await mergeStats(runId, { segmented: segmentedCount });
+    await mergeStats(runId, { segmented: segmentedCount, papers_failed: papersFailed });
 
     if (segmentedCount === 0) {
+      // Distinguishes "every paper's Segmenter call itself failed" (a real
+      // failure, worth resubmitting after fixing whatever broke -- see the
+      // per-paper catch block above) from "the model looked at real input
+      // and legitimately found nothing to segment" (a genuine, if empty,
+      // outcome -- e.g. a corrupted-text upload actions.ts's own DOCX
+      // check now mostly catches before submission, but a run can still
+      // reach here for content that check doesn't cover, like pasted text
+      // or a PDF).
       await updateRun(runId, {
-        status: "completed",
+        status: papersFailed > 0 ? "failed" : "completed",
         completed_at: new Date().toISOString(),
-        error: "No questions were segmented -- nothing to analyze.",
+        error:
+          papersFailed > 0
+            ? `${papersFailed} paper(s) failed to segment -- see the service logs for why. Nothing was produced.`
+            : "No questions were segmented -- nothing to analyze.",
       });
       return;
     }

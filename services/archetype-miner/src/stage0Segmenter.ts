@@ -4,7 +4,20 @@ import type { PdfAttachment } from "./llmTypes.js";
 import type { LlmProvider } from "./llm.js";
 import type { EducationContext, PaperMeta, SegmentedQuestion } from "./types.js";
 
-const MAX_TOKENS = 8000;
+// A full board exam paper needs to reproduce nearly all of its own source
+// text TWICE per record (raw_text AND cleaned_text, for every question),
+// which for a real multi-section paper (30+ records) can genuinely exceed
+// the 8000 this started at -- confirmed directly: a 25k-character CBSE
+// Social Science paper truncated mid-response ("Unterminated string in
+// JSON") at 8000. 16000 is the largest safe value across BOTH providers
+// this service supports -- Azure OpenAI's gpt-4o family caps output at
+// 16384 tokens, so this is the real ceiling regardless of what Anthropic
+// itself could support. A paper too large even for this should be split
+// into smaller sections and submitted as separate files instead (the
+// multi-file batch upload exists for exactly this -- see
+// admin/archetype-miner/actions.ts) -- see the truncation-specific error
+// message in pipelineRunner.ts's per-paper handling below.
+const MAX_TOKENS = 16000;
 
 // Loose but real validation -- not full schema validation, just enough to
 // guarantee every downstream stage can trust the shape it reads (Stage 1

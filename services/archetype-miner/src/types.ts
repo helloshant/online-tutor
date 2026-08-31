@@ -334,6 +334,13 @@ export type PipelineStatus =
 
 export type PipelineRunStats = {
   segmented?: number;
+  // Papers whose own Stage 0 (Segmenter) call itself failed (most
+  // commonly a truncated/unparseable response -- see
+  // stage0Segmenter.ts's own MAX_TOKENS comment) -- these papers
+  // contributed nothing to `segmented`, but every OTHER paper in the same
+  // batch still ran normally rather than the whole run aborting over one
+  // paper's failure.
+  papers_failed?: number;
   analyzed?: number;
   // Segmented records excluded from Stage 1 (and every stage after it)
   // because they're purely a shared stem/stimulus holder for other

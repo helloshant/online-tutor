@@ -76,10 +76,18 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
 
         {runRow.error && <p className="mt-3 text-sm text-red-600">{runRow.error}</p>}
 
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-7">
           <div>
             <dt className="text-foreground/50">Segmented</dt>
             <dd className="font-medium">{runRow.stats.segmented ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-foreground/50" title="Papers whose own Stage 0 call failed (e.g. a truncated response) -- every other paper in the same batch still ran normally.">
+              Papers failed
+            </dt>
+            <dd className={`font-medium ${(runRow.stats.papers_failed ?? 0) > 0 ? "text-red-600" : ""}`}>
+              {runRow.stats.papers_failed ?? "—"}
+            </dd>
           </div>
           <div>
             <dt className="text-foreground/50">Analyzed</dt>

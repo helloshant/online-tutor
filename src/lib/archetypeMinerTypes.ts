@@ -93,6 +93,10 @@ export type PipelineStatus =
 
 export type PipelineRunStats = {
   segmented?: number;
+  // Papers whose own Stage 0 call failed (most commonly a truncated
+  // response) but every OTHER paper in the same batch still ran normally
+  // -- see pipelineRunner.ts's per-paper try/catch in the service.
+  papers_failed?: number;
   analyzed?: number;
   // Segmented records excluded from Stage 1 onward because they're purely
   // a shared stem/stimulus holder for other records, not an independently
