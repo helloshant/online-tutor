@@ -192,13 +192,16 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs"
         />
         <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
-          Or upload the paper as a PDF or DOCX file instead of pasting text above (input kind: raw paper text). Up to
-          15MB. A DOCX&apos;s text is extracted directly and works with either LLM provider.{" "}
+          Or upload the paper as one or more PDF/DOCX files instead of pasting text above (input kind: raw paper
+          text) — select several to submit them together as one run, each becoming its own paper. Up to 15MB each,
+          20 files max. Every file shares the paper-metadata fields below (subject/year/board/set code/...); if your
+          files are actually from different years or set codes, submit them as separate runs instead so each gets
+          its own correct metadata. A DOCX&apos;s text is extracted directly and works with either LLM provider.{" "}
           {pdfUnavailable ? (
             <>
               A PDF specifically isn&apos;t available right now — it requires the Anthropic provider, and this run is
-              set to use Azure OpenAI. Switch &quot;LLM provider for this run&quot; above to Anthropic, upload a DOCX
-              instead, or paste extracted text.
+              set to use Azure OpenAI. Switch &quot;LLM provider for this run&quot; above to Anthropic, upload DOCX
+              files instead, or paste extracted text.
             </>
           ) : (
             <>A PDF is read page-by-page directly by Stage 0, including scanned/photographed papers with no text layer at all.</>
@@ -206,6 +209,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           <input
             type="file"
             name="paperFile"
+            multiple
             accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand"
           />

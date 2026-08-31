@@ -15,12 +15,82 @@ const PAPER_TYPES = ["board_exam", "sample_paper", "compartment"] as const;
 const EXTRACTION_METHODS = ["native_text", "ocr"] as const;
 // Same cap the exam-answer-sheet upload uses (see
 // api/broadcasts/[id]/exam/submit/route.ts) -- comfortably under both
-// Anthropic's own PDF limits and, base64-encoded, this service's 25mb JSON
-// body limit (see services/archetype-miner/src/server.ts). DOCX files are
-// typically far smaller than this, but there's no reason to give them a
-// different cap.
+// Anthropic's own PDF limits and, base64-encoded, this service's JSON body
+// limit (see services/archetype-miner/src/server.ts). Per file -- a
+// multi-file submission's aggregate size is bounded by next.config.ts's
+// own serverActions.bodySizeLimit instead (the framework rejects an
+// over-limit request before this action ever runs, so there's no useful
+// aggregate check to add here on top of that).
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+// A generous but real ceiling on how many files one submission can carry --
+// not because more is unsafe, but a batch this size is more usefully split
+// into a few submissions than fully unbounded.
+const MAX_FILES = 20;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+type PaperFileContent = { pdf_base64: string; raw_text?: undefined } | { raw_text: string; pdf_base64?: undefined };
+
+// Processes ONE uploaded paper file into either a base64 PDF or extracted
+// DOCX text -- shared by every file in a multi-file submission, so each
+// file's own name can appear in whichever error it produces (a batch
+// submission with an error and no indication of WHICH file caused it would
+// be a bad time for whoever has to go find it among a dozen).
+async function extractPaperFileContent(
+  file: File,
+  llmProvider: ArchetypeMinerLlmProvider | undefined
+): Promise<{ ok: true; content: PaperFileContent } | { ok: false; error: string }> {
+  if (file.size > MAX_FILE_BYTES) {
+    return { ok: false, error: `"${file.name}" is too large (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB).` };
+  }
+  const isDocx = file.type === DOCX_MIME || file.name.toLowerCase().endsWith(".docx");
+
+  if (file.type === "application/pdf") {
+    if (llmProvider === "azure-openai") {
+      return {
+        ok: false,
+        error:
+          `"${file.name}" is a PDF, which requires the Anthropic provider -- Azure OpenAI has no native PDF ` +
+          'reading. Switch "LLM provider for this run" to Anthropic, upload DOCX files instead, or paste extracted text.',
+      };
+    }
+    // Stage 0 reads the PDF's pages directly (Anthropic's native document
+    // understanding, see anthropicProvider.ts) rather than working from a
+    // pre-extracted text layer -- this also covers scanned/photographed
+    // past-year papers with no real text layer at all, which a plain
+    // text-extraction step would otherwise return empty or garbled.
+    try {
+      const pdf_base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+      return { ok: true, content: { pdf_base64 } };
+    } catch (err) {
+      console.error(`Failed to read uploaded PDF "${file.name}":`, err);
+      return { ok: false, error: `Could not read "${file.name}". Please try again or try a different file.` };
+    }
+  }
+
+  if (isDocx) {
+    // Unlike a PDF, a .docx is always digitally-native text (a real XML
+    // document, never a scanned page image), so a plain text-extraction
+    // step here doesn't carry the failure mode that got the answer-bank's
+    // own PDF-via-unpdf path removed (see README) -- there's no "this docx
+    // is secretly a scan with no text layer" case. Works with either LLM
+    // provider, so no provider check needed here.
+    try {
+      const { value } = await mammoth.extractRawText({ buffer: Buffer.from(await file.arrayBuffer()) });
+      if (!value.trim()) {
+        return {
+          ok: false,
+          error: `Could not find any text in "${file.name}". Is it empty, or a scanned image pasted into Word?`,
+        };
+      }
+      return { ok: true, content: { raw_text: value } };
+    } catch (err) {
+      console.error(`Failed to extract text from uploaded DOCX "${file.name}":`, err);
+      return { ok: false, error: `Could not read "${file.name}". Please try again or try a different file.` };
+    }
+  }
+
+  return { ok: false, error: `"${file.name}" must be a PDF or DOCX file.` };
+}
 
 function readEducationContext(formData: FormData): EducationContext | null {
   const educationStage = formData.get("educationStage") as string | null;
@@ -128,63 +198,31 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
     }
   } else {
     const rawText = ((formData.get("rawText") as string | null) ?? "").trim();
-    const paperFile = formData.get("paperFile");
-    const hasFile = paperFile instanceof File && paperFile.size > 0;
+    const paperFiles = formData.getAll("paperFile").filter((f): f is File => f instanceof File && f.size > 0);
+    const hasFiles = paperFiles.length > 0;
 
-    if (rawText && hasFile) {
-      return { error: "Paste the paper's raw text OR upload a file, not both." };
+    if (rawText && hasFiles) {
+      return { error: "Paste the paper's raw text OR upload file(s), not both." };
     }
-    if (!rawText && !hasFile) {
-      return { error: "Paste the paper's raw text, or upload it as a PDF or DOCX file." };
+    if (!rawText && !hasFiles) {
+      return { error: "Paste the paper's raw text, or upload one or more PDF/DOCX files." };
+    }
+    if (hasFiles && paperFiles.length > MAX_FILES) {
+      return { error: `Select at most ${MAX_FILES} files in one submission.` };
     }
 
-    let pdfBase64: string | undefined;
-    let fileExtractedText: string | undefined;
-    if (hasFile) {
-      const file = paperFile as File;
-      if (file.size > MAX_FILE_BYTES) {
-        return { error: `That file is too large (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB).` };
-      }
-      const isDocx = file.type === DOCX_MIME || file.name.toLowerCase().endsWith(".docx");
-
-      if (file.type === "application/pdf") {
-        if (llmProvider === "azure-openai") {
-          return {
-            error:
-              "A PDF paper requires the Anthropic provider -- Azure OpenAI has no native PDF reading. Switch \"LLM provider for this run\" to Anthropic, upload a DOCX instead, or paste extracted text.",
-          };
-        }
-        // Stage 0 reads the PDF's pages directly (Anthropic's native document
-        // understanding, see anthropicProvider.ts) rather than working from a
-        // pre-extracted text layer -- this also covers scanned/photographed
-        // past-year papers with no real text layer at all, which a plain
-        // text-extraction step would otherwise return empty or garbled.
-        try {
-          pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-        } catch (err) {
-          console.error("Failed to read uploaded PDF:", err);
-          return { error: "Could not read that PDF. Please try again or try a different file." };
-        }
-      } else if (isDocx) {
-        // Unlike a PDF, a .docx is always digitally-native text (a real XML
-        // document, never a scanned page image), so a plain text-extraction
-        // step here doesn't carry the failure mode that got the answer-
-        // bank's own PDF-via-unpdf path removed (see README) -- there's no
-        // "this docx is secretly a scan with no text layer" case. Works with
-        // either LLM provider, so no provider check needed here.
-        try {
-          const { value } = await mammoth.extractRawText({ buffer: Buffer.from(await file.arrayBuffer()) });
-          if (!value.trim()) {
-            return { error: "Could not find any text in that DOCX file. Is it empty, or a scanned image pasted into Word?" };
-          }
-          fileExtractedText = value;
-        } catch (err) {
-          console.error("Failed to extract text from uploaded DOCX:", err);
-          return { error: "Could not read that DOCX file. Please try again or try a different file." };
-        }
-      } else {
-        return { error: "The paper upload must be a PDF or DOCX file." };
-      }
+    // Every file in the batch becomes its own paper entry, sharing the ONE
+    // set of paper-metadata fields below (subject/year/board/set code/...)
+    // -- there's no per-file metadata in this form. If the selected files
+    // are actually from different years or set codes, submit them as
+    // separate runs instead of one batch, so each gets its own correct
+    // metadata rather than all of them sharing whichever single value was
+    // typed in once.
+    const fileContents: PaperFileContent[] = [];
+    for (const file of paperFiles) {
+      const processed = await extractPaperFileContent(file, llmProvider);
+      if (!processed.ok) return { error: processed.error };
+      fileContents.push(processed.content);
     }
 
     const subject = ((formData.get("paperSubject") as string | null) ?? "").trim() || educationContext.subject_or_course;
@@ -202,6 +240,17 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
       return { error: "Invalid extraction method." };
     }
 
+    const sharedPaperMeta = {
+      subject,
+      year,
+      board,
+      class: paperClass,
+      set_code: setCode,
+      paper_type: paperType as (typeof PAPER_TYPES)[number],
+      source_url: sourceUrl,
+      extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
+    };
+
     try {
       const result = await submitPipelineRun({
         educationContext,
@@ -209,21 +258,9 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
         createdBy: session.user.id,
         llmProvider,
         inputKind: "raw_papers",
-        papers: [
-          {
-            paper: {
-              subject,
-              year,
-              board,
-              class: paperClass,
-              set_code: setCode,
-              paper_type: paperType as (typeof PAPER_TYPES)[number],
-              source_url: sourceUrl,
-              extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
-            },
-            ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: fileExtractedText ?? rawText }),
-          },
-        ],
+        papers: hasFiles
+          ? fileContents.map((content) => ({ paper: sharedPaperMeta, ...content }))
+          : [{ paper: sharedPaperMeta, raw_text: rawText }],
       });
       runId = result.runId;
     } catch (err) {

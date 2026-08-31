@@ -33,9 +33,12 @@ console.log(`Active LLM provider: ${getActiveLlmProvider()}`);
 const app = express();
 // Larger than the other services' 256kb: a single raw_papers submission can
 // legitimately carry many full exam papers' worth of text in one request --
-// or one PDF (base64 runs ~33% larger than the source bytes; the web app
-// caps a single PDF upload at 15MB, see admin/archetype-miner/actions.ts).
-app.use(express.json({ limit: "25mb" }));
+// or several PDFs (base64 runs ~33% larger than the source bytes; the web
+// app caps each PDF/DOCX file at 15MB and MAX_FILES files per submission,
+// see admin/archetype-miner/actions.ts) -- matches that app's own
+// serverActions.bodySizeLimit (next.config.ts) so neither side is the
+// tighter constraint for the same multi-file submission.
+app.use(express.json({ limit: "40mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({
