@@ -1,5 +1,6 @@
 "use server";
 
+import mammoth from "mammoth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
@@ -15,8 +16,11 @@ const EXTRACTION_METHODS = ["native_text", "ocr"] as const;
 // Same cap the exam-answer-sheet upload uses (see
 // api/broadcasts/[id]/exam/submit/route.ts) -- comfortably under both
 // Anthropic's own PDF limits and, base64-encoded, this service's 25mb JSON
-// body limit (see services/archetype-miner/src/server.ts).
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
+// body limit (see services/archetype-miner/src/server.ts). DOCX files are
+// typically far smaller than this, but there's no reason to give them a
+// different cap.
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function readEducationContext(formData: FormData): EducationContext | null {
   const educationStage = formData.get("educationStage") as string | null;
@@ -124,41 +128,62 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
     }
   } else {
     const rawText = ((formData.get("rawText") as string | null) ?? "").trim();
-    const pdfFile = formData.get("paperPdf");
-    const hasPdf = pdfFile instanceof File && pdfFile.size > 0;
+    const paperFile = formData.get("paperFile");
+    const hasFile = paperFile instanceof File && paperFile.size > 0;
 
-    if (rawText && hasPdf) {
-      return { error: "Paste the paper's raw text OR upload a PDF, not both." };
+    if (rawText && hasFile) {
+      return { error: "Paste the paper's raw text OR upload a file, not both." };
     }
-    if (!rawText && !hasPdf) {
-      return { error: "Paste the paper's raw text, or upload it as a PDF." };
-    }
-    if (hasPdf && llmProvider === "azure-openai") {
-      return {
-        error:
-          "A PDF paper requires the Anthropic provider -- Azure OpenAI has no native PDF reading. Switch \"LLM provider for this run\" to Anthropic, or paste extracted text instead.",
-      };
+    if (!rawText && !hasFile) {
+      return { error: "Paste the paper's raw text, or upload it as a PDF or DOCX file." };
     }
 
     let pdfBase64: string | undefined;
-    if (hasPdf) {
-      const file = pdfFile as File;
-      if (file.type !== "application/pdf") {
-        return { error: "The paper upload must be a PDF file." };
+    let fileExtractedText: string | undefined;
+    if (hasFile) {
+      const file = paperFile as File;
+      if (file.size > MAX_FILE_BYTES) {
+        return { error: `That file is too large (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB).` };
       }
-      if (file.size > MAX_PDF_BYTES) {
-        return { error: `That PDF is too large (max ${Math.floor(MAX_PDF_BYTES / (1024 * 1024))}MB).` };
-      }
-      // Stage 0 reads the PDF's pages directly (Anthropic's native document
-      // understanding, see anthropicProvider.ts) rather than working from a
-      // pre-extracted text layer -- this also covers scanned/photographed
-      // past-year papers with no real text layer at all, which a plain
-      // text-extraction step would otherwise return empty or garbled.
-      try {
-        pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-      } catch (err) {
-        console.error("Failed to read uploaded PDF:", err);
-        return { error: "Could not read that PDF. Please try again or try a different file." };
+      const isDocx = file.type === DOCX_MIME || file.name.toLowerCase().endsWith(".docx");
+
+      if (file.type === "application/pdf") {
+        if (llmProvider === "azure-openai") {
+          return {
+            error:
+              "A PDF paper requires the Anthropic provider -- Azure OpenAI has no native PDF reading. Switch \"LLM provider for this run\" to Anthropic, upload a DOCX instead, or paste extracted text.",
+          };
+        }
+        // Stage 0 reads the PDF's pages directly (Anthropic's native document
+        // understanding, see anthropicProvider.ts) rather than working from a
+        // pre-extracted text layer -- this also covers scanned/photographed
+        // past-year papers with no real text layer at all, which a plain
+        // text-extraction step would otherwise return empty or garbled.
+        try {
+          pdfBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+        } catch (err) {
+          console.error("Failed to read uploaded PDF:", err);
+          return { error: "Could not read that PDF. Please try again or try a different file." };
+        }
+      } else if (isDocx) {
+        // Unlike a PDF, a .docx is always digitally-native text (a real XML
+        // document, never a scanned page image), so a plain text-extraction
+        // step here doesn't carry the failure mode that got the answer-
+        // bank's own PDF-via-unpdf path removed (see README) -- there's no
+        // "this docx is secretly a scan with no text layer" case. Works with
+        // either LLM provider, so no provider check needed here.
+        try {
+          const { value } = await mammoth.extractRawText({ buffer: Buffer.from(await file.arrayBuffer()) });
+          if (!value.trim()) {
+            return { error: "Could not find any text in that DOCX file. Is it empty, or a scanned image pasted into Word?" };
+          }
+          fileExtractedText = value;
+        } catch (err) {
+          console.error("Failed to extract text from uploaded DOCX:", err);
+          return { error: "Could not read that DOCX file. Please try again or try a different file." };
+        }
+      } else {
+        return { error: "The paper upload must be a PDF or DOCX file." };
       }
     }
 
@@ -196,7 +221,7 @@ export async function submitRunAction(_prevState: SubmitRunState, formData: Form
               source_url: sourceUrl,
               extraction_method: extractionMethod as (typeof EXTRACTION_METHODS)[number],
             },
-            ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: rawText }),
+            ...(pdfBase64 ? { pdf_base64: pdfBase64 } : { raw_text: fileExtractedText ?? rawText }),
           },
         ],
       });

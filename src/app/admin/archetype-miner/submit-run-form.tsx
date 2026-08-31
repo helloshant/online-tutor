@@ -24,14 +24,15 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
   // SubmitRunParams.llmProvider.
   const [providerChoice, setProviderChoice] = useState<"default" | ArchetypeMinerLlmProvider>("default");
   const effectiveProvider = providerChoice === "default" ? defaultLlmProvider : providerChoice;
-  // Native PDF input only exists on the Anthropic path (see
+  // Native PDF reading only exists on the Anthropic path (see
   // anthropicProvider.ts) -- the service rejects a PDF outright when the
-  // run resolves to Azure OpenAI (azureOpenAIProvider.ts), so disable it
-  // here rather than let an admin discover that by submitting and reading
-  // a form error. null (health check unreachable, or "default" chosen
-  // with no known default) defaults to allowing the upload rather than
-  // guessing.
-  const pdfDisabled = effectiveProvider === "azure-openai";
+  // run resolves to Azure OpenAI (azureOpenAIProvider.ts). A DOCX upload
+  // has no such restriction (its text is extracted locally, see actions.ts,
+  // and works with either provider), so the file input itself always stays
+  // enabled -- this only toggles which note is shown underneath it. null
+  // (health check unreachable, or "default" chosen with no known default)
+  // defaults to the PDF-available note rather than guessing.
+  const pdfUnavailable = effectiveProvider === "azure-openai";
 
   return (
     <form action={formAction} encType="multipart/form-data" className="space-y-4 border-t border-border p-4">
@@ -191,24 +192,22 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs"
         />
         <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
-          {pdfDisabled ? (
+          Or upload the paper as a PDF or DOCX file instead of pasting text above (input kind: raw paper text). Up to
+          15MB. A DOCX&apos;s text is extracted directly and works with either LLM provider.{" "}
+          {pdfUnavailable ? (
             <>
-              PDF upload isn&apos;t available for Azure OpenAI, which has no equivalent to Anthropic&apos;s native PDF
-              reading — switch &quot;LLM provider for this run&quot; above to Anthropic, or extract the text yourself
-              and paste it below instead.
+              A PDF specifically isn&apos;t available right now — it requires the Anthropic provider, and this run is
+              set to use Azure OpenAI. Switch &quot;LLM provider for this run&quot; above to Anthropic, upload a DOCX
+              instead, or paste extracted text.
             </>
           ) : (
-            <>
-              Or upload the paper as a PDF instead of pasting text above (input kind: raw paper text) — Stage 0 reads
-              it directly, including scanned/photographed papers with no text layer at all. Up to 15MB.
-            </>
+            <>A PDF is read page-by-page directly by Stage 0, including scanned/photographed papers with no text layer at all.</>
           )}
           <input
             type="file"
-            name="paperPdf"
-            accept="application/pdf"
-            disabled={pdfDisabled}
-            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+            name="paperFile"
+            accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand"
           />
         </label>
 

@@ -2006,7 +2006,12 @@ here):
   service default changes while it's still going. Returns `{ runId }` immediately — the pipeline
   runs in the background (no queue infra, same as every other service here besides the
   orchestrator's own Redis answer cache), often taking minutes to hours depending on corpus size,
-  since Stage 1 alone is one LLM call per question.
+  since Stage 1 alone is one LLM call per question. A DOCX paper upload never reaches this API as
+  its own thing the way a PDF does -- unlike a PDF, a `.docx` is always digitally-native text
+  (never a scanned page image), so plain text extraction carries none of the failure mode that got
+  the answer-bank's own PDF-via-`unpdf` path removed; the web app extracts it locally with
+  `mammoth` (`admin/archetype-miner/actions.ts`) and submits the result as an ordinary `raw_text`
+  paper, working with either LLM provider and needing no changes to this service at all.
 - `GET /v1/pipeline/runs/:id` — poll status (`pending` → `segmenting` → `analyzing` → `embedding` →
   `clustering` → `mining` → `critiquing` → `completed`/`failed`) and running stats.
 - `GET /v1/pipeline/runs/:id/archetypes` — the mined catalogue so far (every status/decision, not
