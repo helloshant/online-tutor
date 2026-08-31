@@ -76,7 +76,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
 
         {runRow.error && <p className="mt-3 text-sm text-red-600">{runRow.error}</p>}
 
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
           <div>
             <dt className="text-foreground/50">Segmented</dt>
             <dd className="font-medium">{runRow.stats.segmented ?? "—"}</dd>
@@ -84,6 +84,12 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
           <div>
             <dt className="text-foreground/50">Analyzed</dt>
             <dd className="font-medium">{runRow.stats.analyzed ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-foreground/50" title="Shared stem/stimulus records with no independent reasoning task of their own -- not a failure.">
+              Stems excluded
+            </dt>
+            <dd className="font-medium">{runRow.stats.stems_excluded ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-foreground/50">Clusters</dt>

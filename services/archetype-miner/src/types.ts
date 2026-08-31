@@ -335,6 +335,12 @@ export type PipelineStatus =
 export type PipelineRunStats = {
   segmented?: number;
   analyzed?: number;
+  // Segmented records excluded from Stage 1 (and every stage after it)
+  // because they're purely a shared stem/stimulus holder for other
+  // records, not an independently gradable reasoning unit of their own --
+  // see pipelineRunner.ts's excludeStemOnlyParents. Not a failure; a
+  // record here was never expected to become its own signature/archetype.
+  stems_excluded?: number;
   clusters?: number;
   mined?: number;
   reviewed?: number;

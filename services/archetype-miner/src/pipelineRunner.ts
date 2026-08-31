@@ -16,6 +16,7 @@ import type {
   PreSegmentedInput,
   QuestionSignature,
   RawPaperInput,
+  SegmentedQuestion,
 } from "./types.js";
 
 // Runs entirely in-process, fire-and-forget from the API handler
@@ -61,6 +62,31 @@ async function mergeStats(runId: string, patch: Partial<PipelineRunStats>) {
   const { data } = await supabase.from("archetype_pipeline_runs").select("stats").eq("id", runId).single();
   const current = (data?.stats as PipelineRunStats | undefined) ?? {};
   await updateRun(runId, { stats: { ...current, ...patch } });
+}
+
+// A record referenced as another record's own parent_question_id is, by
+// Stage 0's own SEGMENTATION RULE (see prompts.ts), the shared stem/
+// stimulus holder for those children -- not itself an independently
+// gradable reasoning unit. The prompt instructs the model to still emit a
+// standalone record for it (so the shared text is stored somewhere), but
+// sending that record through Stage 1 (Analyzer) anyway wastes a call that
+// predictably comes back with nulls where a real signature needs real
+// values (nothing to classify -- there's no independent reasoning task),
+// which then either fails validation outright or clutters the review queue
+// with an "insufficient information" result that isn't a genuine ambiguity
+// needing a human decision. marks !== null is the one exception: a stem
+// that WAS independently awarded marks (see the SEGMENTATION RULE's own
+// DO NOT clause on this) is a real gradable unit in its own right despite
+// also being a parent, so it still goes through Stage 1 normally.
+function excludeStemOnlyParents(questions: SegmentedQuestion[]): {
+  analyzable: SegmentedQuestion[];
+  excludedCount: number;
+} {
+  const parentIds = new Set(
+    questions.map((q) => q.parent_question_id).filter((id): id is string => Boolean(id))
+  );
+  const analyzable = questions.filter((q) => !(parentIds.has(q.question_id) && q.marks === null));
+  return { analyzable, excludedCount: questions.length - analyzable.length };
 }
 
 async function queueForReview(runId: string, candidates: ReviewQueueCandidate[]): Promise<void> {
@@ -206,12 +232,15 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       .select("question")
       .eq("run_id", runId);
 
+    const { analyzable: analyzableQuestions, excludedCount: stemsExcluded } = excludeStemOnlyParents(
+      (segmentedRows ?? []).map((row) => row.question as SegmentedQuestion)
+    );
+
     const signatures: QuestionSignature[] = [];
     const stage1ReviewCandidates: ReviewQueueCandidate[] = [];
     const threshold = lowConfidenceThreshold();
 
-    for (const row of segmentedRows ?? []) {
-      const question = row.question as Parameters<typeof runAnalyzer>[0]["question"];
+    for (const question of analyzableQuestions) {
       const result = await runAnalyzer({ question, curriculumTaxonomyText, provider: llmProvider });
 
       if (!result) {
@@ -248,7 +277,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       if (error) console.error(`Failed to insert question signatures for run ${runId}:`, error);
     }
     await queueForReview(runId, stage1ReviewCandidates);
-    await mergeStats(runId, { analyzed: signatures.length });
+    await mergeStats(runId, { analyzed: signatures.length, stems_excluded: stemsExcluded });
 
     if (signatures.length === 0) {
       await updateRun(runId, {
