@@ -64,6 +64,41 @@ async function mergeStats(runId: string, patch: Partial<PipelineRunStats>) {
   await updateRun(runId, { stats: { ...current, ...patch } });
 }
 
+// Each runSegmenter() call is independent -- one paper, no visibility into
+// any sibling paper submitted in the SAME run (a multi-file batch, see
+// admin/archetype-miner/actions.ts) -- and papers in one batch commonly
+// share IDENTICAL paper metadata by design (that action's own "every file
+// shares the ONE set of paper-metadata fields" note), so the model has no
+// way to know its own "Q1" needs to differ from another file's "Q1" when,
+// from its own perspective, they look like the same paper. question_id is
+// only a primary key WITHIN one run (see
+// 0041_archetype_miner_run_scoped_ids.sql), so a collision here is a
+// same-run, cross-paper collision, not a cross-run one -- rename the
+// colliding record (and, since a rename must not silently break a
+// parent_question_id link, every record in the SAME paper's own batch
+// that pointed at the original id) with a paper-index suffix that's
+// unique by construction (each paper index in one run is only ever used
+// once), rather than letting the whole paper's insert fail the way an
+// unresolved collision did before this existed.
+function dedupeAcrossPapers(
+  questions: SegmentedQuestion[],
+  usedQuestionIds: Set<string>,
+  paperIndex: number
+): { deduped: SegmentedQuestion[]; renamedCount: number } {
+  const idMap = new Map<string, string>();
+  for (const q of questions) {
+    if (usedQuestionIds.has(q.question_id)) {
+      idMap.set(q.question_id, `${q.question_id}-paper${paperIndex}`);
+    }
+  }
+  const deduped = questions.map((q) => ({
+    ...q,
+    question_id: idMap.get(q.question_id) ?? q.question_id,
+    parent_question_id: q.parent_question_id ? (idMap.get(q.parent_question_id) ?? q.parent_question_id) : q.parent_question_id,
+  }));
+  return { deduped, renamedCount: idMap.size };
+}
+
 // A record referenced as another record's own parent_question_id is, by
 // Stage 0's own SEGMENTATION RULE (see prompts.ts), the shared stem/
 // stimulus holder for those children -- not itself an independently
@@ -173,7 +208,10 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
 
     if (params.inputKind === "raw_papers") {
       await updateRun(runId, { status: "segmenting" });
+      const usedQuestionIds = new Set<string>();
+      let paperIndex = 0;
       for (const paperInput of params.papers) {
+        paperIndex++;
         const result = await runSegmenter({
           rawText: paperInput.raw_text,
           pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
@@ -181,9 +219,19 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
           educationContext,
           provider: llmProvider,
         });
-        if (result.questions.length > 0) {
+
+        const { deduped, renamedCount } = dedupeAcrossPapers(result.questions, usedQuestionIds, paperIndex);
+        if (renamedCount > 0) {
+          console.warn(
+            `Renamed ${renamedCount} question_id(s) in paper ${paperIndex} of run ${runId} to avoid colliding ` +
+              "with an id already used by an earlier paper in this same batch submission."
+          );
+        }
+        for (const q of deduped) usedQuestionIds.add(q.question_id);
+
+        if (deduped.length > 0) {
           const { error } = await supabase.from("archetype_segmented_questions").insert(
-            result.questions.map((q) => ({
+            deduped.map((q) => ({
               question_id: q.question_id,
               run_id: runId,
               parent_question_id: q.parent_question_id,
@@ -192,7 +240,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
             }))
           );
           if (error) console.error(`Failed to insert segmented questions for run ${runId}:`, error);
-          else segmentedCount += result.questions.length;
+          else segmentedCount += deduped.length;
         }
       }
     } else {
