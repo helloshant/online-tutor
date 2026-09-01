@@ -2019,6 +2019,20 @@ here):
 - `GET /v1/review-queue` (optional `run_id`, `status` query params) / `POST /v1/review-queue/:id/resolve`
   — read and resolve escalated items.
 
+**`/admin/archetype-miner/ocr`** — a standalone OCR utility page, entirely separate from this
+service and the pipeline itself (never touches an LLM, never submits anything to a run on its
+own). Built for the case where neither the PDF path (Anthropic's native reading) nor the DOCX path
+(plain `mammoth` text extraction) can produce usable text — concretely, a scanned paper whose
+`.docx` conversion mangled its own Devanagari content beyond recovery (see
+`admin/archetype-miner/actions.ts`'s corruption-detection comment for the real case this came out
+of). Uses Google Document AI (`src/lib/documentAiClient.ts`), chosen specifically for its strong
+Devanagari/Indic-script OCR support, over a batch of uploaded images/PDFs (up to 200 files, run
+with bounded concurrency rather than one huge sequential loop or an unbounded parallel burst) —
+an admin reviews the extracted text there and pastes it into the submit-run form's raw-text field
+themselves; nothing here writes to `archetype_pipeline_runs` or any other archetype-miner table
+directly. Requires its own Google Cloud project/Document AI processor/service account, documented
+in `.env.example`.
+
 **Current scope, deliberately** (see the service's own code comments for the reasoning behind each):
 - **No admin UI yet.** This PR is the microservice itself, per what was asked — submit/poll runs and
   resolve review-queue items via the API directly (or `docker compose exec archetype-miner` + curl)
