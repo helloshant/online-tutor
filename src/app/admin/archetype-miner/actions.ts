@@ -72,16 +72,20 @@ async function extractPaperFileContent(
     // a scanned page image), so it doesn't carry the "this is secretly a
     // scan with no text layer at all" failure mode that got the answer-
     // bank's own PDF-via-unpdf path removed (see README). It CAN still
-    // come out unreadable a different way, though: a .docx produced by
-    // converting a PDF/scan through a tool that used a custom or embedded
-    // font can preserve the WRONG underlying character codes even though
-    // the file displays correctly in Word (font substitution hides the
-    // mismatch visually; mammoth reads the real, wrong codes). Real-world
-    // case that surfaced this: a CBSE paper's extracted text came back as
-    // 25k+ characters, non-empty, that passed straight through to Stage 0
-    // as unreadable garbage (long runs of U+FFFD plus scrambled ASCII/
-    // Devanagari) -- Stage 0 correctly declined to fabricate questions
-    // from it, but that only shows up as an unexplained "zero questions
+    // come out unreadable two other ways, though, both confirmed by real
+    // uploads: (1) a .docx produced by converting a PDF/scan through a
+    // tool that used a custom or embedded font can preserve the WRONG
+    // underlying character codes even though the file displays correctly
+    // in Word -- font substitution hides the mismatch visually; mammoth
+    // reads the real, wrong codes, which show up as literal U+FFFD
+    // replacement characters. (2) Hindi/Devanagari content typed in a
+    // legacy NON-UNICODE font (Kruti Dev, DevLys, Chanakya, and similar,
+    // still very common for Hindi typing in India) maps ordinary Latin
+    // character codes to Devanagari-LOOKING glyphs via the font's own
+    // table -- displays perfectly in Word, but the actual stored text is
+    // just that underlying Latin gibberish (e.g. "fiü7i gg", "klfi,",
+    // "€r«-q-l" in place of real Devanagari words). Both failure modes
+    // only ever showed up before as an unexplained "zero questions
     // segmented" after a full run, not a clear error at upload time.
     try {
       const { value } = await mammoth.extractRawText({ buffer: Buffer.from(await file.arrayBuffer()) });
@@ -91,16 +95,32 @@ async function extractPaperFileContent(
           error: `Could not find any text in "${file.name}". Is it empty, or a scanned image pasted into Word?`,
         };
       }
-      const replacementCharCount = (value.match(/�/g) ?? []).length;
-      if (replacementCharCount > 20) {
+      // Anything that isn't plain ASCII, whitespace, the Devanagari Unicode
+      // block, or a small set of characters genuinely common in real
+      // papers (curly quotes/dashes, ₹, °, ×, ÷, ±, √, superscripts,
+      // fractions) is suspicious -- both failure modes above produce
+      // exactly this: characters from Unicode ranges that have no business
+      // appearing in an English- or Hindi-language exam paper. A handful
+      // can be a legitimate stray character; a real density of them across
+      // the document is the actual signal.
+      const suspiciousChars =
+        value.match(
+          /[^\x20-\x7E\n\r\tऀ-ॿ‘’“”–—… ₹°×÷±√²³½¼¾]/g
+        ) ?? [];
+      const suspiciousRatio = suspiciousChars.length / value.length;
+      if (value.length > 100 && suspiciousChars.length >= 8 && suspiciousRatio >= 0.005) {
         return {
           ok: false,
           error:
-            `"${file.name}"'s extracted text looks corrupted (${replacementCharCount} unreadable character(s) found) ` +
-            "-- likely produced from a PDF/scan with a custom or embedded font that didn't convert to real Unicode " +
-            'text. If you have the original PDF, upload that instead and set "LLM provider for this run" to ' +
-            "Anthropic -- it reads a PDF's pages directly rather than trusting a text layer that can be broken the " +
-            "same way.",
+            `"${file.name}"'s extracted text looks corrupted (${suspiciousChars.length} unusual character(s) found, ` +
+            `e.g. ${JSON.stringify(suspiciousChars.slice(0, 5).join(""))}) -- this usually means either (a) the file ` +
+            "was produced by converting a PDF/scan through a tool with a custom or embedded font that didn't convert " +
+            "to real Unicode text, or (b) Hindi/Devanagari content was typed in a legacy non-Unicode font (e.g. Kruti " +
+            "Dev, DevLys, Chanakya) -- it displays correctly in Word, but the underlying stored text is different " +
+            'characters entirely. If you have the original PDF, upload that instead and set "LLM provider for this ' +
+            "run\" to Anthropic -- it reads a PDF's pages directly rather than trusting a text layer that can be " +
+            "broken either way. For a legacy-font Hindi document specifically, it needs to be converted to Unicode " +
+            "(a Kruti Dev/DevLys-to-Unicode converter) or re-typed before it can be mined.",
         };
       }
       return { ok: true, content: { raw_text: value } };
