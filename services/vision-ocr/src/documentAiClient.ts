@@ -1,26 +1,17 @@
-import "server-only";
-
 import { DocumentProcessorServiceClient } from "@google-cloud/documentai";
 
-// Standalone OCR utility (/admin/archetype-miner/ocr) -- entirely separate
-// from the archetype-miner pipeline/service: this never touches an LLM or
-// the mining pipeline, it's a plain image/PDF -> text conversion an admin
-// runs by hand, reviews, and copies into the archetype-miner submission
-// form themselves (or anywhere else). Built specifically for scanned/
-// photographed papers whose text came through unreadable any other way
-// this app already tries -- most concretely, Hindi/Devanagari content
-// mangled by mammoth's plain DOCX text extraction (see actions.ts's own
-// corruption check) or by whatever tool produced a bad PDF-to-Word
-// conversion in the first place. Google Document AI was chosen specifically
-// for its strong Devanagari/Indic-script OCR support, which is exactly the
-// gap that broke everything else in that case.
+// Image-to-Text / Vision stage. Google Document AI was chosen specifically
+// for its strong Devanagari/Indic-script OCR support -- the real gap that
+// motivated this whole service (see imageProcessing.ts's own comment and
+// the web app's admin/archetype-miner/actions.ts corruption-detection
+// comment for the Hindi-paper case this was built against).
 //
-// Uses a service-account client, NOT a file path (this app has nowhere
-// sane to mount a credentials file across every deployment target it
-// runs on) -- client_email/private_key are supplied directly as separate
-// env vars, the same "small number of plain single-line secrets" pattern
-// every other credential in this app already follows, rather than one
-// multi-line JSON blob.
+// Uses a service-account client, not a mounted credentials file -- this app
+// has nowhere sane to mount one across every deployment target it runs on
+// -- client_email/private_key are supplied directly as separate env vars,
+// the same "small number of plain single-line secrets" pattern every other
+// credential in this app already follows, rather than one multi-line JSON
+// blob.
 
 let cachedClient: DocumentProcessorServiceClient | null = null;
 
@@ -39,8 +30,8 @@ function getClient(): DocumentProcessorServiceClient {
         // The service account JSON's own private_key field is a single
         // JSON string with literal "\n" escape sequences standing in for
         // real newlines in the PEM block -- pasted as-is into a plain
-        // .env value (also just text), those need converting back to
-        // real newlines before the auth library can parse the key.
+        // .env value (also just text), those need converting back to real
+        // newlines before the auth library can parse the key.
         private_key: privateKey.replace(/\\n/g, "\n"),
       },
       // Document AI is a regionalized product -- the client's default
@@ -53,14 +44,17 @@ function getClient(): DocumentProcessorServiceClient {
   return cachedClient;
 }
 
-export type OcrResult = { text: string } | { error: string };
+export type DocumentAiResult = { text: string } | { error: string };
 
 // One call per file -- Document AI's synchronous processDocument endpoint
-// (what this uses) is inherently single-document; a caller wanting to OCR
-// several files loops over this itself (see ocr/actions.ts), which also
-// lets each file's own error surface individually rather than one bad
-// file failing an entire batch.
-export async function runDocumentAiOcr(params: { buffer: Buffer; mimeType: string; fileName: string }): Promise<OcrResult> {
+// (what this uses) is inherently single-document; the caller loops over
+// this itself (see ocrPipeline.ts), which also lets each file's own error
+// surface individually rather than one bad file failing an entire batch.
+export async function runDocumentAiOcr(params: {
+  buffer: Buffer;
+  mimeType: string;
+  fileName: string;
+}): Promise<DocumentAiResult> {
   const { buffer, mimeType, fileName } = params;
   const projectId = process.env.GOOGLE_DOCUMENT_AI_PROJECT_ID;
   const location = process.env.GOOGLE_DOCUMENT_AI_LOCATION;
