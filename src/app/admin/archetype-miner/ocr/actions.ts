@@ -1,7 +1,7 @@
 "use server";
 
 import { requireAdminPage } from "@/lib/auth";
-import { runDocumentAiOcr } from "@/lib/documentAiClient";
+import { runVisionOcr, type VisionOcrMimeType } from "@/lib/visionOcrClient";
 
 // Same cap the exam-answer-sheet/archetype-miner PDF uploads already use
 // for a single file, reused here since Document AI's own synchronous
@@ -11,9 +11,10 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024;
 // from a .docx's own embedded image fragments after a bad PDF-to-Word
 // conversion) can genuinely mean uploading 100+ small image pieces at
 // once, see admin/archetype-miner/actions.ts's own corruption-detection
-// comment for the real example this was built against.
+// comment for the real example this was built against. Must match the
+// vision-ocr service's own MAX_FILES.
 const MAX_FILES = 200;
-const ACCEPTED_TYPES = new Set([
+const ACCEPTED_TYPES = new Set<VisionOcrMimeType>([
   "application/pdf",
   "image/jpeg",
   "image/png",
@@ -29,29 +30,14 @@ export type OcrState = {
   result?: { text: string; fileResults: OcrFileResult[] };
 };
 
-// Runs a handful of async tasks with bounded concurrency -- 149 individual
-// small images (the real case this page was built for) run sequentially
-// would take minutes; run fully in parallel, that many simultaneous
-// requests risks tripping Document AI's own per-second quota on a new/
-// modest GCP project. A small fixed pool is a reasonable middle ground
-// without building a real job queue for what's meant to stay a plain
-// utility page.
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i], i);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return results;
-}
-
 // useActionState-shaped (returns { error } instead of throwing), same
 // convention every file-upload form in this app follows -- see
 // admin/archetype-miner/actions.ts's own submitRunAction for why.
+//
+// Image Processing and Image-to-Text/Vision (Document AI) both run in the
+// separate vision-ocr service (see src/lib/visionOcrClient.ts) -- this
+// action's own job is just validating the upload, base64-encoding it for
+// that one HTTP call, and shaping the per-file results for the form.
 export async function runOcrAction(_prevState: OcrState, formData: FormData): Promise<OcrState> {
   await requireAdminPage("archetype_miner");
 
@@ -63,7 +49,7 @@ export async function runOcrAction(_prevState: OcrState, formData: FormData): Pr
     return { error: `Select at most ${MAX_FILES} files at once.` };
   }
   for (const file of files) {
-    if (!ACCEPTED_TYPES.has(file.type)) {
+    if (!ACCEPTED_TYPES.has(file.type as VisionOcrMimeType)) {
       return { error: `"${file.name}" is a "${file.type || "unknown"}" file -- only PDF and common image types are supported.` };
     }
     if (file.size > MAX_FILE_BYTES) {
@@ -71,15 +57,27 @@ export async function runOcrAction(_prevState: OcrState, formData: FormData): Pr
     }
   }
 
-  const ocrResults = await mapWithConcurrency(files, 4, async (file) => {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await runDocumentAiOcr({ buffer, mimeType: file.type, fileName: file.name });
-    return "text" in result
-      ? { fileName: file.name, ok: true as const, text: result.text }
-      : { fileName: file.name, ok: false as const, note: result.error };
-  });
+  const encoded = await Promise.all(
+    files.map(async (file) => ({
+      fileName: file.name,
+      mimeType: file.type as VisionOcrMimeType,
+      base64: Buffer.from(await file.arrayBuffer()).toString("base64"),
+    }))
+  );
 
-  const fileResults: OcrFileResult[] = ocrResults.map((r) => ({ fileName: r.fileName, ok: r.ok, note: r.ok ? undefined : r.note }));
+  let ocrResults;
+  try {
+    ocrResults = await runVisionOcr(encoded);
+  } catch (err) {
+    console.error("Vision OCR service request failed:", err);
+    return { error: "The OCR service is temporarily unavailable. Please try again shortly." };
+  }
+
+  const fileResults: OcrFileResult[] = ocrResults.map((r) => ({
+    fileName: r.fileName,
+    ok: r.ok,
+    note: r.ok ? undefined : r.error,
+  }));
 
   // Order matches the order files were selected in the picker -- the only
   // ordering signal available without also building an "extract this

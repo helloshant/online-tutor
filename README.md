@@ -179,11 +179,21 @@ Seven containers:
   a run id to poll; every low-confidence or ambiguous judgment anywhere in the pipeline lands in a
   human review queue rather than a dead end. No admin UI yet — see the service's own README section
   below for its current scope and what's still a follow-up.
+- **`services/vision-ocr`** owns image preprocessing and OCR for a scanned/photographed paper —
+  Image Processing (auto-rotate via EXIF, resize, contrast normalization, via `sharp`) followed by
+  Image-to-Text/Vision (Google Document AI, chosen for its strong Devanagari/Indic-script support).
+  The only caller today is `/admin/archetype-miner/ocr` (see that section below for what it's for
+  and why it stays a plain review-and-copy utility rather than feeding a run automatically). Kept
+  as its own service, separate from both the web app and `services/archetype-miner`, so the
+  Document AI credentials and the `sharp` native dependency live in exactly one place — student chat
+  photo uploads deliberately stay on Claude/Azure's direct vision reading (see that service's own
+  code comments) rather than routing through this, since nothing about that path has actually shown
+  the OCR-specific gap this service exists to close.
 
 This split means the orchestration/prompt/pipeline layer, the usage-accounting layer, the payment
-layer, the broadcast-audience/test-scoring layer, and the archetype-mining layer can each be
-redeployed, scaled, or replaced (e.g. swapping in a real observability backend, or a different
-payment gateway, later) without touching the web app or each other.
+layer, the broadcast-audience/test-scoring layer, the archetype-mining layer, and the vision-OCR
+layer can each be redeployed, scaled, or replaced (e.g. swapping in a real observability backend, or
+a different payment gateway, later) without touching the web app or each other.
 
 ## How it works
 
@@ -2025,13 +2035,14 @@ own). Built for the case where neither the PDF path (Anthropic's native reading)
 (plain `mammoth` text extraction) can produce usable text — concretely, a scanned paper whose
 `.docx` conversion mangled its own Devanagari content beyond recovery (see
 `admin/archetype-miner/actions.ts`'s corruption-detection comment for the real case this came out
-of). Uses Google Document AI (`src/lib/documentAiClient.ts`), chosen specifically for its strong
-Devanagari/Indic-script OCR support, over a batch of uploaded images/PDFs (up to 200 files, run
-with bounded concurrency rather than one huge sequential loop or an unbounded parallel burst) —
-an admin reviews the extracted text there and pastes it into the submit-run form's raw-text field
+of). Delegates the actual image preprocessing + OCR to `services/vision-ocr` (see that service's
+own README section above) — chosen specifically for Google Document AI's strong Devanagari/Indic-
+script OCR support, over a batch of uploaded images/PDFs (up to 200 files, the service runs them
+with bounded concurrency rather than one huge sequential loop or an unbounded parallel burst) — an
+admin reviews the extracted text there and pastes it into the submit-run form's raw-text field
 themselves; nothing here writes to `archetype_pipeline_runs` or any other archetype-miner table
-directly. Requires its own Google Cloud project/Document AI processor/service account, documented
-in `.env.example`.
+directly. Requires `services/vision-ocr` to be configured with its own Google Cloud project/
+Document AI processor/service account, documented in that service's own `.env.example`.
 
 **Current scope, deliberately** (see the service's own code comments for the reasoning behind each):
 - **No admin UI yet.** This PR is the microservice itself, per what was asked — submit/poll runs and
@@ -2063,6 +2074,7 @@ npm install
 cd services/orchestrator && npm install && cd ../..
 cd services/observability && npm install && cd ../..
 cd services/archetype-miner && npm install && cd ../..
+cd services/vision-ocr && npm install && cd ../..
 ```
 
 (Not needed if you're only going to run via Docker Compose — the images install their own
@@ -2092,7 +2104,7 @@ update public.profiles set role = 'admin' where id = '<your-auth-user-id>';
 
 ### 4. Configure environment variables
 
-There are **six** env files — one per service:
+There are **seven** env files — one per service:
 
 ```bash
 cp .env.example .env.local
@@ -2101,6 +2113,7 @@ cp services/observability/.env.example services/observability/.env.local
 cp services/payment/.env.example services/payment/.env.local
 cp services/broadcast/.env.example services/broadcast/.env.local
 cp services/archetype-miner/.env.example services/archetype-miner/.env.local
+cp services/vision-ocr/.env.example services/vision-ocr/.env.local
 ```
 
 **Root `.env.local`** (the web app):
@@ -2121,6 +2134,10 @@ cp services/archetype-miner/.env.example services/archetype-miner/.env.local
 - `BROADCAST_SHARED_SECRET` — any random string; must exactly match the same variable in
   `services/broadcast/.env.local`. Same "refuses to start without it" posture as
   `PAYMENT_SHARED_SECRET`.
+- `VISION_OCR_URL` — leave as `http://vision-ocr:4500` for Docker Compose; use
+  `http://localhost:4500` if running the vision-ocr service directly with `npm run dev` instead.
+- `VISION_OCR_SHARED_SECRET` — any random string; must exactly match the same variable in
+  `services/vision-ocr/.env.local`.
 
 **`services/orchestrator/.env.local`** (the orchestration service):
 
@@ -2179,10 +2196,10 @@ cp services/archetype-miner/.env.example services/archetype-miner/.env.local
   service-role key is required since none of those tables has a client-facing RLS policy.
 
 **`services/archetype-miner/.env.local`** (the question-archetype mining pipeline — see its own
-README section above): not called by `web` yet, so nothing to add to the root `.env.local` for it.
+README section above):
 
-- `ARCHETYPE_MINER_SHARED_SECRET` — any random string; only matters once something calls this
-  service (there's no counterpart variable in the root env file yet — see above).
+- `ARCHETYPE_MINER_SHARED_SECRET` — same value as `ARCHETYPE_MINER_SHARED_SECRET` in the root
+  `.env.local`.
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — same Supabase project again. Used to read/write the
   `archetype_*` tables (`supabase/migrations/0038_archetype_miner.sql`); the service-role key is
   required since none of those tables has a client-facing insert/update policy (except
@@ -2195,9 +2212,18 @@ README section above): not called by `web` yet, so nothing to add to the root `.
   at all — without it, every question in a run ends up in the review queue instead of being
   clustered.
 
+**`services/vision-ocr/.env.local`** (image preprocessing + OCR — see its own README section
+above):
+
+- `VISION_OCR_SHARED_SECRET` — same value as above.
+- `GOOGLE_DOCUMENT_AI_PROJECT_ID` / `GOOGLE_DOCUMENT_AI_LOCATION` / `GOOGLE_DOCUMENT_AI_PROCESSOR_ID`
+  / `GOOGLE_DOCUMENT_AI_CLIENT_EMAIL` / `GOOGLE_DOCUMENT_AI_PRIVATE_KEY` — from a Google Cloud
+  project with the Document AI API enabled and a "Document OCR" processor created; see the inline
+  comments in `services/vision-ocr/.env.example` for the exact Cloud Console steps.
+
 ### 5. Run it
 
-**Option A — Docker Compose** (builds and runs all seven containers, including Redis):
+**Option A — Docker Compose** (builds and runs all eight containers, including Redis):
 
 ```bash
 docker compose --env-file .env.local up --build

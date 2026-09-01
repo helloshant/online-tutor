@@ -19,12 +19,14 @@ services:
       - .env.local
     environment:
       # Always resolve to the compose-network hostname here, regardless of
-      # whatever ORCHESTRATOR_URL/PAYMENT_URL/BROADCAST_URL/ARCHETYPE_MINER_URL
-      # a local (non-Docker) .env.local might have for `npm run dev`.
+      # whatever ORCHESTRATOR_URL/PAYMENT_URL/BROADCAST_URL/ARCHETYPE_MINER_URL/
+      # VISION_OCR_URL a local (non-Docker) .env.local might have for
+      # `npm run dev`.
       ORCHESTRATOR_URL: http://orchestrator:4000
       PAYMENT_URL: http://payment:4200
       BROADCAST_URL: http://broadcast:4300
       ARCHETYPE_MINER_URL: http://archetype-miner:4400
+      VISION_OCR_URL: http://vision-ocr:4500
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -33,6 +35,8 @@ services:
       broadcast:
         condition: service_healthy
       archetype-miner:
+        condition: service_healthy
+      vision-ocr:
         condition: service_healthy
     restart: unless-stopped
 
@@ -155,6 +159,30 @@ services:
     # the same way chapter_documents/broadcasts already do.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4400/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  vision-ocr:
+    build:
+      context: ./services/vision-ocr
+      dockerfile: Dockerfile
+    env_file:
+      - ./services/vision-ocr/.env.local
+    environment:
+      PORT: 4500
+    # Deliberately no `ports:` mapping -- same internal-only pattern as the
+    # other backend services. Owns the Image Processing (sharp) and
+    # Image-to-Text/Vision (Google Document AI) stages for a scanned/
+    # photographed paper -- only `web`'s /admin/archetype-miner/ocr page
+    # calls this today, kept as its own service (rather than folded into
+    # the web app or the archetype-miner service) so the Document AI
+    # credentials and the sharp native dependency live in exactly one
+    # place, mirroring archetype-miner's own isolation reasoning.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4500/health"]
       interval: 10s
       timeout: 3s
       retries: 5
