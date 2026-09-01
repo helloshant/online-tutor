@@ -69,6 +69,12 @@ export async function runDocumentAiOcr(params: {
     const [response] = await client.processDocument({
       name,
       rawDocument: { content: buffer, mimeType },
+      // Document AI's synchronous processDocument caps a PDF at 15 pages
+      // in the default mode, 30 in "imageless" mode (which just omits
+      // page images from the response) -- this service only ever reads
+      // response.document.text, never the page images, so there's no
+      // downside to always requesting the higher cap.
+      imagelessMode: true,
     });
     const text = response.document?.text ?? "";
     if (!text.trim()) {
