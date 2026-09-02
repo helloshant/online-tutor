@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "./supabaseClient.js";
-import { runSegmenter } from "./stage0Segmenter.js";
+import { runSegmenter, type SegmenterResult } from "./stage0Segmenter.js";
 import { runAnalyzer } from "./stage1Analyzer.js";
 import { clusterSignatures } from "./clustering.js";
 import { runMiner } from "./stage2Miner.js";
@@ -8,10 +8,13 @@ import { lookupStoredTaxonomy } from "./curriculumTaxonomy.js";
 import { lowConfidenceThreshold, toInsertRow, type ReviewQueueCandidate } from "./reviewQueue.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import { LlmJsonParseError } from "./jsonCompletion.js";
+import { splitPaperText } from "./paperSplitter.js";
+import type { PdfAttachment } from "./llmTypes.js";
 import type {
   Archetype,
   ClusterInput,
   EducationContext,
+  PaperMeta,
   PipelineRunStats,
   PipelineStatus,
   PreSegmentedInput,
@@ -65,6 +68,87 @@ async function mergeStats(runId: string, patch: Partial<PipelineRunStats>) {
   await updateRun(runId, { stats: { ...current, ...patch } });
 }
 
+const MAX_SPLIT_DEPTH = 2;
+
+// Wraps runSegmenter with a reactive auto-split retry: on a truncation
+// failure (LlmJsonParseError -- see jsonCompletion.ts's finishReason
+// check, which catches a syntactically-valid-but-silently-incomplete
+// response, not just an invalid-JSON one), splits the raw text at the
+// safest available boundary (see paperSplitter.ts) and retries Stage 0 on
+// each piece separately, merging whatever succeeds. Only applies to
+// raw_text papers -- a PDF attachment is read directly by the model
+// page-by-page (see anthropicProvider.ts) and can't be text-split this
+// way, so a PDF paper's truncation failure surfaces immediately, same as
+// before this existed.
+//
+// Depth-limited (paper -> sections -> questions, no further) rather than
+// splitting forever: a chunk that still won't fit after being split down
+// to individual top-level questions is a genuinely oversized single
+// question, or text with no recognizable boundary at all -- neither of
+// which more splitting can fix.
+async function runSegmenterWithAutoSplit(
+  baseParams: { paper: PaperMeta; educationContext: EducationContext; provider?: LlmProvider },
+  rawText: string | undefined,
+  pdf: PdfAttachment | undefined,
+  paperLabel: string,
+  depth = 0
+): Promise<SegmenterResult> {
+  try {
+    return await runSegmenter({ ...baseParams, rawText, pdf });
+  } catch (err) {
+    if (!(err instanceof LlmJsonParseError) || pdf || !rawText || depth >= MAX_SPLIT_DEPTH) {
+      throw err;
+    }
+
+    const { chunks, strategy } = splitPaperText(rawText);
+    if (chunks.length < 2) {
+      throw err;
+    }
+
+    console.warn(
+      `${paperLabel} hit MAX_TOKENS -- auto-splitting into ${chunks.length} chunk(s) by ${strategy} boundaries ` +
+        `(depth ${depth + 1}/${MAX_SPLIT_DEPTH}) and retrying each separately.`
+    );
+
+    const merged: SegmenterResult = {
+      questions: [],
+      droppedCount: 0,
+      model: "",
+      usage: { promptTokens: 0, completionTokens: 0 },
+    };
+    let anySucceeded = false;
+
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        const chunkResult = await runSegmenterWithAutoSplit(
+          baseParams,
+          chunks[i],
+          undefined,
+          `${paperLabel} [chunk ${i + 1}/${chunks.length}]`,
+          depth + 1
+        );
+        merged.questions.push(...chunkResult.questions);
+        merged.droppedCount += chunkResult.droppedCount;
+        merged.model = chunkResult.model || merged.model;
+        merged.usage.promptTokens += chunkResult.usage.promptTokens;
+        merged.usage.completionTokens += chunkResult.usage.completionTokens;
+        anySucceeded = true;
+      } catch (chunkErr) {
+        // Fail open per chunk, same posture as everywhere else in this
+        // pipeline -- one chunk still being too large (or itself hitting
+        // the depth limit) shouldn't lose every other chunk that DID
+        // segment successfully.
+        console.error(`${paperLabel} [chunk ${i + 1}/${chunks.length}] failed even after auto-splitting:`, chunkErr);
+      }
+    }
+
+    if (!anySucceeded) {
+      throw err;
+    }
+    return merged;
+  }
+}
+
 // Each runSegmenter() call is independent -- one paper, no visibility into
 // any sibling paper submitted in the SAME run (a multi-file batch, see
 // admin/archetype-miner/actions.ts) -- and papers in one batch commonly
@@ -87,9 +171,29 @@ function dedupeAcrossPapers(
   paperIndex: number
 ): { deduped: SegmentedQuestion[]; renamedCount: number } {
   const idMap = new Map<string, string>();
+  // Checked against a running `seen` set (seeded from every earlier
+  // paper's ids), not just usedQuestionIds directly, so a collision
+  // WITHIN this same list -- e.g. two auto-split chunks of the same
+  // paper (see paperSplitter.ts/runSegmenterWithAutoSplit) independently
+  // producing the same question_id, since neither chunk's Stage 0 call
+  // has any visibility into the other's output -- gets caught too, not
+  // just a collision against a different paper. Two full passes: first
+  // decide every rename, then apply them all together, so a child's
+  // parent_question_id resolves correctly regardless of whether its
+  // parent happens to come before or after it in the array.
+  const seen = new Set(usedQuestionIds);
+  let dupCounter = 0;
   for (const q of questions) {
-    if (usedQuestionIds.has(q.question_id)) {
-      idMap.set(q.question_id, `${q.question_id}-paper${paperIndex}`);
+    if (seen.has(q.question_id)) {
+      let candidate = `${q.question_id}-paper${paperIndex}`;
+      while (seen.has(candidate)) {
+        dupCounter++;
+        candidate = `${q.question_id}-paper${paperIndex}-dup${dupCounter}`;
+      }
+      idMap.set(q.question_id, candidate);
+      seen.add(candidate);
+    } else {
+      seen.add(q.question_id);
     }
   }
   const deduped = questions.map((q) => ({
@@ -226,13 +330,12 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
         // the paper level now that one run can carry several papers.
         let result: Awaited<ReturnType<typeof runSegmenter>>;
         try {
-          result = await runSegmenter({
-            rawText: paperInput.raw_text,
-            pdf: paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
-            paper: paperInput.paper,
-            educationContext,
-            provider: llmProvider,
-          });
+          result = await runSegmenterWithAutoSplit(
+            { paper: paperInput.paper, educationContext, provider: llmProvider },
+            paperInput.raw_text,
+            paperInput.pdf_base64 ? { mediaType: "application/pdf", base64: paperInput.pdf_base64 } : undefined,
+            `Paper ${paperIndex} (${paperLabel})`
+          );
         } catch (err) {
           papersFailed++;
           console.error(`Stage 0 (Segmenter) failed for paper ${paperIndex} (${paperLabel}) of run ${runId}:`, err);
@@ -241,9 +344,12 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
               `Paper ${paperIndex} (${paperLabel}) looks like it hit MAX_TOKENS -- the model's response was cut ` +
                 "off before it could finish, either as invalid JSON (an unterminated string/array) or as a " +
                 "syntactically complete but suspiciously short response (see jsonCompletion.ts's own " +
-                "finishReason check). If this paper is unusually long, splitting it into smaller sections and " +
-                "submitting them as separate files in one multi-file batch (see admin/archetype-miner/actions.ts) " +
-                "usually resolves this."
+                "finishReason check). This is reported even though the pipeline already tried auto-splitting the " +
+                "paper at section/question boundaries and retrying each piece (see paperSplitter.ts) -- that " +
+                "failed too, which usually means either a single question within it is unusually large on its " +
+                "own, or the paper has no boundary markers this can recognize (no SECTION/खण्ड headers, no plain " +
+                "numbered questions). Splitting it by hand into smaller sections and submitting them as separate " +
+                "files in one multi-file batch (see admin/archetype-miner/actions.ts) is the next thing to try."
             );
           }
           continue;
