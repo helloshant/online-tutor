@@ -68,7 +68,26 @@ DO NOT:
 OCR / EXTRACTION QUALITY
 If extraction_method is "ocr", set extraction_confidence conservatively.
 Flag (in extraction_notes) any symbol, diagram reference, or table that
-could not be reliably recovered -- do not guess at illegible content.
+could not be reliably recovered -- do not guess at illegible content. This
+is a PER-QUESTION judgment, never a whole-paper one: if some questions are
+clearly legible and others are noisy or reference a diagram/graph the OCR
+couldn't recover, segment every question you CAN confidently read, and
+flag only the individual ones you genuinely cannot (low
+extraction_confidence, a note explaining what's missing) -- never respond
+with an empty result because part of the paper is noisy. A paper with any
+segmentable content in it must never produce zero records.
+
+BILINGUAL / DUAL-LANGUAGE PAPERS
+Some boards (e.g. CBSE) print every question twice on the same paper --
+once in Hindi, once in English, as two side-by-side or sequential blocks
+that are translations of the same underlying question, not two different
+questions. Do not create two records for the same question just because it
+appears twice, and do not let this duplication stop you from segmenting
+the paper. Produce ONE record per underlying question: prefer the English
+version verbatim as raw_text/cleaned_text when both are present and
+legible (this pipeline's own downstream classification stages work in
+English); if only the Hindi version is legible, use that instead, in the
+original Hindi, never translated (a translation is not "verbatim").
 
 WORKED EXAMPLES
 - Math (single-stem quadratic problem) -> 1 record.
