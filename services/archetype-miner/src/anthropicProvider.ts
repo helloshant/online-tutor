@@ -58,5 +58,9 @@ export async function getAnthropicCompletion(params: {
       promptTokens: response.usage.input_tokens,
       completionTokens: response.usage.output_tokens,
     },
+    // "max_tokens" here means the response was truncated by maxTokens --
+    // see LlmReply.finishReason's own comment for why this matters even
+    // when the truncated text still happens to parse as valid JSON.
+    finishReason: response.stop_reason,
   };
 }
