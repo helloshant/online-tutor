@@ -147,3 +147,44 @@ export function splitPaperText(text: string): SplitResult {
 
   return { chunks: [text], strategy: "none" };
 }
+
+// A second, harder-to-detect failure mode than MAX_TOKENS truncation:
+// confirmed directly against a real 33-question paper that came back with
+// a clean, complete, non-empty response containing only 5 questions --
+// finish_reason was NOT "length"/"max_tokens" (nothing for
+// jsonCompletion.ts's own check to catch), the model had simply decided,
+// on its own, that it was done after Section A's first few questions. A
+// long, repetitive, verbatim-heavy transcription task giving up partway
+// through and closing its output cleanly is a known model behavior with
+// no reliable API-level signal -- there is no finish_reason for "I got
+// bored," only for "I ran out of budget."
+//
+// CBSE-style papers give us one real signal anyway: they state their own
+// total question count directly in the general instructions, in both
+// languages. This is a best-effort, board-specific heuristic, not a
+// guarantee -- a paper that doesn't state its own count (or phrases it
+// differently) just means this returns null and pipelineRunner.ts falls
+// back to relying on finishReason alone, same as before this existed.
+const DECLARED_COUNT_PATTERNS = [
+  /question paper contains\s+(\d{1,3})\s+questions/i,
+  /प्रश्न[\s-]*पत्र में\s+(\d{1,3})\s+प्रश्न/u,
+];
+
+export function extractDeclaredQuestionCount(text: string): number | null {
+  for (const pattern of DECLARED_COUNT_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
+// Below this fraction of a declared count, treat the result as suspect
+// rather than trusting a clean-looking response -- deliberately lenient
+// (some legitimately illegible/diagram-only questions getting dropped is
+// normal and NOT what this is for) so this only fires on the kind of
+// dramatic shortfall actually observed (5 of 33 -- ~15%), not on ordinary,
+// expected per-question data-quality loss.
+export const COMPLETENESS_THRESHOLD = 0.6;
