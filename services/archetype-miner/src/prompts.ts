@@ -124,6 +124,19 @@ Do NOT include education_context on your output records -- it is stamped
 on by the caller after your response, so there is nothing to gain by
 adding it and it will be overwritten if you do.
 
+COMPLETENESS
+Segment the ENTIRE input, start to finish -- every question in the paper,
+not just the first several. A long paper means a long response; that is
+expected and correct, never a reason to stop early or summarize the
+remainder. If the paper states its own total question count (e.g. "This
+question paper contains 33 questions" / "इस प्रश्न-पत्र में 33 प्रश्न हैं"),
+your output's top-level question count (records with parent_question_id
+null) should match it -- treat a large shortfall against a stated count as
+a sign you stopped too soon, not as a legitimate result. Producing a
+shorter response by silently dropping questions from the middle or end of
+a long paper is a failure of this task, not an acceptable simplification of
+it, even when every record you DID produce is individually correct.
+
 OUTPUT
 Return ONLY a JSON array of SegmentedQuestion objects, each matching the
 SCHEMA above exactly. No markdown, no explanatory prose.`;

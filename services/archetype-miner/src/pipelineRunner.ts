@@ -8,7 +8,7 @@ import { lookupStoredTaxonomy } from "./curriculumTaxonomy.js";
 import { lowConfidenceThreshold, toInsertRow, type ReviewQueueCandidate } from "./reviewQueue.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import { LlmJsonParseError } from "./jsonCompletion.js";
-import { splitPaperText } from "./paperSplitter.js";
+import { COMPLETENESS_THRESHOLD, extractDeclaredQuestionCount, splitPaperText } from "./paperSplitter.js";
 import type { PdfAttachment } from "./llmTypes.js";
 import type {
   Archetype,
@@ -70,22 +70,49 @@ async function mergeStats(runId: string, patch: Partial<PipelineRunStats>) {
 
 const MAX_SPLIT_DEPTH = 2;
 
-// Wraps runSegmenter with a reactive auto-split retry: on a truncation
-// failure (LlmJsonParseError -- see jsonCompletion.ts's finishReason
-// check, which catches a syntactically-valid-but-silently-incomplete
-// response, not just an invalid-JSON one), splits the raw text at the
-// safest available boundary (see paperSplitter.ts) and retries Stage 0 on
-// each piece separately, merging whatever succeeds. Only applies to
-// raw_text papers -- a PDF attachment is read directly by the model
-// page-by-page (see anthropicProvider.ts) and can't be text-split this
-// way, so a PDF paper's truncation failure surfaces immediately, same as
-// before this existed.
+function topLevelCount(questions: SegmentedQuestion[]): number {
+  return questions.filter((q) => !q.parent_question_id).length;
+}
+
+// A CLEAN, non-throwing result can still be wrong -- confirmed directly
+// against a real 33-question paper that came back with a complete,
+// non-empty response covering only 5 questions, finish_reason NOT
+// "length"/"max_tokens" (nothing for jsonCompletion.ts's own check to
+// catch). The model had simply decided, on its own, that it was done.
+// extractDeclaredQuestionCount's own comment covers why this heuristic
+// exists and its limits; only fires on the kind of dramatic shortfall
+// actually observed, never on ordinary per-question data-quality loss.
+function looksIncomplete(rawText: string | undefined, questions: SegmentedQuestion[]): boolean {
+  if (!rawText) return false;
+  const declared = extractDeclaredQuestionCount(rawText);
+  if (declared == null) return false;
+  return topLevelCount(questions) < declared * COMPLETENESS_THRESHOLD;
+}
+
+// Wraps runSegmenter with a reactive auto-split retry, triggered by EITHER
+// of two independent signals that a response can't be trusted as a
+// genuine complete answer: a truncation failure (LlmJsonParseError -- see
+// jsonCompletion.ts's finishReason check, which catches a syntactically-
+// valid-but-silently-incomplete response, not just an invalid-JSON one),
+// or a clean success that still looks incomplete against the paper's own
+// stated question count (see looksIncomplete above). Either way, splits
+// the raw text at the safest available boundary (see paperSplitter.ts)
+// and retries Stage 0 on each piece separately, merging whatever
+// succeeds. Only applies to raw_text papers -- a PDF attachment is read
+// directly by the model page-by-page (see anthropicProvider.ts) and can't
+// be text-split this way, so a PDF paper's truncation failure surfaces
+// immediately, same as before this existed (and never looks "incomplete"
+// by the second signal either, since that needs raw text to check against).
 //
 // Depth-limited (paper -> sections -> questions, no further) rather than
-// splitting forever: a chunk that still won't fit after being split down
-// to individual top-level questions is a genuinely oversized single
-// question, or text with no recognizable boundary at all -- neither of
-// which more splitting can fix.
+// splitting forever: a chunk that still won't fit/still looks incomplete
+// after being split down to individual top-level questions is a
+// genuinely oversized single question, or text with no recognizable
+// boundary at all -- neither of which more splitting can fix. At every
+// point where splitting isn't possible, this returns whatever partial
+// result IS available rather than discarding it outright (only a genuine
+// exception with no usable result at all propagates as a failure) --
+// fail open, same posture as everywhere else in this pipeline.
 async function runSegmenterWithAutoSplit(
   baseParams: { paper: PaperMeta; educationContext: EducationContext; provider?: LlmProvider },
   rawText: string | undefined,
@@ -93,60 +120,91 @@ async function runSegmenterWithAutoSplit(
   paperLabel: string,
   depth = 0
 ): Promise<SegmenterResult> {
+  let result: SegmenterResult | undefined;
+  let caughtErr: unknown;
   try {
-    return await runSegmenter({ ...baseParams, rawText, pdf });
+    result = await runSegmenter({ ...baseParams, rawText, pdf });
   } catch (err) {
-    if (!(err instanceof LlmJsonParseError) || pdf || !rawText || depth >= MAX_SPLIT_DEPTH) {
-      throw err;
-    }
-
-    const { chunks, strategy } = splitPaperText(rawText);
-    if (chunks.length < 2) {
-      throw err;
-    }
-
-    console.warn(
-      `${paperLabel} hit MAX_TOKENS -- auto-splitting into ${chunks.length} chunk(s) by ${strategy} boundaries ` +
-        `(depth ${depth + 1}/${MAX_SPLIT_DEPTH}) and retrying each separately.`
-    );
-
-    const merged: SegmenterResult = {
-      questions: [],
-      droppedCount: 0,
-      model: "",
-      usage: { promptTokens: 0, completionTokens: 0 },
-    };
-    let anySucceeded = false;
-
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        const chunkResult = await runSegmenterWithAutoSplit(
-          baseParams,
-          chunks[i],
-          undefined,
-          `${paperLabel} [chunk ${i + 1}/${chunks.length}]`,
-          depth + 1
-        );
-        merged.questions.push(...chunkResult.questions);
-        merged.droppedCount += chunkResult.droppedCount;
-        merged.model = chunkResult.model || merged.model;
-        merged.usage.promptTokens += chunkResult.usage.promptTokens;
-        merged.usage.completionTokens += chunkResult.usage.completionTokens;
-        anySucceeded = true;
-      } catch (chunkErr) {
-        // Fail open per chunk, same posture as everywhere else in this
-        // pipeline -- one chunk still being too large (or itself hitting
-        // the depth limit) shouldn't lose every other chunk that DID
-        // segment successfully.
-        console.error(`${paperLabel} [chunk ${i + 1}/${chunks.length}] failed even after auto-splitting:`, chunkErr);
-      }
-    }
-
-    if (!anySucceeded) {
-      throw err;
-    }
-    return merged;
+    caughtErr = err;
   }
+
+  const incomplete = result ? looksIncomplete(rawText, result.questions) : false;
+  if (result && !incomplete) {
+    return result;
+  }
+  // A non-truncation failure (auth error, network, an actually-malformed
+  // response after retries) is never something splitting can fix --
+  // propagate it immediately rather than attempting to split.
+  if (caughtErr && !(caughtErr instanceof LlmJsonParseError)) {
+    throw caughtErr;
+  }
+
+  const canSplit = !pdf && Boolean(rawText) && depth < MAX_SPLIT_DEPTH;
+  const { chunks, strategy } = canSplit ? splitPaperText(rawText as string) : { chunks: [], strategy: "none" as const };
+  if (!canSplit || chunks.length < 2) {
+    if (caughtErr) throw caughtErr;
+    // incomplete === true is the only way to reach here with no
+    // caughtErr, which requires `result` to be set (see looksIncomplete).
+    console.warn(
+      `${paperLabel} looks incomplete (far fewer questions than the paper's own stated count) but no further ` +
+        "splitting is possible here (no recognizable boundary, or the depth limit was reached) -- returning the " +
+        `${topLevelCount((result as SegmenterResult).questions)} question(s) segmented so far rather than ` +
+        "discarding them."
+    );
+    return result as SegmenterResult;
+  }
+
+  console.warn(
+    caughtErr
+      ? `${paperLabel} hit MAX_TOKENS -- auto-splitting into ${chunks.length} chunk(s) by ${strategy} boundaries ` +
+          `(depth ${depth + 1}/${MAX_SPLIT_DEPTH}) and retrying each separately.`
+      : `${paperLabel} looks incomplete (far fewer questions than the paper's own stated count, with no ` +
+          `truncation signal) -- auto-splitting into ${chunks.length} chunk(s) by ${strategy} boundaries ` +
+          `(depth ${depth + 1}/${MAX_SPLIT_DEPTH}) and retrying each separately.`
+  );
+
+  const merged: SegmenterResult = {
+    questions: [],
+    droppedCount: 0,
+    model: "",
+    usage: { promptTokens: 0, completionTokens: 0 },
+  };
+  let anySucceeded = false;
+
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      const chunkResult = await runSegmenterWithAutoSplit(
+        baseParams,
+        chunks[i],
+        undefined,
+        `${paperLabel} [chunk ${i + 1}/${chunks.length}]`,
+        depth + 1
+      );
+      merged.questions.push(...chunkResult.questions);
+      merged.droppedCount += chunkResult.droppedCount;
+      merged.model = chunkResult.model || merged.model;
+      merged.usage.promptTokens += chunkResult.usage.promptTokens;
+      merged.usage.completionTokens += chunkResult.usage.completionTokens;
+      anySucceeded = true;
+    } catch (chunkErr) {
+      // Fail open per chunk, same posture as everywhere else in this
+      // pipeline -- one chunk still being too large (or itself hitting
+      // the depth limit) shouldn't lose every other chunk that DID
+      // segment successfully.
+      console.error(`${paperLabel} [chunk ${i + 1}/${chunks.length}] failed even after auto-splitting:`, chunkErr);
+    }
+  }
+
+  if (!anySucceeded) {
+    if (caughtErr) throw caughtErr;
+    console.warn(
+      `${paperLabel} looks incomplete and every auto-split chunk failed -- returning the ` +
+        `${topLevelCount((result as SegmenterResult).questions)} question(s) segmented before splitting was ` +
+        "attempted, rather than discarding them."
+    );
+    return result as SegmenterResult;
+  }
+  return merged;
 }
 
 // Each runSegmenter() call is independent -- one paper, no visibility into
