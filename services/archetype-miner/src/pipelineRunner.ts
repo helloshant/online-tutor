@@ -170,6 +170,16 @@ async function runSegmenterWithAutoSplit(
     usage: { promptTokens: 0, completionTokens: 0 },
   };
   let anySucceeded = false;
+  // Grows as each chunk is merged in -- see renameCollidingIds' own
+  // contract comment for why this MUST happen incrementally, one chunk's
+  // own (internally-unique) batch at a time, rather than concatenating
+  // every chunk's questions first and deduplicating the flattened result
+  // afterward (that's exactly the shape that let a bilingual pairing
+  // split across two chunks -- Hindi and English halves of the same
+  // question, independently producing the identical id -- collide again
+  // after "renaming," since a plain id-string map can't hold two
+  // different replacements for one original id).
+  const mergedQuestionIds = new Set<string>();
 
   for (let i = 0; i < chunks.length; i++) {
     try {
@@ -180,7 +190,15 @@ async function runSegmenterWithAutoSplit(
         `${paperLabel} [chunk ${i + 1}/${chunks.length}]`,
         depth + 1
       );
-      merged.questions.push(...chunkResult.questions);
+      const { renamed, renamedCount } = renameCollidingIds(chunkResult.questions, mergedQuestionIds, `chunk${i + 1}`);
+      if (renamedCount > 0) {
+        console.warn(
+          `${paperLabel} [chunk ${i + 1}/${chunks.length}]: renamed ${renamedCount} question_id(s) colliding ` +
+            "with an id an earlier chunk of this same paper already produced (most commonly a bilingual pairing " +
+            "split across chunks -- see paperSplitter.ts's own note on this trade-off)."
+        );
+      }
+      merged.questions.push(...renamed);
       merged.droppedCount += chunkResult.droppedCount;
       merged.model = chunkResult.model || merged.model;
       merged.usage.promptTokens += chunkResult.usage.promptTokens;
@@ -216,37 +234,47 @@ async function runSegmenterWithAutoSplit(
 // from its own perspective, they look like the same paper. question_id is
 // only a primary key WITHIN one run (see
 // 0041_archetype_miner_run_scoped_ids.sql), so a collision here is a
-// same-run, cross-paper collision, not a cross-run one -- rename the
-// colliding record (and, since a rename must not silently break a
-// parent_question_id link, every record in the SAME paper's own batch
-// that pointed at the original id) with a paper-index suffix that's
-// unique by construction (each paper index in one run is only ever used
-// once), rather than letting the whole paper's insert fail the way an
-// unresolved collision did before this existed.
-function dedupeAcrossPapers(
+// same-run collision, not a cross-run one -- rename the colliding record
+// (and, since a rename must not silently break a parent_question_id link,
+// every record in the SAME batch that pointed at the original id) with a
+// suffix that's unique by construction, rather than letting the whole
+// batch's insert fail the way an unresolved collision did before this
+// existed.
+//
+// IMPORTANT CONTRACT: `questions` must itself be internally unique --
+// i.e. this batch is the direct, not-yet-merged output of ONE Stage 0
+// call (or an already-deduplicated recursive merge, see
+// runSegmenterWithAutoSplit), never a pre-flattened combination of
+// several independent batches. A single id-string -> id-string map (what
+// this uses) can only record ONE replacement per original id; call this
+// on an already-flattened list where the SAME original id appears twice
+// (confirmed directly: Hindi and English halves of a bilingual paper,
+// split into different auto-split chunks, independently generating the
+// identical id "CBSE-CHEM-2026-Q1") and BOTH occurrences silently resolve
+// to the SAME renamed id in the second pass below, reproducing the exact
+// collision this exists to prevent. The caller's job is calling this
+// once per incoming batch, incrementally, against a `seen` set that only
+// grows -- see runSegmenterWithAutoSplit's chunk-merge loop and this
+// function's own outer call site for the two batch boundaries that
+// actually hold that contract (one Stage 0 call's own output; one real
+// paper's fully-merged output).
+function renameCollidingIds(
   questions: SegmentedQuestion[],
-  usedQuestionIds: Set<string>,
-  paperIndex: number
-): { deduped: SegmentedQuestion[]; renamedCount: number } {
+  seen: Set<string>,
+  suffix: string
+): { renamed: SegmentedQuestion[]; renamedCount: number } {
   const idMap = new Map<string, string>();
-  // Checked against a running `seen` set (seeded from every earlier
-  // paper's ids), not just usedQuestionIds directly, so a collision
-  // WITHIN this same list -- e.g. two auto-split chunks of the same
-  // paper (see paperSplitter.ts/runSegmenterWithAutoSplit) independently
-  // producing the same question_id, since neither chunk's Stage 0 call
-  // has any visibility into the other's output -- gets caught too, not
-  // just a collision against a different paper. Two full passes: first
-  // decide every rename, then apply them all together, so a child's
-  // parent_question_id resolves correctly regardless of whether its
-  // parent happens to come before or after it in the array.
-  const seen = new Set(usedQuestionIds);
+  // Two full passes: first decide every rename, then apply them all
+  // together, so a child's parent_question_id resolves correctly
+  // regardless of whether its parent happens to come before or after it
+  // in the array.
   let dupCounter = 0;
   for (const q of questions) {
     if (seen.has(q.question_id)) {
-      let candidate = `${q.question_id}-paper${paperIndex}`;
+      let candidate = `${q.question_id}-${suffix}`;
       while (seen.has(candidate)) {
         dupCounter++;
-        candidate = `${q.question_id}-paper${paperIndex}-dup${dupCounter}`;
+        candidate = `${q.question_id}-${suffix}-dup${dupCounter}`;
       }
       idMap.set(q.question_id, candidate);
       seen.add(candidate);
@@ -254,12 +282,12 @@ function dedupeAcrossPapers(
       seen.add(q.question_id);
     }
   }
-  const deduped = questions.map((q) => ({
+  const renamed = questions.map((q) => ({
     ...q,
     question_id: idMap.get(q.question_id) ?? q.question_id,
     parent_question_id: q.parent_question_id ? (idMap.get(q.parent_question_id) ?? q.parent_question_id) : q.parent_question_id,
   }));
-  return { deduped, renamedCount: idMap.size };
+  return { renamed, renamedCount: idMap.size };
 }
 
 // A record referenced as another record's own parent_question_id is, by
@@ -413,7 +441,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
           continue;
         }
 
-        const { deduped, renamedCount } = dedupeAcrossPapers(result.questions, usedQuestionIds, paperIndex);
+        const { renamed: deduped, renamedCount } = renameCollidingIds(result.questions, usedQuestionIds, `paper${paperIndex}`);
         if (renamedCount > 0) {
           console.warn(
             `Renamed ${renamedCount} question_id(s) in paper ${paperIndex} of run ${runId} to avoid colliding ` +
