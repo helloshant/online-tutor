@@ -25,6 +25,20 @@ export class LlmJsonParseError extends Error {
 
 const MAX_ATTEMPTS = 3;
 
+// Anthropic's own value ("max_tokens") and Azure OpenAI's own value
+// ("length") for "the response was cut off by the token budget, not
+// because the model finished." A truncated response can still be
+// perfectly valid JSON -- a model closing out an array/object early to
+// land under its token budget, rather than getting cut off mid-token,
+// produces exactly that: syntactically complete but silently missing most
+// of the records it should have produced (confirmed directly: a 33-
+// question paper's Segmenter call returned a valid 3-element array this
+// way, no parse error, nothing to distinguish it from a paper that
+// genuinely only had 3 segmentable questions). finishReason is the only
+// signal that catches this -- record count alone can't, since there's no
+// way to know in general how many records a given input SHOULD produce.
+const TRUNCATED_FINISH_REASONS = new Set(["max_tokens", "length"]);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -49,10 +63,18 @@ export async function getJsonCompletion(params: {
   let lastRawText = "";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const { text, model, usage } = await getCompletion(params);
+    const { text, model, usage, finishReason } = await getCompletion(params);
     lastRawText = text;
     if (!text.trim()) {
       lastError = new Error("Empty response from LLM");
+    } else if (finishReason && TRUNCATED_FINISH_REASONS.has(finishReason)) {
+      // Checked BEFORE attempting to parse -- see TRUNCATED_FINISH_REASONS'
+      // own comment on why a truncated response can still parse cleanly,
+      // which would otherwise let it through as if it were complete.
+      lastError = new Error(
+        `LLM response was truncated by the token budget (finish_reason: "${finishReason}") -- ` +
+          "the output may still be valid JSON, but it's incomplete, not a genuine full response."
+      );
     } else {
       try {
         const data = JSON.parse(stripCodeFence(text));

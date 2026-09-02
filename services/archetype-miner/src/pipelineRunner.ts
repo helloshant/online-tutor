@@ -239,9 +239,11 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
           if (err instanceof LlmJsonParseError) {
             console.warn(
               `Paper ${paperIndex} (${paperLabel}) looks like it hit MAX_TOKENS -- the model's response was cut ` +
-                "off before it could finish (an unterminated JSON string/array is the usual sign). If this paper " +
-                "is unusually long, splitting it into smaller sections and submitting them as separate files in " +
-                "one multi-file batch (see admin/archetype-miner/actions.ts) usually resolves this."
+                "off before it could finish, either as invalid JSON (an unterminated string/array) or as a " +
+                "syntactically complete but suspiciously short response (see jsonCompletion.ts's own " +
+                "finishReason check). If this paper is unusually long, splitting it into smaller sections and " +
+                "submitting them as separate files in one multi-file batch (see admin/archetype-miner/actions.ts) " +
+                "usually resolves this."
             );
           }
           continue;

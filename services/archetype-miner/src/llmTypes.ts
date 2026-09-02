@@ -13,6 +13,17 @@ export type LlmReply = {
   text: string;
   model: string;
   usage: TokenUsage;
+  // The provider's own reason the completion stopped -- Anthropic's
+  // "max_tokens" or Azure OpenAI's "length" means the response was cut off
+  // mid-generation, REGARDLESS of whether the truncated text happens to
+  // still parse as valid JSON (a model closing out a JSON array early to
+  // stay under its token budget, rather than getting cut off mid-token,
+  // produces exactly this: syntactically valid but silently incomplete
+  // output -- see jsonCompletion.ts, which is the only thing that can
+  // actually detect this). Optional/provider-specific string, not a fixed
+  // union -- each SDK has its own vocabulary and this is only ever
+  // string-compared against the one truncation value each cares about.
+  finishReason?: string | null;
 };
 
 // Stage 0 (Segmenter) only -- lets a raw_papers submission hand the model

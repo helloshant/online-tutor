@@ -63,5 +63,9 @@ export async function getAzureOpenAICompletion(params: {
       promptTokens: completion.usage?.prompt_tokens ?? 0,
       completionTokens: completion.usage?.completion_tokens ?? 0,
     },
+    // "length" here means the response was truncated by maxTokens -- see
+    // LlmReply.finishReason's own comment for why this matters even when
+    // the truncated text still happens to parse as valid JSON.
+    finishReason: completion.choices[0]?.finish_reason,
   };
 }
