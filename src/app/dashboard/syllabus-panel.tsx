@@ -24,10 +24,7 @@ export function SyllabusPanel({
   return (
     <aside className="hidden w-80 shrink-0 overflow-y-auto border-r border-border bg-surface p-3 lg:block">
       <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">Syllabus</h2>
-      <p className="mt-1 px-2 text-xs text-foreground/40">
-        Click a topic to drop its summary into the chat. Looking for questions from a specific book
-        or exam paper? Try the Practice tab.
-      </p>
+      <p className="mt-1 px-2 text-xs text-foreground/40">Click a topic to drop its summary into the chat.</p>
 
       <div className="mt-2">
         <TopicList

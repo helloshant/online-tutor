@@ -23,9 +23,8 @@ const TYPE_LABELS: Record<InboxItem["type"], string> = {
 // A student's broadcast inbox -- announcements/promotions (read-only),
 // feedback requests (a 1-5 rating + optional comment), and tests (a real
 // in-app MCQ/short-answer quiz, auto-graded where possible). Fetched once
-// on mount rather than wired to `active` like PracticePanel's search does,
-// since there's no per-keystroke cost to guard against here -- just one
-// list fetch.
+// on mount rather than gated on the tab being active -- there's no per-
+// keystroke cost to guard against here, just one list fetch.
 export function InboxPanel() {
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
