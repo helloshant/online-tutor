@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicPatterns } from "@/lib/orchestratorClient";
+import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 
 // Lists the curated, real exam patterns mined for a topic -- powers the
 // on-demand "practice a specific pattern" picker under Relevant Exercises
@@ -46,7 +47,10 @@ async function handleGet({ id: topicId }: { id: string }) {
   try {
     const { patterns } = await getTopicPatterns({
       boardName: board?.name ?? "",
-      gradeName: grade?.name ?? "",
+      // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade
+      // N") never matches archetype education_context.grade_or_year ("N")
+      // unstripped.
+      gradeName: toArchetypeGradeOrYear(grade?.name ?? ""),
       subjectName: subject?.name ?? "",
       chapter: topicRow.chapter,
       topic: topicRow.topic,

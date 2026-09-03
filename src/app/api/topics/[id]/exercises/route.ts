@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicExercises } from "@/lib/orchestratorClient";
+import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
@@ -68,7 +69,12 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
-      gradeName: grade?.name ?? "",
+      // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade
+      // N") never matches archetype education_context.grade_or_year ("N")
+      // unstripped, which meant every archetype-grounded generation
+      // through this route silently fell back to the ungrounded prompt
+      // regardless of real mining coverage.
+      gradeName: toArchetypeGradeOrYear(grade?.name ?? ""),
       medium: topicMedium,
       responseLanguage,
       chapter: topicRow.chapter,

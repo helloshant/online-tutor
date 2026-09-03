@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import { generateTopicExercise, type DifficultyLevel } from "@/lib/orchestratorClient";
+import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts and
@@ -117,7 +118,10 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
-      gradeName: grade?.name ?? "",
+      // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade
+      // N") never matches archetype education_context.grade_or_year ("N")
+      // unstripped.
+      gradeName: toArchetypeGradeOrYear(grade?.name ?? ""),
       medium: topicMedium,
       responseLanguage,
       chapter: topicRow.chapter,
