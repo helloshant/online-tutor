@@ -169,6 +169,12 @@ Separate exercises with a line containing only ---. Output nothing else: no prea
 // pattern proven to actually appear in this board's real exams, instead
 // of the model inventing difficulty/scope from nothing.
 export type ExerciseArchetype = {
+  // Identity, not shown to the model -- carried through so the caller can
+  // record student_archetype_progress after a successful generation (see
+  // archetypeExercises.ts's recordArchetypeProgress) without a second
+  // lookup. archetype_id is only unique WITHIN a run, hence both.
+  runId: string;
+  archetypeId: string;
   name: string;
   invariantReasoningStructure: string;
   variationDescriptions: string[];
