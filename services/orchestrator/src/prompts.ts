@@ -203,6 +203,12 @@ export type ExerciseArchetype = {
   // reads this, to calibrate honestly instead of silently fabricating a
   // level this pattern has never actually appeared at.
   difficultyDistribution: Record<DifficultyLevel, number> | null;
+  // Sorted ascending years this pattern's own supporting questions
+  // actually appeared in real exams -- e.g. [2025, 2026]. Unused by the
+  // generation prompt itself (which years it appeared in doesn't change
+  // how to instantiate it); only ever read for display, see
+  // TopicPattern's own comment in types.ts.
+  yearsObserved: number[];
 };
 
 function describeArchetype(a: ExerciseArchetype, index: number): string {
