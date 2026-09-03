@@ -187,6 +187,86 @@ export async function getTopicExercises(
   return { exercises: body.exercises as ExerciseItem[] };
 }
 
+// One curated, real exam pattern this exact chapter/topic has mined
+// archetypes for -- powers the on-demand "practice a specific pattern"
+// picker under Relevant Exercises (Tier C). Never displayed with
+// "archetype"/"mining" language -- just the pattern's own human-written
+// name. difficulty is informational only in this tier (Tier D is what
+// lets a student actually steer it).
+export type TopicPattern = {
+  runId: string;
+  archetypeId: string;
+  name: string;
+  difficulty: "Easy" | "Medium" | "Hard" | null;
+};
+
+export type TopicPatternsRequest = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  topic: string;
+};
+
+export async function getTopicPatterns(request: TopicPatternsRequest): Promise<{ patterns: TopicPattern[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/patterns`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.patterns)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { patterns: body.patterns as TopicPattern[] };
+}
+
+// On-demand generation for ONE specific pattern (both archetypeId and
+// archetypeRunId set, from a TopicPattern returned above), or a random
+// one from whatever's mined for this topic (both omitted -- "Generate
+// another").
+export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
+  archetypeId?: string;
+  archetypeRunId?: string;
+};
+
+export async function generateTopicExercise(
+  request: GenerateTopicExerciseRequest
+): Promise<{ exercise: ExerciseItem | null }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/generate`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || (body.exercise !== null && typeof body.exercise !== "object")) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { exercise: body.exercise as ExerciseItem | null };
+}
+
 // Deliberately no medium/language field -- the exercise's own stored
 // language is what grading feedback is written in, resolved server-side
 // from the exercise's own row (see the orchestrator's GradeExerciseRequest

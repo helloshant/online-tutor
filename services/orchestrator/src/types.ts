@@ -136,6 +136,55 @@ export type TopicExercisesResponse = {
   source: "database" | "llm";
 };
 
+// One curated, real exam pattern this exact chapter/topic has mined
+// archetypes for -- powers the on-demand "practice a specific pattern"
+// picker under Relevant Exercises (Tier C). Deliberately narrower than
+// archetypeExercises.ts's own ExerciseArchetype: no
+// invariantReasoningStructure/variationDescriptions, since those are
+// generation-prompt inputs, not meant for display to a student. runId is
+// carried through (never shown) because archetypeId is only unique
+// WITHIN a run -- /v1/topic-exercises/generate needs both back to
+// identify which pattern was actually picked.
+export type TopicPattern = {
+  runId: string;
+  archetypeId: string;
+  name: string;
+  difficulty: "Easy" | "Medium" | "Hard" | null;
+};
+
+export type TopicPatternsRequest = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  topic: string;
+};
+
+export type TopicPatternsResponse = {
+  patterns: TopicPattern[];
+};
+
+// On-demand generation for ONE specific pattern the student picked (both
+// archetypeId and archetypeRunId set, matching a TopicPattern from
+// /v1/topic-exercises/patterns), or a random one from whatever's mined
+// for this topic (both omitted -- "Generate another"). Deliberately
+// skips the answer-bank lookup /v1/topic-exercises does first: the whole
+// point of this endpoint is a fresh question, not whatever's already
+// banked for this topic.
+export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
+  archetypeId?: string;
+  archetypeRunId?: string;
+};
+
+export type GenerateTopicExerciseResponse = {
+  // null only when nothing's mined for this topic at all, or generation/
+  // storage genuinely failed -- never an error response, since the
+  // picker itself simply wouldn't have shown anything to click in the
+  // first case, and a transient generation failure is the caller's to
+  // retry, not to treat as a hard error.
+  exercise: ExerciseItem | null;
+};
+
 // A student's own attempt at one exercise, submitted BEFORE they've seen
 // the worked solution (see topic-summary-message.tsx) -- graded by an LLM
 // judge (buildGradingPrompt in prompts.ts), not exact-string matching,
