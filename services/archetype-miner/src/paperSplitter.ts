@@ -20,8 +20,23 @@
 // the label itself so callers can recognize when the "same" section is
 // being restated (see normalizeSectionLabel and its own comment below --
 // this is the load-bearing part of the whole module).
+//
+// Deliberately requires the label to be effectively the WHOLE line
+// (nothing after it but optional trailing punctuation) -- confirmed
+// directly against a real paper whose general instructions describe each
+// section on its own line ("SECTION A : Biology (30 Marks)") using the
+// SAME "line starts with SECTION" shape as the real header that appears
+// later ("SECTION – A"). A looser pattern (allowing arbitrary trailing
+// text) treats that instructional mention as the first, "real" occurrence
+// of label A -- and since a REPEATED label is deliberately never a new
+// boundary (see the bilingual-pairing reasoning below), the genuine
+// header further down then gets skipped as "already seen," leaving the
+// entire section's real content -- every question in it -- unsplit. A
+// bare descriptive mention essentially never matches this stricter shape
+// (real prose has more words after the label); a genuine header almost
+// always does.
 const SECTION_BOUNDARY =
-  /^(?:SECTION|PART)\s*[-–—:]?\s*(?<enLabel>[A-Za-z0-9]+)\b.*$|^(?:खण्ड|खंड|भाग)\s*[-–—:]?\s*(?<hiLabel>\S+?)[.:]?\s*$/gmu;
+  /^(?:SECTION|PART)\s*[-–—:]?\s*(?<enLabel>[A-Za-z0-9]+)\s*[-–—:]?\s*$|^(?:खण्ड|खंड|भाग)\s*[-–—:]?\s*(?<hiLabel>\S+?)[.:]?\s*$/gmu;
 
 // CBSE's own five-section convention. An unrecognized Hindi label (a rare
 // board/format this hasn't been tested against, or an OCR-mangled
