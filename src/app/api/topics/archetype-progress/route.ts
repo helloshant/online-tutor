@@ -73,16 +73,42 @@ async function handleGet(request: Request) {
   // ever see the derived counts this route computes from it, never the
   // rows themselves).
   const admin = createAdminClient();
-  const archetypeRows = await getArchetypesWithChapterTopic(admin, { board: board.name, grade: grade.name, subject: subject.name });
+  // grades.name is always "Grade N" (confirmed: every row in the live
+  // catalog), but archetype-miner submissions store education_context.
+  // grade_or_year as a bare admin-typed number ("N") -- confirmed against
+  // live archetypes ("10", "12", ...), never "Grade N". Passing grade.name
+  // straight through meant this filter never matched ANYTHING, so no
+  // student ever saw an archetype-mined badge regardless of real coverage.
+  // Not a general fuzzy-match fix (that's still soft/best-effort, see
+  // getArchetypesWithChapterTopic's own comment) -- just correcting for
+  // this one confirmed, systematic naming difference between the two
+  // independently-named systems.
+  const gradeOrYear = grade.name.replace(/^grade\s+/i, "").trim();
+  const archetypeRows = await getArchetypesWithChapterTopic(admin, { board: board.name, grade: gradeOrYear, subject: subject.name });
 
   const seen = new Set(
     ((seenRows ?? []) as { run_id: string; archetype_id: string }[]).map((r) => `${r.run_id}:${r.archetype_id}`)
   );
 
+  // syllabus_topics turns out to use TWO different granularity conventions
+  // in the live catalog, confirmed directly: some subjects give `chapter`
+  // the real chapter name and `topic` a within-chapter summary (e.g. CBSE
+  // Grade 10 Physics: chapter "Electricity", topic "Ohm's law, resistance,
+  // series & parallel circuits") -- but most of the CBSE Grade 11/12
+  // catalog (exactly where archetype mining has concentrated) instead sets
+  // `chapter` to the SUBJECT name or a book title for every row ("Mathematics",
+  // "Flamingo", ...) and puts the real per-chapter granularity in `topic`
+  // (e.g. "Matrices", "Determinants"). Archetypes' own resolvedChapter is
+  // always the real chapter name (Stage 1's own curriculum classification),
+  // so matching it only against t.chapter silently returned zero matches
+  // for the whole second convention -- which is most of what's actually
+  // been mined. Match against EITHER field instead; resolvedTopic (finer
+  // than anything syllabus_topics tracks in either convention) isn't part
+  // of this match at all.
   const normalize = (s: string) => s.trim().toLowerCase();
   const progress: TopicArchetypeProgress[] = topics.map((t) => {
     const matching = archetypeRows.filter(
-      (a) => normalize(a.resolvedChapter) === normalize(t.chapter) && normalize(a.resolvedTopic) === normalize(t.topic)
+      (a) => normalize(a.resolvedChapter) === normalize(t.chapter) || normalize(a.resolvedChapter) === normalize(t.topic)
     );
     const practiced = matching.filter((a) => seen.has(`${a.run_id}:${a.archetype_id}`)).length;
     return { chapter: t.chapter, topic: t.topic, total: matching.length, practiced };
