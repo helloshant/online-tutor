@@ -19,6 +19,20 @@
 // this scope yet, the common case for most chapters right now) just means
 // this returns an empty array and generation falls back to the original
 // ungrounded prompt -- never an error, never blocks a student's request.
+//
+// syllabus_topics also turns out to use two different granularity
+// conventions in the live catalog (confirmed directly, same finding as
+// archetypeCoverage.ts's own comment on this): some subjects give
+// `chapter` the real chapter name, but most of the CBSE Grade 11/12
+// catalog -- exactly where mining has concentrated -- sets `chapter` to
+// the subject name or a book title for every row and puts the real
+// chapter name in `topic` instead (e.g. CBSE Grade 12 Mathematics:
+// chapter "Mathematics", topic "Relations and Functions"). A question's
+// own real curriculum.chapter is always the real chapter name, so it's
+// matched against EITHER field below -- requiring it to match `chapter`
+// specifically silently missed this whole second convention, exactly
+// like it did for the student-facing progress badges before that was
+// fixed (see /api/topics/archetype-progress's own comment).
 import { getSupabaseClient } from "./supabaseClient.js";
 import type { ExerciseArchetype } from "./prompts.js";
 
@@ -99,7 +113,7 @@ export async function findArchetypesForTopic(params: {
     const resolved = row.archetype.supporting_question_ids
       .map((qid) => chapterByQuestion.get(`${row.run_id}:${qid}`))
       .filter((v): v is { chapter: string; topic: string } => Boolean(v));
-    const isMatch = resolved.some((r) => normalize(r.chapter) === targetChapter && normalize(r.topic) === targetTopic);
+    const isMatch = resolved.some((r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic);
     if (!isMatch) continue;
 
     const dist = row.archetype.stats?.difficulty_distribution;
