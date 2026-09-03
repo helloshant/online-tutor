@@ -673,8 +673,10 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
     // ---------------------------------------------------------------
     await updateRun(runId, { status: "critiquing" });
 
-    const criticResult = allCandidates.length > 0 ? await runCritic(allCandidates, llmProvider) : { reviewed: [] };
-    const reviewed = criticResult?.reviewed ?? [];
+    // runCritic handles the empty-candidates case itself, batches a large
+    // catalogue internally, and never returns null or drops a candidate
+    // silently -- see stage3Critic.ts's own comments.
+    const { reviewed } = await runCritic(allCandidates, llmProvider);
 
     const stage3ReviewCandidates: ReviewQueueCandidate[] = reviewed
       .filter((a) => a.critic_decision === "REVIEW")
