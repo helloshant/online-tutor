@@ -2,6 +2,7 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
+import { findArchetypesForTopic } from "./archetypeExercises.js";
 import {
   deleteCachedAnswer,
   deleteCachedTopicSummary,
@@ -809,6 +810,20 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
   }
 
   try {
+    // Grounds the generated set in real, historically-mined exam patterns
+    // for this exact chapter/topic when any exist -- see
+    // archetypeExercises.ts. Empty (the common case today, most chapters
+    // have nothing mined yet) just means buildExerciseGenerationPrompt
+    // falls back to its original ungrounded instruction, same as before
+    // this existed -- fails open, never blocks exercise generation.
+    const archetypes = await findArchetypesForTopic({
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      subjectName: body.subjectName,
+      chapter: body.chapter,
+      topic: body.topic,
+    });
+
     const systemPrompt = buildExerciseGenerationPrompt({
       subjectName: body.subjectName,
       boardName: body.boardName,
@@ -818,6 +833,7 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       chapter: body.chapter,
       topic: body.topic,
       count: EXERCISE_GENERATION_COUNT,
+      archetypes,
     });
     const { text, model, usage } = await getChatReply({
       systemPrompt,

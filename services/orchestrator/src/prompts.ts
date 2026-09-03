@@ -164,6 +164,24 @@ A: <complete worked solution, showing steps>
 
 Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
 
+// One real, historically-mined reasoning pattern for this exact chapter/
+// topic (see archetypeExercises.ts) -- grounds a generated exercise in a
+// pattern proven to actually appear in this board's real exams, instead
+// of the model inventing difficulty/scope from nothing.
+export type ExerciseArchetype = {
+  name: string;
+  invariantReasoningStructure: string;
+  variationDescriptions: string[];
+  difficulty: "Easy" | "Medium" | "Hard" | null;
+};
+
+function describeArchetype(a: ExerciseArchetype, index: number): string {
+  const variationNote =
+    a.variationDescriptions.length > 0 ? ` Known variations: ${a.variationDescriptions.join("; ")}.` : "";
+  const difficultyNote = a.difficulty ? ` Typically ${a.difficulty} difficulty at this level.` : "";
+  return `${index + 1}. "${a.name}" -- ${a.invariantReasoningStructure}${variationNote}${difficultyNote}`;
+}
+
 export function buildExerciseGenerationPrompt(params: {
   subjectName: string;
   boardName: string;
@@ -174,14 +192,29 @@ export function buildExerciseGenerationPrompt(params: {
   chapter: string;
   topic: string;
   count: number;
+  // Real archetypes mined from this exact board/grade/subject/chapter/
+  // topic's own past papers, when any exist (see archetypeExercises.ts --
+  // chapter/topic matching there is soft, so this can legitimately be
+  // empty for a chapter nothing's been mined for yet, or a fresh subject).
+  // Falls back to the original ungrounded instruction when empty, exactly
+  // as before this parameter existed.
+  archetypes?: ExerciseArchetype[];
 }): string {
-  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic, count } = params;
+  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic, count, archetypes = [] } = params;
+
+  const taskInstruction =
+    archetypes.length > 0
+      ? `Generate exactly ${count} practice questions by instantiating the reasoning patterns below with FRESH numbers, names, and context of your own choosing -- never reuse or lightly reword a historical question, only the underlying reasoning structure. Cycle through the patterns (repeat some if there are fewer than ${count}) so the set as a whole reflects the mix of patterns and difficulty this chapter/topic actually gets tested on, not an arbitrary spread:
+
+${archetypes.map(describeArchetype).join("\n")}`
+      : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.`;
+
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
 Chapter: "${chapter}"
 Topic: "${topic}"
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. ${taskInstruction}
 
 ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
