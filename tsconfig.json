@@ -30,5 +30,14 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // "services" -- every services/* directory is its own independently
+  // built/deployed microservice with its own tsconfig.json/package.json
+  // (and its own, sometimes newer, compiler target -- see e.g.
+  // services/archetype-miner/tsconfig.json's ES2022). The root "include"
+  // above (**/*.ts, with no services/-aware exclude) was pulling every
+  // service's own source into THIS project's typecheck scope too --
+  // harmless until a service used syntax this app's ES2017 target
+  // doesn't support (named regex capture groups), which then failed the
+  // web app's own build for code the web app doesn't even ship.
+  "exclude": ["node_modules", "services"]
 }

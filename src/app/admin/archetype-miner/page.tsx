@@ -43,6 +43,9 @@ export default async function ArchetypeMinerPage() {
           <Link href="/admin/archetype-miner/catalogue" className="text-brand hover:underline">
             Archetype catalogue
           </Link>
+          <Link href="/admin/archetype-miner/coverage" className="text-brand hover:underline">
+            Chapter/topic coverage
+          </Link>
           <Link href="/admin/archetype-miner/families" className="text-brand hover:underline">
             Archetype families
           </Link>
