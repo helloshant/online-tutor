@@ -173,6 +173,14 @@ export type TopicPattern = {
   // (see prompts.ts's describeDifficultyAsk).
   difficulty: DifficultyLevel | null;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
+  // Sorted ascending years this pattern actually appeared in real exams,
+  // e.g. [2025, 2026] -- suffixed onto the pattern's own name in the
+  // picker (e.g. "Determine Relation Properties (2025, 2026)") so a
+  // student can see which real exam years actually tested this before
+  // picking it, not just its name. Empty when Stage 1 never classified a
+  // year for any of the archetype's supporting questions -- the picker
+  // just shows the bare name then, no empty "()" suffix.
+  yearsObserved: number[];
 };
 
 export type TopicPatternsRequest = {

@@ -20,6 +20,10 @@ type Pattern = {
   archetypeId: string;
   name: string;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
+  // Sorted ascending, e.g. [2025, 2026] -- suffixed onto the button label
+  // (see describeYearsSuffix) so a student can see which real exam years
+  // actually tested this pattern before picking it.
+  yearsObserved: number[];
 };
 
 // Sentinel `generating` key for "Generate another" (no specific pattern),
@@ -37,6 +41,12 @@ function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): s
   if (total === 0) return null;
   const [top, topCount] = DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0];
   return `Usually ${top} (${topCount} of ${total} mined)`;
+}
+
+// " (2025, 2026)" -- empty string (no suffix at all) when nothing's
+// classified, rather than an empty "()" hanging off the name.
+function describeYearsSuffix(years: number[]): string {
+  return years.length > 0 ? ` (${years.join(", ")})` : "";
 }
 
 // Curated "practice a specific mined pattern" picker (Tier C/D) --
@@ -163,7 +173,7 @@ export function PatternPicker({
                 isSelected ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
               }`}
             >
-              {generating === p.archetypeId ? "Generating…" : p.name}
+              {generating === p.archetypeId ? "Generating…" : `${p.name}${describeYearsSuffix(p.yearsObserved)}`}
             </button>
           );
         })}

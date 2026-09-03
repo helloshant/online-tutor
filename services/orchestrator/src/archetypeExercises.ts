@@ -52,7 +52,7 @@ type ArchetypeLookupRow = {
     invariant_reasoning_structure: string;
     variations: { description: string }[];
     supporting_question_ids: string[];
-    stats: { difficulty_distribution: { Easy: number; Medium: number; Hard: number } };
+    stats: { difficulty_distribution: { Easy: number; Medium: number; Hard: number }; years_observed?: number[] };
   };
 };
 
@@ -136,6 +136,10 @@ export async function findArchetypesForTopic(params: {
       variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
       difficulty,
       difficultyDistribution: dist && total > 0 ? dist : null,
+      // Sorted, deduped ascending -- Stage 2 builds this from every
+      // supporting question's own year, in whatever order clustering
+      // happened to process them, with no guaranteed order or uniqueness.
+      yearsObserved: Array.from(new Set(row.archetype.stats?.years_observed ?? [])).sort((a, b) => a - b),
     });
 
     if (matches.length >= MAX_ARCHETYPES) break;

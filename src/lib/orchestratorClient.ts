@@ -204,6 +204,9 @@ export type TopicPattern = {
   name: string;
   difficulty: DifficultyLevel | null;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
+  // Sorted ascending years this pattern actually appeared in real exams,
+  // e.g. [2025, 2026] -- see the orchestrator's own TopicPattern comment.
+  yearsObserved: number[];
 };
 
 export type TopicPatternsRequest = {
