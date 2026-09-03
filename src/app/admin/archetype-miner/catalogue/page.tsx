@@ -92,7 +92,11 @@ export default async function ArchetypeCatalogPage({
           Archetype families
         </Link>{" "}
         mining uses) -- check &quot;Show everything&quot; below to also see candidate/REVIEW/MERGE/
-        REMOVE state.
+        REMOVE state. For a curriculum-coverage view instead --{" "}
+        <Link href="/admin/archetype-miner/coverage" className="text-brand hover:underline">
+          which archetypes appeared under which chapter/topic
+        </Link>
+        .
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
