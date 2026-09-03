@@ -38,6 +38,8 @@ import type {
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
   ExerciseItem,
+  GenerateTopicExerciseRequest,
+  GenerateTopicExerciseResponse,
   GradeExerciseRequest,
   GradeExerciseResponse,
   ImageAttachment,
@@ -45,6 +47,8 @@ import type {
   Medium,
   TopicExercisesRequest,
   TopicExercisesResponse,
+  TopicPatternsRequest,
+  TopicPatternsResponse,
   TopicSummaryRequest,
   TopicSummaryResponse,
 } from "./types.js";
@@ -737,6 +741,53 @@ app.post("/v1/topic-summary-cache/invalidate", requireSharedSecret, async (req: 
   res.json({ ok: true });
 });
 
+// Shared by /v1/topic-exercises' batch generation loop and
+// /v1/topic-exercises/generate's single on-demand generation (Tier C):
+// validates, dedupes against the bank, and persists one freshly-
+// generated exercise, returning the ExerciseItem to send back to the
+// student -- or null if the answer wasn't storable (validateAnswerFor
+// Storage rejected it) or the bank write itself failed, in which case
+// the caller just has one fewer exercise to show rather than a hard
+// error.
+async function storeGeneratedExercise(
+  scope: Omit<AnswerScope, "question" | "topicId">,
+  topicId: string,
+  userId: string,
+  exercise: { question: string; answer: string },
+  archetypeAttribution: { runId: string; archetypeId: string } | null
+): Promise<ExerciseItem | null> {
+  const validation = validateAnswerForStorage(exercise.answer);
+  if (!validation.store) return null;
+
+  // A specific generated question can coincide with one already banked
+  // under a *different* topic (e.g. the same exercise regenerated after a
+  // syllabus edit moved it) -- checked per-exercise rather than trusting
+  // a topic-level miss to mean every exercise here is new.
+  const existing = await findAnswerInBank({ ...scope, question: exercise.question });
+  const exerciseId =
+    existing?.id ??
+    (await recordAnswer(
+      { ...scope, question: exercise.question, topicId },
+      exercise.answer,
+      validation.status,
+      userId,
+      archetypeAttribution
+    ));
+
+  if (!exerciseId) {
+    console.error(`Failed to store generated exercise in the answer bank: "${exercise.question.slice(0, 80)}"`);
+    return null;
+  }
+
+  return {
+    id: exerciseId,
+    question: exercise.question,
+    answer: exercise.answer,
+    archetypeRunId: archetypeAttribution?.runId ?? null,
+    archetypeId: archetypeAttribution?.archetypeId ?? null,
+  };
+}
+
 // Reached when a student clicks "Relevant Exercises" under a topic summary.
 // Searches the answer bank for exercises already generated for this exact
 // topic (by anyone -- exact topic_id match, see 0015_answer_bank_topic_id.sql)
@@ -892,12 +943,9 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     // exercise back up later), not just best-effort storage the way this
     // used to work -- an exercise a storage failure couldn't get an id for
     // is skipped from the response entirely, rather than shown with
-    // nothing to submit against.
+    // nothing to submit against. See storeGeneratedExercise above.
     const stored: ExerciseItem[] = [];
     for (const exercise of parsed) {
-      const validation = validateAnswerForStorage(exercise.answer);
-      if (!validation.store) continue;
-
       // patternIndex (see exerciseParser.ts) is the model's own 1-based
       // reference into the SAME archetypes array the prompt was built
       // from -- out-of-range or absent (an ungrounded generation, or a
@@ -907,37 +955,8 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
         typeof exercise.patternIndex === "number" ? archetypes[exercise.patternIndex - 1] : undefined;
       const archetypeAttribution = archetype ? { runId: archetype.runId, archetypeId: archetype.archetypeId } : null;
 
-      // The topic-level search above (findRelevantExercises) only tells us
-      // this exact topic has nothing banked yet -- a specific generated
-      // question can still coincide with one already banked under a
-      // *different* topic (e.g. the same exercise regenerated after a
-      // syllabus edit moved it), so check per-exercise before writing rather
-      // than trusting the topic-level miss to mean every exercise is new.
-      const existing = await findAnswerInBank({ ...scope, question: exercise.question });
-      const exerciseId =
-        existing?.id ??
-        (await recordAnswer(
-          { ...scope, question: exercise.question, topicId: body.topicId },
-          exercise.answer,
-          validation.status,
-          body.userId,
-          archetypeAttribution
-        ));
-
-      if (!exerciseId) {
-        console.error(
-          `Failed to store generated exercise in the answer bank: "${exercise.question.slice(0, 80)}"`
-        );
-        continue;
-      }
-
-      stored.push({
-        id: exerciseId,
-        question: exercise.question,
-        answer: exercise.answer,
-        archetypeRunId: archetypeAttribution?.runId ?? null,
-        archetypeId: archetypeAttribution?.archetypeId ?? null,
-      });
+      const item = await storeGeneratedExercise(scope, body.topicId, body.userId, exercise, archetypeAttribution);
+      if (item) stored.push(item);
     }
 
     void recordChatEvent({
@@ -961,6 +980,172 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
   } catch (err) {
     console.error("Exercise generation failed:", err);
     res.status(502).json({ error: "Could not generate exercises right now. Please try again shortly." });
+  }
+});
+
+// Lists the curated, real exam patterns mined for this exact chapter/
+// topic -- powers the on-demand "practice a specific pattern" picker
+// under Relevant Exercises (Tier C). A thin wrapper over
+// findArchetypesForTopic, stripped to just what the picker needs to
+// display. Empty is the common case (most chapters have nothing mined
+// yet) and isn't an error -- the picker just doesn't render.
+app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<TopicPatternsRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.subjectName !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string"
+  ) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, chapter, and topic are required" });
+    return;
+  }
+
+  const archetypes = await findArchetypesForTopic({
+    boardName: body.boardName,
+    gradeName: body.gradeName,
+    subjectName: body.subjectName,
+    chapter: body.chapter,
+    topic: body.topic,
+  });
+
+  const response: TopicPatternsResponse = {
+    patterns: archetypes.map((a) => ({ runId: a.runId, archetypeId: a.archetypeId, name: a.name, difficulty: a.difficulty })),
+  };
+  res.json(response);
+});
+
+// On-demand generation for ONE specific mined pattern -- Tier C's
+// "Generate" action on a pattern the student picked from
+// /v1/topic-exercises/patterns (archetypeId + archetypeRunId set), or
+// "Generate another" with neither set for a random one from whatever's
+// available. Deliberately skips the answer-bank lookup
+// /v1/topic-exercises does first (findRelevantExercises) -- the whole
+// point of clicking this is a fresh question, not whatever's already
+// banked for this topic.
+app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  const body = req.body as Partial<GenerateTopicExerciseRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !body.userId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.subjectName !== "string" ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.medium !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string"
+  ) {
+    res.status(400).json({
+      error:
+        "userId, topicId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, chapter, and topic are required",
+    });
+    return;
+  }
+
+  const medium = body.medium as Medium;
+  const responseLanguage: Medium = (body.responseLanguage as Medium | undefined) ?? medium;
+  const scope = { boardId: body.boardId, gradeId: body.gradeId, subjectId: body.subjectId, medium: responseLanguage };
+
+  try {
+    const archetypes = await findArchetypesForTopic({
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      subjectName: body.subjectName,
+      chapter: body.chapter,
+      topic: body.topic,
+    });
+
+    if (archetypes.length === 0) {
+      // Nothing mined for this chapter/topic -- the picker itself
+      // wouldn't have shown anything to click, so this only happens on a
+      // stale/replayed request. Nothing to ground an on-demand generation
+      // in, so there's nothing to do -- not an error.
+      const response: GenerateTopicExerciseResponse = { exercise: null };
+      res.json(response);
+      return;
+    }
+
+    // A requested archetypeId/archetypeRunId not present in this topic's
+    // own current list (a stale picker, or a tampered request -- never
+    // trusted blindly) just falls through to a random pick from what's
+    // actually available here, same as "Generate another" with nothing
+    // specified.
+    const requested = body.archetypeId
+      ? archetypes.find((a) => a.archetypeId === body.archetypeId && a.runId === body.archetypeRunId)
+      : undefined;
+    const chosen = requested ?? archetypes[Math.floor(Math.random() * archetypes.length)];
+
+    const systemPrompt = buildExerciseGenerationPrompt({
+      subjectName: body.subjectName,
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      medium,
+      responseLanguage,
+      chapter: body.chapter,
+      topic: body.topic,
+      count: 1,
+      archetypes: [chosen],
+    });
+    const { text, model, usage } = await getChatReply({
+      systemPrompt,
+      history: [],
+      message: "Generate the exercise now.",
+      maxTokens: EXERCISE_MAX_TOKENS,
+    });
+
+    const parsed = parseGeneratedExercises(text);
+    const first = parsed[0];
+    const archetypeAttribution = { runId: chosen.runId, archetypeId: chosen.archetypeId };
+    const item = first ? await storeGeneratedExercise(scope, body.topicId, body.userId, first, archetypeAttribution) : null;
+
+    if (item) {
+      void recordArchetypeProgress({
+        userId: body.userId,
+        boardId: body.boardId,
+        gradeId: body.gradeId,
+        subjectId: body.subjectId,
+        medium,
+        chapter: body.chapter,
+        topic: body.topic,
+        archetypes: [chosen],
+      });
+    }
+
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `topic-exercises/generate: ${body.chapter} / ${body.topic} (${chosen.name})`,
+      source: "llm",
+      provider: getActiveLlmProvider(),
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    const response: GenerateTopicExerciseResponse = { exercise: item };
+    res.json(response);
+  } catch (err) {
+    console.error("On-demand topic exercise generation failed:", err);
+    res.status(502).json({ error: "Could not generate a question right now. Please try again shortly." });
   }
 });
 

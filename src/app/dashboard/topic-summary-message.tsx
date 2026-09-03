@@ -18,6 +18,14 @@ type ExerciseItem = { id: string; question: string; answer: string };
 type SearchExercise = { question: string; answer: string };
 type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
 
+// A curated, real exam pattern mined for this exact topic -- powers the
+// "Practice a specific pattern" picker below the auto-loaded exercises
+// (Tier C). runId is carried through (never shown) purely so a click can
+// identify which pattern was picked back to the server -- archetypeId
+// alone isn't unique across runs. Empty (the common case for most
+// topics right now) just means the picker doesn't render at all.
+type Pattern = { runId: string; archetypeId: string; name: string };
+
 // Per-exercise submission/grading state, keyed by exercise id -- a
 // student attempts each exercise independently, so this can't be one
 // shared piece of state for the whole list. "idle" covers both "hasn't
@@ -31,6 +39,10 @@ type GradeState = {
   revealedAnswer?: string;
   error?: string;
 };
+
+// Sentinel `generating` key for "Generate another" (no specific pattern),
+// distinct from any real archetypeId.
+const GENERATING_RANDOM = "__random__";
 
 const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> = {
   correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
@@ -94,6 +106,14 @@ export function TopicSummaryMessage({
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [filteredExercises, setFilteredExercises] = useState<SearchExercise[] | null>(null);
   const [loadingFilter, setLoadingFilter] = useState(false);
+
+  // On-demand pattern picker (Tier C). `generating` holds the archetypeId
+  // of whichever button was clicked (or GENERATING_RANDOM for "Generate
+  // another"), so only THAT button shows a busy state -- not a single
+  // shared boolean that would grey out every button in the row at once.
+  const [patterns, setPatterns] = useState<Pattern[]>([]);
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,6 +194,8 @@ export function TopicSummaryMessage({
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
+    setPatterns([]);
+    setGenerateError(null);
   }, [preferEnglish]);
 
   async function handleLoadExercises() {
@@ -188,19 +210,59 @@ export function TopicSummaryMessage({
       }
       setExercises(body.exercises);
 
-      // Best-effort -- if this fails, the tag-refine chips just don't show,
-      // no error surfaced (the exercises themselves loaded fine).
-      const tagsRes = await fetch(
-        `/api/answer-bank/tags?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}`
-      );
+      // Both best-effort -- if either fails, the tag chips or the pattern
+      // picker just don't show; the exercises themselves already loaded
+      // fine, so neither failure is surfaced as an error.
+      const [tagsRes, patternsRes] = await Promise.all([
+        fetch(`/api/answer-bank/tags?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}`),
+        fetch(`/api/topics/${topic.id}/exercises/patterns`),
+      ]);
       const tagsBody = await tagsRes.json().catch(() => null);
       if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
         setTopicTags(tagsBody.tags);
+      }
+      const patternsBody = await patternsRes.json().catch(() => null);
+      if (patternsRes.ok && Array.isArray(patternsBody?.patterns)) {
+        setPatterns(patternsBody.patterns);
       }
     } catch {
       setExercisesError("Could not load exercises.");
     } finally {
       setLoadingExercises(false);
+    }
+  }
+
+  async function handleGeneratePattern(pattern?: Pattern) {
+    if (generating !== null) return;
+    setGenerating(pattern?.archetypeId ?? GENERATING_RANDOM);
+    setGenerateError(null);
+    try {
+      const res = await fetch(`/api/topics/${topic.id}/exercises/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          pattern
+            ? { archetypeId: pattern.archetypeId, archetypeRunId: pattern.runId, preferEnglish }
+            : { preferEnglish }
+        ),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setGenerateError(body?.error ?? "Could not generate a question right now.");
+        return;
+      }
+      if (body?.exercise) {
+        // Appended to the same list the auto-loaded exercises render
+        // through -- one unified, hide-until-submitted list, not a
+        // separate section with its own grading UI to keep in sync.
+        setExercises((prev) => [...(prev ?? []), body.exercise as ExerciseItem]);
+      } else {
+        setGenerateError("Could not generate a question right now.");
+      }
+    } catch {
+      setGenerateError("Could not generate a question right now.");
+    } finally {
+      setGenerating(null);
     }
   }
 
@@ -399,77 +461,113 @@ export function TopicSummaryMessage({
                       </ol>
                     </>
                   )
-                ) : exercises.length === 0 ? (
-                  <p className="text-foreground/50">No exercises available for this topic yet.</p>
                 ) : (
                   <>
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                      Relevant exercises
-                    </p>
-                    <p className="mb-3 text-xs text-foreground/40">
-                      Try each one yourself first -- the worked solution shows once you check your answer.
-                    </p>
-                    <ol className="space-y-4">
-                      {exercises.map((ex, i) => {
-                        const state = getGradeState(ex.id);
-                        return (
-                          <li key={ex.id}>
-                            <p className="whitespace-pre-wrap font-medium">
-                              {i + 1}. <MathText text={ex.question} />
-                            </p>
-
-                            {state.status === "graded" ? (
-                              <div className="mt-1.5 space-y-2">
-                                <p className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}>
-                                  <span className="font-semibold">{VERDICT_STYLES[state.verdict as ExerciseVerdict].label}</span>{" "}
-                                  {state.feedback}
+                    {exercises.length === 0 ? (
+                      <p className="text-foreground/50">No exercises available for this topic yet.</p>
+                    ) : (
+                      <>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                          Relevant exercises
+                        </p>
+                        <p className="mb-3 text-xs text-foreground/40">
+                          Try each one yourself first -- the worked solution shows once you check your answer.
+                        </p>
+                        <ol className="space-y-4">
+                          {exercises.map((ex, i) => {
+                            const state = getGradeState(ex.id);
+                            return (
+                              <li key={ex.id}>
+                                <p className="whitespace-pre-wrap font-medium">
+                                  {i + 1}. <MathText text={ex.question} />
                                 </p>
-                                <div className="rounded-lg bg-background p-3 text-foreground/80">
-                                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                                    Solution
-                                  </p>
-                                  <p className="whitespace-pre-wrap">
-                                    <MathText text={state.revealedAnswer ?? ""} />
-                                  </p>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-1.5 space-y-1.5">
-                                <textarea
-                                  value={state.draft}
-                                  onChange={(e) => setGradeState(ex.id, { ...state, draft: e.target.value })}
-                                  placeholder="Type your answer here…"
-                                  rows={2}
-                                  disabled={state.status === "submitting"}
-                                  className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground disabled:opacity-60"
-                                />
-                                {state.error && <p className="text-xs text-red-600">{state.error}</p>}
-                                <button
-                                  type="button"
-                                  onClick={() => handleSubmitAnswer(ex.id)}
-                                  disabled={state.status === "submitting" || !state.draft.trim()}
-                                  className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-                                >
-                                  {state.status === "submitting" ? "Checking…" : "Check my answer"}
-                                </button>
-                              </div>
-                            )}
 
-                            {/* No target_id, same reasoning as the tag-filter
-                                path above -- FeedbackButtons is about the
-                                exercise's own quality, independent of
-                                whether (or how) the student has attempted
-                                it yet, so this stays visible either way. */}
-                            <FeedbackButtons
-                              kind="exercise"
-                              subjectId={topic.subject_id}
-                              question={`${topic.chapter} / ${topic.topic}`}
-                              contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
-                            />
-                          </li>
-                        );
-                      })}
-                    </ol>
+                                {state.status === "graded" ? (
+                                  <div className="mt-1.5 space-y-2">
+                                    <p className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}>
+                                      <span className="font-semibold">
+                                        {VERDICT_STYLES[state.verdict as ExerciseVerdict].label}
+                                      </span>{" "}
+                                      {state.feedback}
+                                    </p>
+                                    <div className="rounded-lg bg-background p-3 text-foreground/80">
+                                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                                        Solution
+                                      </p>
+                                      <p className="whitespace-pre-wrap">
+                                        <MathText text={state.revealedAnswer ?? ""} />
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mt-1.5 space-y-1.5">
+                                    <textarea
+                                      value={state.draft}
+                                      onChange={(e) => setGradeState(ex.id, { ...state, draft: e.target.value })}
+                                      placeholder="Type your answer here…"
+                                      rows={2}
+                                      disabled={state.status === "submitting"}
+                                      className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground disabled:opacity-60"
+                                    />
+                                    {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSubmitAnswer(ex.id)}
+                                      disabled={state.status === "submitting" || !state.draft.trim()}
+                                      className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                                    >
+                                      {state.status === "submitting" ? "Checking…" : "Check my answer"}
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* No target_id, same reasoning as the tag-filter
+                                    path above -- FeedbackButtons is about the
+                                    exercise's own quality, independent of
+                                    whether (or how) the student has attempted
+                                    it yet, so this stays visible either way. */}
+                                <FeedbackButtons
+                                  kind="exercise"
+                                  subjectId={topic.subject_id}
+                                  question={`${topic.chapter} / ${topic.topic}`}
+                                  contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
+                                />
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </>
+                    )}
+
+                    {patterns.length > 0 && (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                          Practice a specific pattern
+                        </p>
+                        {generateError && <p className="mb-2 text-xs text-red-600">{generateError}</p>}
+                        <div className="flex flex-wrap gap-1.5">
+                          {patterns.map((p) => (
+                            <button
+                              key={`${p.runId}:${p.archetypeId}`}
+                              type="button"
+                              onClick={() => handleGeneratePattern(p)}
+                              disabled={generating !== null}
+                              className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
+                            >
+                              {generating === p.archetypeId ? "Generating…" : p.name}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => handleGeneratePattern()}
+                            disabled={generating !== null}
+                            className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
+                          >
+                            {generating === GENERATING_RANDOM ? "Generating…" : "Generate another"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </>
