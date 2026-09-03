@@ -254,7 +254,6 @@ export function ChatPanel({
   medium,
   isStaffUser,
   topicClick,
-  practiceQuestionClick,
 }: {
   subscriptionId: string | null;
   subject: SubjectSummary;
@@ -269,7 +268,6 @@ export function ChatPanel({
   medium: Medium | null;
   isStaffUser: boolean;
   topicClick: { clickId: string; topic: SyllabusTopic } | null;
-  practiceQuestionClick: { clickId: string; question: string; answer: string } | null;
 }) {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -297,15 +295,12 @@ export function ChatPanel({
   const effectivePreferEnglish = showLanguageToggle && preferEnglish;
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
-  const lastPracticeClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   // Lets performSend read the LATEST timeline (to check whether a loaded
   // topic summary is still the last thing shown, see its own comment)
   // without needing `timeline` in its own dependency array -- adding it
-  // there would recreate performSend on every single message exchange,
-  // which the practiceQuestionClick effect below also depends on and has
-  // no reason to re-evaluate that often.
+  // there would recreate performSend on every single message exchange.
   const timelineRef = useRef<TimelineEntry[]>(timeline);
   useEffect(() => {
     timelineRef.current = timeline;
@@ -397,11 +392,9 @@ export function ChatPanel({
     [scrollToBottom]
   );
 
-  // Shared by the form's Send button and the practiceQuestionClick effect
-  // below, which sends a composed message with no user-typed text or image
-  // of its own. useCallback (rather than a plain function) so the effect
-  // below can list it as a dependency instead of reaching for a function
-  // declared later in the component.
+  // Called by the form's Send button below. useCallback (rather than a
+  // plain function) since it's read by other effects/callbacks elsewhere
+  // in this component that depend on its identity staying stable.
   const performSend = useCallback(
     async (trimmed: string, image: SelectedImage | null) => {
       if ((!trimmed && !image) || sending) return;
@@ -621,24 +614,6 @@ export function ChatPanel({
       return next;
     });
   }
-
-  // Same fresh-id-per-click guard as topicClick above, but sends straight
-  // away rather than seeding the input for the student to edit -- an
-  // earlier version left it in the input for a manual Send, which just
-  // re-asked the identical already-answered question if the student didn't
-  // think to add anything. Explicitly asking for a more detailed
-  // explanation (rather than just resending the bare question) also gets a
-  // more useful reply than the model regenerating a near-duplicate of the
-  // banked answer from scratch.
-  useEffect(() => {
-    if (!practiceQuestionClick || practiceQuestionClick.clickId === lastPracticeClickIdRef.current) return;
-    lastPracticeClickIdRef.current = practiceQuestionClick.clickId;
-    const { question, answer } = practiceQuestionClick;
-    void performSend(
-      `I don't understand this solution -- can you explain it in more detail, step by step?\n\nQ: ${question}\nA: ${answer}`,
-      null
-    );
-  }, [practiceQuestionClick, performSend]);
 
   async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
-import { PracticePanel } from "./practice-panel";
 import { InboxPanel } from "./inbox-panel";
 import { TopicList } from "./topic-list";
 import { StaffPreviewPicker } from "./staff-preview-picker";
@@ -46,7 +45,7 @@ function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
 // state entirely. Same for "topics": desktop already has SyllabusPanel as a
 // persistent sidebar, so a "Topics" destination only has meaning on mobile,
 // where it's the only way to reach topic browsing at all (see topic-list.tsx).
-type MainTab = "subjects" | "topics" | "chat" | "practice" | "inbox";
+type MainTab = "subjects" | "topics" | "chat" | "inbox";
 
 export function DashboardShell({
   userName,
@@ -84,17 +83,6 @@ export function DashboardShell({
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
   const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
-  // Set when "Ask about this" is clicked on a Practice result -- handed to
-  // ChatPanel so it can seed a pending context (shown above the input,
-  // folded into the next message sent) rather than leaving the student to
-  // retype the question from scratch to get help with it. Same fresh-id-
-  // per-click shape as topicClick, for the same reason: clicking the same
-  // result twice should still re-seed it.
-  const [practiceQuestionClick, setPracticeQuestionClick] = useState<{
-    clickId: string;
-    question: string;
-    answer: string;
-  } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below. Desktop-only state:
@@ -102,8 +90,7 @@ export function DashboardShell({
   const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
   // Which main-area surface is visible -- all stay mounted (see the main
   // content below) so switching tabs never loses any panel's local state
-  // (the chat timeline's ephemeral topic bubbles, or an in-progress
-  // Practice search).
+  // (e.g. the chat timeline's ephemeral topic bubbles).
   const [mainTab, setMainTab] = useState<MainTab>("chat");
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
@@ -115,7 +102,6 @@ export function DashboardShell({
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
     setTopicClick(null);
-    setPracticeQuestionClick(null);
     setSubjectsCollapsed(true);
     setMainTab("chat");
   }
@@ -124,18 +110,11 @@ export function DashboardShell({
   // and the mobile Subjects screen indirectly via handleSelectSubject above
   // -- always jump to the Chat tab on select, since that's where the
   // resulting summary bubble actually appears. Without this, clicking a
-  // topic while on Practice (or Topics itself) would drop the bubble into a
-  // panel the student isn't currently looking at, with no visible feedback
-  // that anything happened.
+  // topic while on Topics itself would drop the bubble into a panel the
+  // student isn't currently looking at, with no visible feedback that
+  // anything happened.
   function handleSelectTopic(topic: SyllabusTopic) {
     setTopicClick({ clickId: crypto.randomUUID(), topic });
-    setMainTab("chat");
-  }
-
-  // Same "jump to Chat" reasoning as handleSelectTopic above: seeding
-  // context into a panel the student isn't looking at would be invisible.
-  function handleAskAboutPractice(question: string, answer: string) {
-    setPracticeQuestionClick({ clickId: crypto.randomUUID(), question, answer });
     setMainTab("chat");
   }
 
@@ -145,7 +124,6 @@ export function DashboardShell({
     { tab: "subjects", icon: "📚", label: "Subjects" },
     ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
     { tab: "chat", icon: "💬", label: "Chat" },
-    ...(hasSyllabusScope ? [{ tab: "practice" as const, icon: "✏️", label: "Practice" }] : []),
     ...(!isStaffUser ? [{ tab: "inbox" as const, icon: "🔔", label: "Inbox" }] : []),
   ];
 
@@ -270,10 +248,10 @@ export function DashboardShell({
             </div>
           ) : selectedSubject ? (
             <>
-              {/* Desktop-only: below lg, Topics/Chat/Practice are reached
-                  through the bottom nav instead, which also covers Subjects
-                  (desktop switches subjects via the sidebar, so doesn't need
-                  a Subjects tab here). */}
+              {/* Desktop-only: below lg, Topics/Chat are reached through the
+                  bottom nav instead, which also covers Subjects (desktop
+                  switches subjects via the sidebar, so doesn't need a
+                  Subjects tab here). */}
               {hasSyllabusScope && (
                 <div className="hidden shrink-0 gap-1 border-b border-border bg-surface px-6 pt-2 lg:flex">
                   {/* Inbox is a real student's own subscription inbox --
@@ -281,7 +259,7 @@ export function DashboardShell({
                       left off this row entirely for them rather than shown
                       and rendering nothing (see the !isStaffUser guard
                       further down where its panel is actually rendered). */}
-                  {(isStaffUser ? (["chat", "practice"] as const) : (["chat", "practice", "inbox"] as const)).map((tab) => (
+                  {(isStaffUser ? (["chat"] as const) : (["chat", "inbox"] as const)).map((tab) => (
                     <button
                       key={tab}
                       type="button"
@@ -326,22 +304,8 @@ export function DashboardShell({
                   medium={medium}
                   isStaffUser={isStaffUser}
                   topicClick={topicClick}
-                  practiceQuestionClick={practiceQuestionClick}
                 />
               </div>
-              {boardId && gradeId && medium && (
-                <div className={mainTab === "practice" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-                  <PracticePanel
-                    key={selectedSubject.id}
-                    subjectId={selectedSubject.id}
-                    boardId={boardId}
-                    gradeId={gradeId}
-                    medium={medium}
-                    active={mainTab === "practice"}
-                    onAskAbout={handleAskAboutPractice}
-                  />
-                </div>
-              )}
               {/* Not subject-scoped (a student's broadcasts don't belong to
                   any one subject), but nested here anyway rather than as a
                   sibling of the selectedSubject branch -- reachable the
