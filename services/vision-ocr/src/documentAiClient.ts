@@ -46,6 +46,46 @@ function getClient(): DocumentProcessorServiceClient {
 
 export type DocumentAiResult = { text: string } | { error: string };
 
+// Reported directly: OCR for a real CBSE Grade 12 Mathematics paper
+// (65-7-1, diagram/graph-heavy -- typical of a Math paper, unlike a
+// mostly-text Hindi/English paper) failed with "GoogleError: Total
+// timeout ... exceeded 300000 milliseconds" after a DEADLINE_EXCEEDED --
+// not a transient failure to retry away, but this exact RPC's own client-
+// bundled retry budget (300s total, confirmed in
+// document_processor_service_client_config.json) being too tight for a
+// large, complex scanned document. That same bundled config's own retry
+// GROUP (used by ProcessDocument) separately declares 600s (10 min) as a
+// legitimate total_timeout_millis for other RPCs sharing it -- so this
+// isn't inventing an arbitrary number, just applying a ceiling the
+// library's own authors already consider reasonable for this API to
+// ProcessDocument specifically, which the generated client's per-method
+// entry doesn't. Every other value below mirrors that same bundled group
+// exactly (delay/backoff/per-attempt timeout unchanged) -- only
+// totalTimeoutMillis is raised.
+//
+// A plain object literal, not google-gax's own RetryOptions/
+// BackoffSettings classes -- CallOptions.retry accepts
+// Partial<RetryOptions> structurally, and google-gax is only ever a
+// transitive dependency here (via @google-cloud/documentai), not
+// something this service declares and pins itself.
+const PROCESS_DOCUMENT_CALL_OPTIONS = {
+  retry: {
+    // DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, UNAVAILABLE -- the same
+    // "deadline_exceeded_resource_exhausted_unavailable" group
+    // ProcessDocument's own bundled config already retries.
+    retryCodes: [4, 8, 14],
+    backoffSettings: {
+      initialRetryDelayMillis: 1000,
+      retryDelayMultiplier: 9,
+      maxRetryDelayMillis: 90000,
+      initialRpcTimeoutMillis: 60000,
+      rpcTimeoutMultiplier: 1,
+      maxRpcTimeoutMillis: 60000,
+      totalTimeoutMillis: 540000, // 9 minutes -- under the library's own 10-minute ceiling for this retry group.
+    },
+  },
+};
+
 // One call per file -- Document AI's synchronous processDocument endpoint
 // (what this uses) is inherently single-document; the caller loops over
 // this itself (see ocrPipeline.ts), which also lets each file's own error
@@ -66,16 +106,19 @@ export async function runDocumentAiOcr(params: {
   try {
     const client = getClient();
     const name = client.processorPath(projectId, location, processorId);
-    const [response] = await client.processDocument({
-      name,
-      rawDocument: { content: buffer, mimeType },
-      // Document AI's synchronous processDocument caps a PDF at 15 pages
-      // in the default mode, 30 in "imageless" mode (which just omits
-      // page images from the response) -- this service only ever reads
-      // response.document.text, never the page images, so there's no
-      // downside to always requesting the higher cap.
-      imagelessMode: true,
-    });
+    const [response] = await client.processDocument(
+      {
+        name,
+        rawDocument: { content: buffer, mimeType },
+        // Document AI's synchronous processDocument caps a PDF at 15 pages
+        // in the default mode, 30 in "imageless" mode (which just omits
+        // page images from the response) -- this service only ever reads
+        // response.document.text, never the page images, so there's no
+        // downside to always requesting the higher cap.
+        imagelessMode: true,
+      },
+      PROCESS_DOCUMENT_CALL_OPTIONS
+    );
     const text = response.document?.text ?? "";
     if (!text.trim()) {
       return { error: `Document AI found no text in "${fileName}".` };
