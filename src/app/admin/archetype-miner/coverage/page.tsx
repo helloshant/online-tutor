@@ -1,41 +1,7 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { ArchetypeRow, ArchetypeStatus, CriticDecision, EducationContext } from "@/lib/archetypeMinerTypes";
-
-// Same eligibility the main catalogue and family mining already use --
-// see catalogue/page.tsx's own comment. "Show everything" (?all=1) bypasses
-// it for anyone who wants to see candidate/REVIEW/MERGE state too.
-const ACCEPTED_STATUSES: ArchetypeStatus[] = ["reviewed", "final"];
-const ACCEPTED_DECISIONS: CriticDecision[] = ["KEEP", "REVISE", "ADD"];
-
-const UNKNOWN_CHAPTER = "(chapter not resolved)";
-const UNKNOWN_TOPIC = "(topic not resolved)";
-
-// Archetype itself doesn't carry a chapter/topic field -- Stage 2 mines
-// within an education_context scope, not a chapter one, so a cluster's
-// own member questions can (rarely) span more than one chapter/topic
-// within the same concept. Chapter/topic live on the per-QUESTION
-// signature instead (Stage 1's own curriculum.chapter/topic, stored in
-// archetype_question_signatures), so this derives each archetype's
-// chapter/topic AT READ TIME from its supporting questions' own
-// signatures -- the most common (chapter, topic) pair among them -- which
-// also means this works retroactively for every archetype already mined,
-// not just runs submitted after this page existed.
-function mostCommon(values: string[]): string | null {
-  if (values.length === 0) return null;
-  const counts = new Map<string, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best: string | null = null;
-  let bestCount = 0;
-  for (const [value, count] of counts) {
-    if (count > bestCount) {
-      best = value;
-      bestCount = count;
-    }
-  }
-  return best;
-}
+import { getArchetypeFilterOptions, getArchetypesWithChapterTopic, type ArchetypeWithChapterTopic } from "@/lib/archetypeCoverage";
 
 export default async function ArchetypeCoveragePage({
   searchParams,
@@ -47,73 +13,18 @@ export default async function ArchetypeCoveragePage({
   const showAll = all === "1";
   const admin = createAdminClient();
 
-  // Unfiltered fetch (within the eligible set) just to populate the
-  // filter dropdowns with values that actually occur in the data -- same
-  // reasoning as the main catalogue page's own board/grade dropdowns,
-  // extended with subject since chapters/topics only make sense scoped to
-  // one subject.
-  const { data: filterRows } = await admin
-    .from("archetypes")
-    .select("education_context")
-    .in("status", ACCEPTED_STATUSES)
-    .in("critic_decision", ACCEPTED_DECISIONS);
+  const [{ boards, grades, subjects }, rows] = await Promise.all([
+    getArchetypeFilterOptions(admin),
+    getArchetypesWithChapterTopic(admin, { board, grade, subject, showAll }),
+  ]);
 
-  const distinct = (pick: (ctx: EducationContext) => string) =>
-    Array.from(new Set((filterRows ?? []).map((r) => pick(r.education_context as EducationContext)))).sort();
-  const boards = distinct((c) => c.curriculum_source.name);
-  const grades = distinct((c) => c.grade_or_year);
-  const subjects = distinct((c) => c.subject_or_course);
-
-  let query = admin.from("archetypes").select("*").order("created_at", { ascending: true });
-  if (!showAll) query = query.in("status", ACCEPTED_STATUSES).in("critic_decision", ACCEPTED_DECISIONS);
-  if (board) query = query.eq("education_context->curriculum_source->>name", board);
-  if (grade) query = query.eq("education_context->>grade_or_year", grade);
-  if (subject) query = query.eq("education_context->>subject_or_course", subject);
-
-  const { data } = await query;
-  const rows = (data ?? []) as ArchetypeRow[];
-
-  // Bulk-fetch every signature for every run these archetypes came from --
-  // question_id is only unique WITHIN a run (see
-  // 0041_archetype_miner_run_scoped_ids.sql), so the lookup map below is
-  // keyed by "run_id:question_id", not question_id alone. This pulls in
-  // some signatures the current filter doesn't strictly need (every
-  // question in each run, not just the ones referenced by these specific
-  // archetypes) -- simpler than a compound-tuple filter, and cheap at this
-  // tool's actual scale (an admin catalogue, not a student-facing query).
-  const runIds = Array.from(new Set(rows.map((r) => r.run_id)));
-  type SignatureRow = { run_id: string; question_id: string; signature: { curriculum?: { chapter?: string; topic?: string } } };
-  const chapterByQuestion = new Map<string, { chapter: string; topic: string }>();
-  if (runIds.length > 0) {
-    const { data: signatureRows } = await admin
-      .from("archetype_question_signatures")
-      .select("run_id, question_id, signature")
-      .in("run_id", runIds);
-    for (const s of (signatureRows ?? []) as SignatureRow[]) {
-      const curriculum = s.signature?.curriculum;
-      chapterByQuestion.set(`${s.run_id}:${s.question_id}`, {
-        chapter: curriculum?.chapter?.trim() || UNKNOWN_CHAPTER,
-        topic: curriculum?.topic?.trim() || UNKNOWN_TOPIC,
-      });
-    }
-  }
-
-  // chapter -> topic -> rows, each row annotated with its own resolved
-  // (chapter, topic) for rendering.
-  type AnnotatedRow = ArchetypeRow & { resolvedChapter: string; resolvedTopic: string };
-  const grouped = new Map<string, Map<string, AnnotatedRow[]>>();
+  // chapter -> topic -> rows.
+  const grouped = new Map<string, Map<string, ArchetypeWithChapterTopic[]>>();
   for (const row of rows) {
-    const resolved = row.archetype.supporting_question_ids
-      .map((qid) => chapterByQuestion.get(`${row.run_id}:${qid}`))
-      .filter((v): v is { chapter: string; topic: string } => Boolean(v));
-    const resolvedChapter = mostCommon(resolved.map((r) => r.chapter)) ?? UNKNOWN_CHAPTER;
-    const topicsWithinChapter = resolved.filter((r) => r.chapter === resolvedChapter).map((r) => r.topic);
-    const resolvedTopic = mostCommon(topicsWithinChapter) ?? UNKNOWN_TOPIC;
-
-    if (!grouped.has(resolvedChapter)) grouped.set(resolvedChapter, new Map());
-    const byTopic = grouped.get(resolvedChapter) as Map<string, AnnotatedRow[]>;
-    if (!byTopic.has(resolvedTopic)) byTopic.set(resolvedTopic, []);
-    (byTopic.get(resolvedTopic) as AnnotatedRow[]).push({ ...row, resolvedChapter, resolvedTopic });
+    if (!grouped.has(row.resolvedChapter)) grouped.set(row.resolvedChapter, new Map());
+    const byTopic = grouped.get(row.resolvedChapter) as Map<string, ArchetypeWithChapterTopic[]>;
+    if (!byTopic.has(row.resolvedTopic)) byTopic.set(row.resolvedTopic, []);
+    (byTopic.get(row.resolvedTopic) as ArchetypeWithChapterTopic[]).push(row);
   }
   // Chapters sorted by how many archetypes they hold (most-covered first)
   // -- more useful at a glance than alphabetical for a coverage view.

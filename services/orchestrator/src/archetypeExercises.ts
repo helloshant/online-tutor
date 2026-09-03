@@ -32,6 +32,7 @@ type SignatureRow = { run_id: string; question_id: string; signature: { curricul
 
 type ArchetypeLookupRow = {
   run_id: string;
+  archetype_id: string;
   archetype: {
     name: string;
     invariant_reasoning_structure: string;
@@ -57,7 +58,7 @@ export async function findArchetypesForTopic(params: {
 
   const { data: archetypeRows, error } = await supabase
     .from("archetypes")
-    .select("run_id, archetype")
+    .select("run_id, archetype_id, archetype")
     .eq("education_context->curriculum_source->>name", params.boardName)
     .eq("education_context->>grade_or_year", params.gradeName)
     .eq("education_context->>subject_or_course", params.subjectName)
@@ -107,6 +108,8 @@ export async function findArchetypesForTopic(params: {
       : null;
 
     matches.push({
+      runId: row.run_id,
+      archetypeId: row.archetype_id,
       name: row.archetype.name,
       invariantReasoningStructure: row.archetype.invariant_reasoning_structure,
       variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
@@ -117,4 +120,58 @@ export async function findArchetypesForTopic(params: {
   }
 
   return matches;
+}
+
+// Called only after a successful, archetype-grounded generation (the HIT
+// path in server.ts) -- records that this student was shown a question
+// following each of these patterns, for the "N of M known patterns
+// practiced" chapter/topic view (see 0042_student_archetype_progress.sql's
+// own comment on exactly what this does and doesn't claim). Fails open:
+// a write error here never blocks the exercises the student already got
+// back, only gets logged.
+export async function recordArchetypeProgress(params: {
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: string;
+  chapter: string;
+  topic: string;
+  archetypes: ExerciseArchetype[];
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase || params.archetypes.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+  const rows = params.archetypes.map((a) => ({
+    user_id: params.userId,
+    run_id: a.runId,
+    archetype_id: a.archetypeId,
+    board_id: params.boardId,
+    grade_id: params.gradeId,
+    subject_id: params.subjectId,
+    medium: params.medium,
+    chapter: params.chapter,
+    topic: params.topic,
+    last_seen_at: nowIso,
+  }));
+
+  // upsert on the table's own (user_id, run_id, archetype_id) unique
+  // constraint -- a repeat exposure to the same pattern updates
+  // last_seen_at rather than erroring or creating a duplicate row.
+  // times_seen is deliberately left off the upsert payload: PostgREST's
+  // upsert only touches columns actually present in the row, so omitting
+  // it means a conflict leaves the existing value alone rather than
+  // resetting it -- but that also means it never increments past its
+  // first-insert default of 1 with this plain a write. Accepted for now
+  // since nothing displays times_seen yet; incrementing it for real would
+  // need a raw SQL expression (an RPC), not worth adding until something
+  // actually reads the count.
+  const { error } = await supabase
+    .from("student_archetype_progress")
+    .upsert(rows, { onConflict: "user_id,run_id,archetype_id", ignoreDuplicates: false });
+
+  if (error) {
+    console.error("Failed to record student_archetype_progress (exercises were still returned to the student):", error);
+  }
 }

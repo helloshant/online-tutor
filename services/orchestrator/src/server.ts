@@ -2,7 +2,7 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
-import { findArchetypesForTopic } from "./archetypeExercises.js";
+import { findArchetypesForTopic, recordArchetypeProgress } from "./archetypeExercises.js";
 import {
   deleteCachedAnswer,
   deleteCachedTopicSummary,
@@ -856,6 +856,26 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     });
 
     const parsed = parseGeneratedExercises(text);
+
+    // Only recorded once generation actually produced something -- if
+    // parsing came back empty, the student wasn't shown anything despite
+    // archetypes having been looked up, so there's nothing to credit as
+    // "seen." Fire-and-forget, same posture as recordChatEvent below: a
+    // write failure here is logged inside recordArchetypeProgress itself
+    // and never affects the response already being sent to the student.
+    if (archetypes.length > 0 && parsed.length > 0) {
+      void recordArchetypeProgress({
+        userId: body.userId,
+        boardId: body.boardId,
+        gradeId: body.gradeId,
+        subjectId: body.subjectId,
+        medium,
+        chapter: body.chapter,
+        topic: body.topic,
+        archetypes,
+      });
+    }
+
     // Shown to the student regardless of whether the write below succeeds --
     // a storage failure shouldn't cost them the exercises they just asked
     // for, only get logged so it doesn't go unnoticed (see recordAnswer).
