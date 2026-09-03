@@ -103,9 +103,16 @@ export async function findArchetypesForTopic(params: {
     if (!isMatch) continue;
 
     const dist = row.archetype.stats?.difficulty_distribution;
-    const difficulty = dist
-      ? ((Object.entries(dist).sort((a, b) => b[1] - a[1])[0]?.[0] as "Easy" | "Medium" | "Hard" | undefined) ?? null)
-      : null;
+    // All-zero (no question ever classified) is treated the same as no
+    // data at all -- previously this picked "Easy" by insertion-order tie-
+    // break even with nothing behind it, which would have made
+    // describeDifficultyAsk's "never appeared as X" check below actively
+    // wrong about the one level it DID report.
+    const total = dist ? dist.Easy + dist.Medium + dist.Hard : 0;
+    const difficulty =
+      dist && total > 0
+        ? ((Object.entries(dist).sort((a, b) => b[1] - a[1])[0]?.[0] as "Easy" | "Medium" | "Hard" | undefined) ?? null)
+        : null;
 
     matches.push({
       runId: row.run_id,
@@ -114,6 +121,7 @@ export async function findArchetypesForTopic(params: {
       invariantReasoningStructure: row.archetype.invariant_reasoning_structure,
       variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
       difficulty,
+      difficultyDistribution: dist && total > 0 ? dist : null,
     });
 
     if (matches.length >= MAX_ARCHETYPES) break;

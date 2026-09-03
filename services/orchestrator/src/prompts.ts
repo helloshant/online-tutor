@@ -1,6 +1,6 @@
 import type { RetrievedChunk } from "./chapterRag.js";
 import { selectRelevantTopics } from "./syllabusFilter.js";
-import type { Medium, SyllabusTopic } from "./types.js";
+import type { DifficultyLevel, Medium, SyllabusTopic } from "./types.js";
 
 // Reported directly: a reply laying out data as a table (standard trig
 // ratios across several angles) came back "jumbled" in the chat window --
@@ -192,7 +192,17 @@ export type ExerciseArchetype = {
   name: string;
   invariantReasoningStructure: string;
   variationDescriptions: string[];
-  difficulty: "Easy" | "Medium" | "Hard" | null;
+  // Dominant (most-common) historical difficulty -- kept as its own field
+  // since the batch prompt's "Typically X difficulty" note only ever
+  // needs the one headline value, not the full spread.
+  difficulty: DifficultyLevel | null;
+  // Raw counts behind `difficulty` above -- null/all-zero when Stage 1
+  // never classified a difficulty for any of this archetype's supporting
+  // questions. Unused by the batch prompt; only describeDifficultyAsk
+  // below (Tier D, on-demand generation with a requested difficulty)
+  // reads this, to calibrate honestly instead of silently fabricating a
+  // level this pattern has never actually appeared at.
+  difficultyDistribution: Record<DifficultyLevel, number> | null;
 };
 
 function describeArchetype(a: ExerciseArchetype, index: number): string {
@@ -200,6 +210,41 @@ function describeArchetype(a: ExerciseArchetype, index: number): string {
     a.variationDescriptions.length > 0 ? ` Known variations: ${a.variationDescriptions.join("; ")}.` : "";
   const difficultyNote = a.difficulty ? ` Typically ${a.difficulty} difficulty at this level.` : "";
   return `${index + 1}. "${a.name}" -- ${a.invariantReasoningStructure}${variationNote}${difficultyNote}`;
+}
+
+// Only ever called for a single-archetype, on-demand generation (Tier C's
+// /v1/topic-exercises/generate) where the student explicitly asked for a
+// difficulty -- the batch prompt (buildExerciseGenerationPrompt's default
+// path, several archetypes at once) has no single "the student asked for
+// X" to calibrate against, so this is deliberately not folded into
+// describeArchetype above.
+//
+// The whole point: a pattern that's only ever appeared as Hard shouldn't
+// silently get an invented, disconnected "Easy" variant just because a
+// student clicked that button -- that would quietly break the "these are
+// real exam patterns" promise the entire archetype-grounding feature
+// exists to keep. Telling the model exactly how (un)common the requested
+// level actually is, and asking it to calibrate by simplifying scope/
+// numbers rather than inventing something unrelated, is the honest
+// middle ground between silently refusing the request and silently
+// fabricating it.
+function describeDifficultyAsk(a: ExerciseArchetype, requested: DifficultyLevel): string {
+  const dist = a.difficultyDistribution;
+  const total = dist ? dist.Easy + dist.Medium + dist.Hard : 0;
+
+  if (!dist || total === 0) {
+    return `No historical difficulty data is on record for this pattern. Write it at ${requested} difficulty, using the exact reasoning structure above -- don't invent an unrelated or trivial variant just to hit the label.`;
+  }
+
+  const spread = (["Easy", "Medium", "Hard"] as DifficultyLevel[])
+    .filter((level) => dist[level] > 0)
+    .map((level) => `${dist[level]} of ${total} ${level}`)
+    .join(", ");
+
+  if (dist[requested] === 0) {
+    return `Historically this pattern has appeared as ${spread} -- NEVER as ${requested} at this level. The student asked for ${requested} anyway: keep the exact reasoning structure above, but simplify the numbers, scope, or number of steps as needed to make it genuinely ${requested} -- don't invent a disconnected question just to hit that label.`;
+  }
+  return `Historically this pattern has appeared as ${spread}. Write it at ${requested} difficulty, consistent with how it's actually appeared at that level for this pattern.`;
 }
 
 export function buildExerciseGenerationPrompt(params: {
@@ -219,14 +264,33 @@ export function buildExerciseGenerationPrompt(params: {
   // Falls back to the original ungrounded instruction when empty, exactly
   // as before this parameter existed.
   archetypes?: ExerciseArchetype[];
+  // Set only by the on-demand single-pattern path (Tier D) when the
+  // student picked a specific difficulty rather than "Any" -- meaningless
+  // (and ignored) for the batch path or an ungrounded generation, since
+  // there's no single archetype to calibrate the ask against.
+  requestedDifficulty?: DifficultyLevel;
 }): string {
-  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic, count, archetypes = [] } = params;
+  const {
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    responseLanguage = medium,
+    chapter,
+    topic,
+    count,
+    archetypes = [],
+    requestedDifficulty,
+  } = params;
+
+  const difficultyAsk =
+    requestedDifficulty && archetypes.length === 1 ? `\n\n${describeDifficultyAsk(archetypes[0], requestedDifficulty)}` : "";
 
   const taskInstruction =
     archetypes.length > 0
       ? `Generate exactly ${count} practice questions by instantiating the reasoning patterns below with FRESH numbers, names, and context of your own choosing -- never reuse or lightly reword a historical question, only the underlying reasoning structure. Cycle through the patterns (repeat some if there are fewer than ${count}) so the set as a whole reflects the mix of patterns and difficulty this chapter/topic actually gets tested on, not an arbitrary spread:
 
-${archetypes.map(describeArchetype).join("\n")}`
+${archetypes.map(describeArchetype).join("\n")}${difficultyAsk}`
       : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.`;
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.

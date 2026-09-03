@@ -187,17 +187,23 @@ export async function getTopicExercises(
   return { exercises: body.exercises as ExerciseItem[] };
 }
 
+export type DifficultyLevel = "Easy" | "Medium" | "Hard";
+
 // One curated, real exam pattern this exact chapter/topic has mined
 // archetypes for -- powers the on-demand "practice a specific pattern"
 // picker under Relevant Exercises (Tier C). Never displayed with
 // "archetype"/"mining" language -- just the pattern's own human-written
-// name. difficulty is informational only in this tier (Tier D is what
-// lets a student actually steer it).
+// name. difficultyDistribution (Tier D) is the real historical spread --
+// shown as a hint next to the Easy/Medium/Hard picker so a student can
+// see up front how (un)common the level they're about to ask for
+// actually is for this pattern, before generation has to calibrate
+// around it server-side.
 export type TopicPattern = {
   runId: string;
   archetypeId: string;
   name: string;
-  difficulty: "Easy" | "Medium" | "Hard" | null;
+  difficulty: DifficultyLevel | null;
+  difficultyDistribution: Record<DifficultyLevel, number> | null;
 };
 
 export type TopicPatternsRequest = {
@@ -239,6 +245,9 @@ export async function getTopicPatterns(request: TopicPatternsRequest): Promise<{
 export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
   archetypeId?: string;
   archetypeRunId?: string;
+  // Tier D: set only when the student picked a specific level rather than
+  // "Any difficulty."
+  requestedDifficulty?: DifficultyLevel;
 };
 
 export async function generateTopicExercise(
