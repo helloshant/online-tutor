@@ -29,6 +29,7 @@ import {
   buildTutorSystemPrompt,
 } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
+import { bestMatchingTopic } from "./syllabusFilter.js";
 import { getStoredTopicSummary, upsertTopicSummary } from "./topicSummary.js";
 import type {
   AnswerScope,
@@ -260,6 +261,15 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
     return;
   }
 
+  // Powers the "Practice a specific pattern" picker on this reply,
+  // regardless of which of the three response paths below actually serves
+  // it (cache/database/llm all answer the SAME question against the SAME
+  // topics, so the same best-guess topic applies to all three) -- computed
+  // once here rather than duplicated in each branch. A pure, cheap
+  // (keyword-only, no I/O) lookup, so there's no cost reason to skip it on
+  // the cache/database hit paths the way an LLM call would be.
+  const matchedTopic = bestMatchingTopic(studentBody.topics, studentBody.message);
+
   // Stages 2-3 (cache, then the Postgres answer bank) only apply to a fresh,
   // text-only question, not a follow-up ("explain more", "why?") -- those
   // depend on conversation context that a scope-only lookup key can't
@@ -306,7 +316,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
         source: "cache",
         latencyMs: Date.now() - startedAt,
       });
-      const response: ChatOrchestrationResponse = { reply: cached, source: "cache" };
+      const response: ChatOrchestrationResponse = { reply: cached, source: "cache", matchedTopic };
       res.json(response);
       return;
     }
@@ -328,7 +338,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
         answerBankId: fromBank.id,
         latencyMs: Date.now() - startedAt,
       });
-      const response: ChatOrchestrationResponse = { reply: fromBank.answer, source: "database" };
+      const response: ChatOrchestrationResponse = { reply: fromBank.answer, source: "database", matchedTopic };
       res.json(response);
       return;
     }
@@ -441,7 +451,7 @@ app.post("/v1/chat", requireSharedSecret, async (req: Request, res: Response) =>
       grounded: referenceChunks.length > 0,
     });
 
-    const response: ChatOrchestrationResponse = { reply: text, source: "llm" };
+    const response: ChatOrchestrationResponse = { reply: text, source: "llm", matchedTopic };
     res.json(response);
   } catch (err) {
     console.error("LLM chat completion failed:", err);

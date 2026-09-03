@@ -69,7 +69,7 @@ function getOrchestratorUrl(): string {
 
 export async function getOrchestratedReply(
   request: ChatOrchestrationRequest
-): Promise<{ reply: string; source?: ChatOrchestrationSource }> {
+): Promise<{ reply: string; source?: ChatOrchestrationSource; matchedTopic?: { chapter: string; topic: string } | null }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chat`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -90,7 +90,7 @@ export async function getOrchestratedReply(
   if (!body || typeof body.reply !== "string") {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
-  return { reply: body.reply, source: body.source };
+  return { reply: body.reply, source: body.source, matchedTopic: body.matchedTopic };
 }
 
 export type TopicSummaryRequest = {
