@@ -3,12 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
-import { generateTopicExercise } from "@/lib/orchestratorClient";
+import { generateTopicExercise, type DifficultyLevel } from "@/lib/orchestratorClient";
 import type { Medium } from "@/lib/supabase/types";
 
 // Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts and
 // /api/topics/[id]/exercises/route.ts.
 const ENGLISH_SUBJECT_CODE = "ENG";
+const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 
 // On-demand generation for ONE specific pattern (Tier C's "Generate" on a
 // picked pattern, or "Generate another" with no pattern specified) --
@@ -39,6 +40,11 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
   const archetypeId = typeof body?.archetypeId === "string" ? body.archetypeId : undefined;
   const archetypeRunId = typeof body?.archetypeRunId === "string" ? body.archetypeRunId : undefined;
   const preferEnglish = body?.preferEnglish === true;
+  // Invalid/absent just means "Any difficulty" -- never a 400, this is
+  // the one optional refinement on an otherwise already-valid request.
+  const requestedDifficulty = VALID_DIFFICULTIES.includes(body?.requestedDifficulty)
+    ? (body.requestedDifficulty as DifficultyLevel)
+    : undefined;
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
 
@@ -118,6 +124,7 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       topic: topicRow.topic,
       archetypeId,
       archetypeRunId,
+      requestedDifficulty,
     });
     return NextResponse.json({ exercise });
   } catch (err) {

@@ -145,11 +145,21 @@ export type TopicExercisesResponse = {
 // carried through (never shown) because archetypeId is only unique
 // WITHIN a run -- /v1/topic-exercises/generate needs both back to
 // identify which pattern was actually picked.
+export type DifficultyLevel = "Easy" | "Medium" | "Hard";
+
 export type TopicPattern = {
   runId: string;
   archetypeId: string;
   name: string;
-  difficulty: "Easy" | "Medium" | "Hard" | null;
+  // Dominant historical difficulty -- kept for a compact display, e.g.
+  // "usually Hard." difficultyDistribution below is the full spread
+  // behind it (Tier D: shown as a hint next to the Easy/Medium/Hard
+  // picker, e.g. "7 of 10 mined Hard, 3 Medium, 0 Easy"), so a student
+  // asking for a level this pattern rarely/never appears at can see that
+  // up front, before generation has to calibrate around it server-side
+  // (see prompts.ts's describeDifficultyAsk).
+  difficulty: DifficultyLevel | null;
+  difficultyDistribution: Record<DifficultyLevel, number> | null;
 };
 
 export type TopicPatternsRequest = {
@@ -174,6 +184,11 @@ export type TopicPatternsResponse = {
 export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
   archetypeId?: string;
   archetypeRunId?: string;
+  // Tier D: set only when the student picked a specific level rather than
+  // "Any difficulty" -- see prompts.ts's describeDifficultyAsk for how
+  // this gets calibrated against the pattern's own real
+  // difficultyDistribution rather than trusted to just work.
+  requestedDifficulty?: DifficultyLevel;
 };
 
 export type GenerateTopicExerciseResponse = {

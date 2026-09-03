@@ -17,14 +17,25 @@ import type { SyllabusTopic } from "@/lib/supabase/types";
 type ExerciseItem = { id: string; question: string; answer: string };
 type SearchExercise = { question: string; answer: string };
 type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
+type DifficultyLevel = "Easy" | "Medium" | "Hard";
 
 // A curated, real exam pattern mined for this exact topic -- powers the
 // "Practice a specific pattern" picker below the auto-loaded exercises
-// (Tier C). runId is carried through (never shown) purely so a click can
-// identify which pattern was picked back to the server -- archetypeId
+// (Tier C/D). runId is carried through (never shown) purely so a click
+// can identify which pattern was picked back to the server -- archetypeId
 // alone isn't unique across runs. Empty (the common case for most
 // topics right now) just means the picker doesn't render at all.
-type Pattern = { runId: string; archetypeId: string; name: string };
+// difficultyDistribution (Tier D) is the pattern's own real historical
+// spread -- shown as a hint next to the Easy/Medium/Hard buttons so a
+// student can see up front how (un)common the level they're about to
+// pick actually is for this pattern, rather than it silently being
+// calibrated (or not) only after they've already asked.
+type Pattern = {
+  runId: string;
+  archetypeId: string;
+  name: string;
+  difficultyDistribution: Record<DifficultyLevel, number> | null;
+};
 
 // Per-exercise submission/grading state, keyed by exercise id -- a
 // student attempts each exercise independently, so this can't be one
@@ -43,6 +54,20 @@ type GradeState = {
 // Sentinel `generating` key for "Generate another" (no specific pattern),
 // distinct from any real archetypeId.
 const GENERATING_RANDOM = "__random__";
+
+const DIFFICULTY_LEVELS: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
+
+// "Usually Hard (7 of 10 mined)" -- raw counts, not a percentage, so this
+// stays honest about how little data some patterns have (a percentage of
+// 1 question would read as false precision) and never claims anything
+// about a pattern with nothing classified at all.
+function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): string | null {
+  if (!dist) return null;
+  const total = dist.Easy + dist.Medium + dist.Hard;
+  if (total === 0) return null;
+  const [top, topCount] = DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0];
+  return `Usually ${top} (${topCount} of ${total} mined)`;
+}
 
 const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> = {
   correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
@@ -107,11 +132,16 @@ export function TopicSummaryMessage({
   const [filteredExercises, setFilteredExercises] = useState<SearchExercise[] | null>(null);
   const [loadingFilter, setLoadingFilter] = useState(false);
 
-  // On-demand pattern picker (Tier C). `generating` holds the archetypeId
-  // of whichever button was clicked (or GENERATING_RANDOM for "Generate
-  // another"), so only THAT button shows a busy state -- not a single
-  // shared boolean that would grey out every button in the row at once.
+  // On-demand pattern picker (Tier C/D). `generating` holds the
+  // archetypeId of whichever button was clicked (or GENERATING_RANDOM for
+  // "Generate another"), so only THAT button shows a busy state -- not a
+  // single shared boolean that would grey out every button in the row at
+  // once. `pendingSelection` is which pattern (or, with pattern: null,
+  // "Generate another") the student has clicked but not yet chosen a
+  // difficulty for -- clicking a pattern name doesn't generate
+  // immediately, it opens the Easy/Medium/Hard/Any row below it first.
   const [patterns, setPatterns] = useState<Pattern[]>([]);
+  const [pendingSelection, setPendingSelection] = useState<{ pattern: Pattern | null } | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
@@ -195,6 +225,7 @@ export function TopicSummaryMessage({
     setActiveTagFilter(null);
     setFilteredExercises(null);
     setPatterns([]);
+    setPendingSelection(null);
     setGenerateError(null);
   }, [preferEnglish]);
 
@@ -232,19 +263,20 @@ export function TopicSummaryMessage({
     }
   }
 
-  async function handleGeneratePattern(pattern?: Pattern) {
+  async function handleGeneratePattern(pattern?: Pattern, requestedDifficulty?: DifficultyLevel) {
     if (generating !== null) return;
     setGenerating(pattern?.archetypeId ?? GENERATING_RANDOM);
     setGenerateError(null);
+    setPendingSelection(null);
     try {
       const res = await fetch(`/api/topics/${topic.id}/exercises/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          pattern
-            ? { archetypeId: pattern.archetypeId, archetypeRunId: pattern.runId, preferEnglish }
-            : { preferEnglish }
-        ),
+        body: JSON.stringify({
+          ...(pattern ? { archetypeId: pattern.archetypeId, archetypeRunId: pattern.runId } : {}),
+          ...(requestedDifficulty ? { requestedDifficulty } : {}),
+          preferEnglish,
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -546,26 +578,81 @@ export function TopicSummaryMessage({
                         </p>
                         {generateError && <p className="mb-2 text-xs text-red-600">{generateError}</p>}
                         <div className="flex flex-wrap gap-1.5">
-                          {patterns.map((p) => (
-                            <button
-                              key={`${p.runId}:${p.archetypeId}`}
-                              type="button"
-                              onClick={() => handleGeneratePattern(p)}
-                              disabled={generating !== null}
-                              className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
-                            >
-                              {generating === p.archetypeId ? "Generating…" : p.name}
-                            </button>
-                          ))}
+                          {patterns.map((p) => {
+                            const isSelected = pendingSelection?.pattern?.archetypeId === p.archetypeId;
+                            return (
+                              <button
+                                key={`${p.runId}:${p.archetypeId}`}
+                                type="button"
+                                onClick={() => setPendingSelection(isSelected ? null : { pattern: p })}
+                                disabled={generating !== null}
+                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
+                                  isSelected ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
+                                }`}
+                              >
+                                {generating === p.archetypeId ? "Generating…" : p.name}
+                              </button>
+                            );
+                          })}
                           <button
                             type="button"
-                            onClick={() => handleGeneratePattern()}
+                            onClick={() =>
+                              setPendingSelection(pendingSelection && !pendingSelection.pattern ? null : { pattern: null })
+                            }
                             disabled={generating !== null}
-                            className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
+                            className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
+                              pendingSelection && !pendingSelection.pattern
+                                ? "bg-foreground/70 text-white"
+                                : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+                            }`}
                           >
                             {generating === GENERATING_RANDOM ? "Generating…" : "Generate another"}
                           </button>
                         </div>
+
+                        {/* Picking a pattern (or "Generate another") doesn't
+                            fire the request immediately -- it opens this
+                            difficulty row first, so a student can see the
+                            pattern's own real historical spread before
+                            deciding, rather than only finding out afterward
+                            that (say) "Easy" almost never appears in real
+                            exams for it. */}
+                        {pendingSelection && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-background p-2">
+                            <span className="text-xs text-foreground/50">
+                              {pendingSelection.pattern
+                                ? describeDifficultyHint(pendingSelection.pattern.difficultyDistribution) ??
+                                  "No difficulty data yet —"
+                                : "Difficulty:"}
+                            </span>
+                            {DIFFICULTY_LEVELS.map((level) => (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined, level)}
+                                disabled={generating !== null}
+                                className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
+                              >
+                                {level}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined)}
+                              disabled={generating !== null}
+                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
+                            >
+                              Any
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingSelection(null)}
+                              className="ml-auto text-xs text-foreground/40 hover:underline"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>

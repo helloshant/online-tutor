@@ -37,6 +37,7 @@ import type {
   ChapterDocumentImportChunksRequest,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
+  DifficultyLevel,
   ExerciseItem,
   GenerateTopicExerciseRequest,
   GenerateTopicExerciseResponse,
@@ -58,6 +59,9 @@ const MAX_TOKENS = 1536;
 const SUMMARY_MAX_TOKENS = 700;
 const EXERCISE_MAX_TOKENS = 2048;
 const EXERCISE_GENERATION_COUNT = 5;
+// Tier D: validates a client-supplied requestedDifficulty on
+// /v1/topic-exercises/generate -- see that route's own comment.
+const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 const SHARED_SECRET = process.env.ORCHESTRATOR_SHARED_SECRET;
 
 const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -1013,7 +1017,13 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
   });
 
   const response: TopicPatternsResponse = {
-    patterns: archetypes.map((a) => ({ runId: a.runId, archetypeId: a.archetypeId, name: a.name, difficulty: a.difficulty })),
+    patterns: archetypes.map((a) => ({
+      runId: a.runId,
+      archetypeId: a.archetypeId,
+      name: a.name,
+      difficulty: a.difficulty,
+      difficultyDistribution: a.difficultyDistribution,
+    })),
   };
   res.json(response);
 });
@@ -1059,6 +1069,12 @@ app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Reques
   const medium = body.medium as Medium;
   const responseLanguage: Medium = (body.responseLanguage as Medium | undefined) ?? medium;
   const scope = { boardId: body.boardId, gradeId: body.gradeId, subjectId: body.subjectId, medium: responseLanguage };
+  // Invalid/absent just means "Any difficulty" -- never rejected as a bad
+  // request, since this is the one optional refinement on an otherwise
+  // already-valid request.
+  const requestedDifficulty = VALID_DIFFICULTIES.includes(body.requestedDifficulty as DifficultyLevel)
+    ? (body.requestedDifficulty as DifficultyLevel)
+    : undefined;
 
   try {
     const archetypes = await findArchetypesForTopic({
@@ -1099,6 +1115,7 @@ app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Reques
       topic: body.topic,
       count: 1,
       archetypes: [chosen],
+      requestedDifficulty,
     });
     const { text, model, usage } = await getChatReply({
       systemPrompt,
