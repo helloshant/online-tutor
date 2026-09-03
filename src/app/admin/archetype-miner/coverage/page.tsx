@@ -12,10 +12,19 @@ export default async function ArchetypeCoveragePage({
   const { board, grade, subject, all } = await searchParams;
   const showAll = all === "1";
   const admin = createAdminClient();
+  const scopeChosen = Boolean(board && grade && subject);
 
+  // Chapter/topic resolution requires a full board+grade+subject scope to
+  // mean anything (see the warning below) -- and, at this app's current
+  // scale, doing it unscoped means fetching every eligible archetype (500+
+  // rows) plus every signature for every run they came from (thousands of
+  // rows), just to show a message telling the admin to narrow the filter.
+  // Skip that fetch entirely until all three are picked, so the page loads
+  // instantly by default instead of stalling on a bulk fetch nobody asked
+  // for.
   const [{ boards, grades, subjects }, rows] = await Promise.all([
     getArchetypeFilterOptions(admin),
-    getArchetypesWithChapterTopic(admin, { board, grade, subject, showAll }),
+    scopeChosen ? getArchetypesWithChapterTopic(admin, { board, grade, subject, showAll }) : Promise.resolve([]),
   ]);
 
   // chapter -> topic -> rows.
@@ -31,8 +40,6 @@ export default async function ArchetypeCoveragePage({
   const chapterEntries = Array.from(grouped.entries()).sort(
     (a, b) => Array.from(b[1].values()).flat().length - Array.from(a[1].values()).flat().length
   );
-
-  const scopeChosen = Boolean(board && grade && subject);
 
   return (
     <div>
@@ -110,14 +117,15 @@ export default async function ArchetypeCoveragePage({
 
       {!scopeChosen && (
         <p className="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-2 text-sm text-yellow-800">
-          Chapters only make sense within one board + grade + subject -- pick all three above. Showing{" "}
-          {rows.length} archetype(s) across whatever&apos;s currently selected in the meantime.
+          Chapters only make sense within one board + grade + subject -- pick all three above to see coverage.
         </p>
       )}
 
-      <p className="mt-4 text-xs text-foreground/40">
-        {rows.length} archetype(s) across {chapterEntries.length} chapter(s) shown.
-      </p>
+      {scopeChosen && (
+        <p className="mt-4 text-xs text-foreground/40">
+          {rows.length} archetype(s) across {chapterEntries.length} chapter(s) shown.
+        </p>
+      )}
 
       <div className="mt-4 space-y-8">
         {chapterEntries.map(([chapterName, byTopic]) => {
@@ -169,7 +177,7 @@ export default async function ArchetypeCoveragePage({
             </div>
           );
         })}
-        {chapterEntries.length === 0 && (
+        {scopeChosen && chapterEntries.length === 0 && (
           <p className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground/50">
             No archetypes match this filter yet.
           </p>
