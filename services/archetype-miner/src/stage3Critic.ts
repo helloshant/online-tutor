@@ -1,6 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCriticPrompt } from "./prompts.js";
-import { coerceInvariantReasoningStructure } from "./textCoercion.js";
+import { coerceInvariantReasoningStructure, normalizeStats } from "./textCoercion.js";
 import type { LlmProvider } from "./llm.js";
 import type { Archetype, CriticDecision } from "./types.js";
 
@@ -59,16 +59,7 @@ function normalizeReviewed(raw: Partial<Archetype> & { archetype_id: string }, o
     invariant_reasoning_structure: raw.invariant_reasoning_structure ?? "",
     variations: [],
     supporting_question_ids: raw.supporting_question_ids ?? [],
-    stats: raw.stats ?? {
-      question_count: raw.supporting_question_ids?.length ?? 0,
-      years_observed: [],
-      first_observed_year: null,
-      last_observed_year: null,
-      marks_distribution: {},
-      formats: {},
-      difficulty_distribution: { Easy: 0, Medium: 0, Hard: 0 },
-      grade_or_year_distribution: {},
-    },
+    stats: normalizeStats(raw.stats, raw.supporting_question_ids?.length ?? 0),
     generator_usable: raw.generator_usable ?? false,
     generator_usability_rationale: raw.generator_usability_rationale ?? "",
     mining_confidence: raw.mining_confidence ?? 0,
