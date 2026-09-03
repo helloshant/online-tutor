@@ -823,6 +823,19 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       chapter: body.chapter,
       topic: body.topic,
     });
+    // Visibility into how often generation is actually archetype-grounded
+    // versus falling back to the ungrounded prompt -- the only way to see
+    // this from outside without it (a hit/miss ratio isn't reflected
+    // anywhere else: same endpoint, same response shape, same "source:
+    // llm" either way). One line per generation call, not per request --
+    // this only runs on the "nothing banked yet" path to begin with.
+    console.log(
+      archetypes.length > 0
+        ? `Archetype-grounded exercises: HIT (${archetypes.length} archetype(s)) for ` +
+            `${body.boardName}/${body.gradeName}/${body.subjectName} -- "${body.chapter}" / "${body.topic}"`
+        : `Archetype-grounded exercises: MISS for ` +
+            `${body.boardName}/${body.gradeName}/${body.subjectName} -- "${body.chapter}" / "${body.topic}"`
+    );
 
     const systemPrompt = buildExerciseGenerationPrompt({
       subjectName: body.subjectName,
