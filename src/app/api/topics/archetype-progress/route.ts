@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getArchetypesWithChapterTopic } from "@/lib/archetypeCoverage";
+import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import type { Medium } from "@/lib/supabase/types";
 
 // Batched, one call per board/grade/subject/medium scope (not per topic) --
@@ -73,17 +74,9 @@ async function handleGet(request: Request) {
   // ever see the derived counts this route computes from it, never the
   // rows themselves).
   const admin = createAdminClient();
-  // grades.name is always "Grade N" (confirmed: every row in the live
-  // catalog), but archetype-miner submissions store education_context.
-  // grade_or_year as a bare admin-typed number ("N") -- confirmed against
-  // live archetypes ("10", "12", ...), never "Grade N". Passing grade.name
-  // straight through meant this filter never matched ANYTHING, so no
-  // student ever saw an archetype-mined badge regardless of real coverage.
-  // Not a general fuzzy-match fix (that's still soft/best-effort, see
-  // getArchetypesWithChapterTopic's own comment) -- just correcting for
-  // this one confirmed, systematic naming difference between the two
-  // independently-named systems.
-  const gradeOrYear = grade.name.replace(/^grade\s+/i, "").trim();
+  // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade N")
+  // never matches education_context.grade_or_year ("N") unstripped.
+  const gradeOrYear = toArchetypeGradeOrYear(grade.name);
   const archetypeRows = await getArchetypesWithChapterTopic(admin, { board: board.name, grade: gradeOrYear, subject: subject.name });
 
   const seen = new Set(
