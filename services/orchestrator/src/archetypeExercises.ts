@@ -122,13 +122,55 @@ export async function findArchetypesForTopic(params: {
   return matches;
 }
 
+// Both the "just shown" event (generation, no result yet) and a graded
+// attempt's result go through the SAME record_archetype_progress Postgres
+// function (0043_exercise_grading.sql) -- a plain PostgREST upsert can't
+// express "+1" for times_seen/times_correct/times_incorrect (every column
+// left out of the payload is simply untouched on conflict, never
+// incremented), so this needs a real SQL-side increment to be accurate
+// across repeat calls. Fails open throughout: a write error here never
+// blocks the response already being sent back to the student, only gets
+// logged.
+async function recordArchetypeProgressRow(params: {
+  userId: string;
+  runId: string;
+  archetypeId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: string;
+  chapter: string;
+  topic: string;
+  result?: "correct" | "partially_correct" | "incorrect" | null;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.rpc("record_archetype_progress", {
+    p_user_id: params.userId,
+    p_run_id: params.runId,
+    p_archetype_id: params.archetypeId,
+    p_board_id: params.boardId,
+    p_grade_id: params.gradeId,
+    p_subject_id: params.subjectId,
+    p_medium: params.medium,
+    p_chapter: params.chapter,
+    p_topic: params.topic,
+    p_result: params.result ?? null,
+  });
+
+  if (error) {
+    console.error("Failed to record student_archetype_progress:", error);
+  }
+}
+
 // Called only after a successful, archetype-grounded generation (the HIT
 // path in server.ts) -- records that this student was shown a question
 // following each of these patterns, for the "N of M known patterns
 // practiced" chapter/topic view (see 0042_student_archetype_progress.sql's
-// own comment on exactly what this does and doesn't claim). Fails open:
-// a write error here never blocks the exercises the student already got
-// back, only gets logged.
+// own comment on exactly what this does and doesn't claim -- "shown," not
+// "attempted" or "mastered"; see recordArchetypeAttemptResult below for
+// the actual mastery signal).
 export async function recordArchetypeProgress(params: {
   userId: string;
   boardId: string;
@@ -139,39 +181,41 @@ export async function recordArchetypeProgress(params: {
   topic: string;
   archetypes: ExerciseArchetype[];
 }): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase || params.archetypes.length === 0) return;
+  if (params.archetypes.length === 0) return;
+  await Promise.all(
+    params.archetypes.map((a) =>
+      recordArchetypeProgressRow({
+        userId: params.userId,
+        runId: a.runId,
+        archetypeId: a.archetypeId,
+        boardId: params.boardId,
+        gradeId: params.gradeId,
+        subjectId: params.subjectId,
+        medium: params.medium,
+        chapter: params.chapter,
+        topic: params.topic,
+      })
+    )
+  );
+}
 
-  const nowIso = new Date().toISOString();
-  const rows = params.archetypes.map((a) => ({
-    user_id: params.userId,
-    run_id: a.runId,
-    archetype_id: a.archetypeId,
-    board_id: params.boardId,
-    grade_id: params.gradeId,
-    subject_id: params.subjectId,
-    medium: params.medium,
-    chapter: params.chapter,
-    topic: params.topic,
-    last_seen_at: nowIso,
-  }));
-
-  // upsert on the table's own (user_id, run_id, archetype_id) unique
-  // constraint -- a repeat exposure to the same pattern updates
-  // last_seen_at rather than erroring or creating a duplicate row.
-  // times_seen is deliberately left off the upsert payload: PostgREST's
-  // upsert only touches columns actually present in the row, so omitting
-  // it means a conflict leaves the existing value alone rather than
-  // resetting it -- but that also means it never increments past its
-  // first-insert default of 1 with this plain a write. Accepted for now
-  // since nothing displays times_seen yet; incrementing it for real would
-  // need a raw SQL expression (an RPC), not worth adding until something
-  // actually reads the count.
-  const { error } = await supabase
-    .from("student_archetype_progress")
-    .upsert(rows, { onConflict: "user_id,run_id,archetype_id", ignoreDuplicates: false });
-
-  if (error) {
-    console.error("Failed to record student_archetype_progress (exercises were still returned to the student):", error);
-  }
+// Called once per graded attempt (see /v1/topic-exercises/grade in
+// server.ts), only when the exercise being graded was archetype-grounded
+// AND the LLM judge's own response actually parsed into a real verdict
+// (see exerciseGrading.ts) -- an attempt at an ungrounded exercise, or a
+// grading response that failed to parse, has nothing valid to credit and
+// is skipped rather than guessed at.
+export async function recordArchetypeAttemptResult(params: {
+  userId: string;
+  runId: string;
+  archetypeId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: string;
+  chapter: string;
+  topic: string;
+  result: "correct" | "partially_correct" | "incorrect";
+}): Promise<void> {
+  await recordArchetypeProgressRow(params);
 }

@@ -147,7 +147,19 @@ export type TopicExercisesRequest = {
   topic: string;
 };
 
-export type ExerciseItem = { question: string; answer: string };
+// id is the exercise's own stable answered_questions row id -- always
+// present, needed to submit an attempt against it later (see
+// gradeTopicExercise below). archetypeRunId/archetypeId are set only when
+// this specific exercise was generated from (or matched to) a mined
+// archetype, never shown to the student -- only used server-side to
+// credit student_archetype_progress on a graded attempt.
+export type ExerciseItem = {
+  id: string;
+  question: string;
+  answer: string;
+  archetypeRunId?: string | null;
+  archetypeId?: string | null;
+};
 
 export async function getTopicExercises(
   request: TopicExercisesRequest
@@ -173,6 +185,50 @@ export async function getTopicExercises(
     throw new Error("Orchestrator returned an unexpected response shape");
   }
   return { exercises: body.exercises as ExerciseItem[] };
+}
+
+// Deliberately no medium/language field -- the exercise's own stored
+// language is what grading feedback is written in, resolved server-side
+// from the exercise's own row (see the orchestrator's GradeExerciseRequest
+// and getExerciseForGrading).
+export type GradeTopicExerciseRequest = {
+  userId: string;
+  exerciseId: string;
+  studentAnswer: string;
+};
+
+export type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
+
+export type GradeTopicExerciseResponse = {
+  verdict: ExerciseVerdict;
+  feedback: string;
+  // The worked solution -- withheld from the student until this call, see
+  // topic-summary-message.tsx's own hide-until-submitted flow.
+  answer: string;
+};
+
+export async function gradeTopicExercise(request: GradeTopicExerciseRequest): Promise<GradeTopicExerciseResponse> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/grade`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || typeof body.verdict !== "string" || typeof body.feedback !== "string" || typeof body.answer !== "string") {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return body as GradeTopicExerciseResponse;
 }
 
 export type ChapterDocumentEmbedRequest = {

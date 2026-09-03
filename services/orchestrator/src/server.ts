@@ -1,8 +1,9 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
-import { findAnswerInBank, findRelevantExercises, recordAnswer } from "./answerBank.js";
+import { findAnswerInBank, findRelevantExercises, getExerciseForGrading, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
-import { findArchetypesForTopic, recordArchetypeProgress } from "./archetypeExercises.js";
+import { findArchetypesForTopic, recordArchetypeProgress, recordArchetypeAttemptResult } from "./archetypeExercises.js";
+import { gradeExerciseAnswer } from "./exerciseGrading.js";
 import {
   deleteCachedAnswer,
   deleteCachedTopicSummary,
@@ -36,6 +37,9 @@ import type {
   ChapterDocumentImportChunksRequest,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
+  ExerciseItem,
+  GradeExerciseRequest,
+  GradeExerciseResponse,
   ImageAttachment,
   ImageMediaType,
   Medium,
@@ -802,7 +806,13 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       latencyMs: Date.now() - startedAt,
     });
     const response: TopicExercisesResponse = {
-      exercises: found.map(({ question, answer }) => ({ question, answer })),
+      exercises: found.map((f) => ({
+        id: f.id,
+        question: f.question,
+        answer: f.answer,
+        archetypeRunId: f.archetype_run_id,
+        archetypeId: f.archetype_id,
+      })),
       source: "database",
     };
     res.json(response);
@@ -876,14 +886,26 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       });
     }
 
-    // Shown to the student regardless of whether the write below succeeds --
-    // a storage failure shouldn't cost them the exercises they just asked
-    // for, only get logged so it doesn't go unnoticed (see recordAnswer).
-    const stored: { question: string; answer: string }[] = [];
+    // Every exercise returned to the student now needs a real, stable
+    // answered_questions row id (the hide-until-submitted grading flow --
+    // see /v1/topic-exercises/grade below -- has to be able to look the
+    // exercise back up later), not just best-effort storage the way this
+    // used to work -- an exercise a storage failure couldn't get an id for
+    // is skipped from the response entirely, rather than shown with
+    // nothing to submit against.
+    const stored: ExerciseItem[] = [];
     for (const exercise of parsed) {
       const validation = validateAnswerForStorage(exercise.answer);
       if (!validation.store) continue;
-      stored.push(exercise);
+
+      // patternIndex (see exerciseParser.ts) is the model's own 1-based
+      // reference into the SAME archetypes array the prompt was built
+      // from -- out-of-range or absent (an ungrounded generation, or a
+      // model that dropped the tag despite being asked for it) just means
+      // this specific exercise isn't attributed to a pattern, not an error.
+      const archetype =
+        typeof exercise.patternIndex === "number" ? archetypes[exercise.patternIndex - 1] : undefined;
+      const archetypeAttribution = archetype ? { runId: archetype.runId, archetypeId: archetype.archetypeId } : null;
 
       // The topic-level search above (findRelevantExercises) only tells us
       // this exact topic has nothing banked yet -- a specific generated
@@ -892,19 +914,30 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       // syllabus edit moved it), so check per-exercise before writing rather
       // than trusting the topic-level miss to mean every exercise is new.
       const existing = await findAnswerInBank({ ...scope, question: exercise.question });
-      if (existing) continue;
+      const exerciseId =
+        existing?.id ??
+        (await recordAnswer(
+          { ...scope, question: exercise.question, topicId: body.topicId },
+          exercise.answer,
+          validation.status,
+          body.userId,
+          archetypeAttribution
+        ));
 
-      const saved = await recordAnswer(
-        { ...scope, question: exercise.question, topicId: body.topicId },
-        exercise.answer,
-        validation.status,
-        body.userId
-      );
-      if (!saved) {
+      if (!exerciseId) {
         console.error(
           `Failed to store generated exercise in the answer bank: "${exercise.question.slice(0, 80)}"`
         );
+        continue;
       }
+
+      stored.push({
+        id: exerciseId,
+        question: exercise.question,
+        answer: exercise.answer,
+        archetypeRunId: archetypeAttribution?.runId ?? null,
+        archetypeId: archetypeAttribution?.archetypeId ?? null,
+      });
     }
 
     void recordChatEvent({
@@ -928,6 +961,81 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
   } catch (err) {
     console.error("Exercise generation failed:", err);
     res.status(502).json({ error: "Could not generate exercises right now. Please try again shortly." });
+  }
+});
+
+// Grades a student's own attempt at ONE exercise, submitted before they've
+// seen the worked solution (see topic-summary-message.tsx's own hide-
+// until-submitted flow). question/expectedAnswer/scope are all re-derived
+// from the exercise's own stored row (getExerciseForGrading), never
+// trusted from the request -- a student grading their own attempt must
+// never be able to supply their own "expected answer." The real solution
+// is returned regardless of the verdict (or even if grading itself
+// failed to parse) -- withholding it any further than "until the student
+// has made an attempt" serves no purpose.
+app.post("/v1/topic-exercises/grade", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<GradeExerciseRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !body.userId ||
+    typeof body.exerciseId !== "string" ||
+    !body.exerciseId ||
+    typeof body.studentAnswer !== "string" ||
+    !body.studentAnswer.trim()
+  ) {
+    res.status(400).json({ error: "userId, exerciseId, and studentAnswer are required" });
+    return;
+  }
+
+  const exercise = await getExerciseForGrading(body.exerciseId);
+  if (!exercise) {
+    res.status(404).json({ error: "Exercise not found." });
+    return;
+  }
+
+  try {
+    const graded = await gradeExerciseAnswer({
+      subjectName: exercise.subjectName,
+      medium: exercise.medium as Medium,
+      question: exercise.question,
+      expectedAnswer: exercise.answer,
+      studentAnswer: body.studentAnswer,
+    });
+
+    // Only credited when grading actually produced a real verdict AND the
+    // exercise itself was archetype-grounded AND that archetype's own
+    // chapter/topic resolved (see getExerciseForGrading's own comment --
+    // absent for a chat-originated bank entry, which can't reach this
+    // endpoint's exerciseId in practice, but checked explicitly anyway
+    // rather than assumed).
+    if (graded && exercise.archetypeRunId && exercise.archetypeId && exercise.chapter && exercise.topic) {
+      void recordArchetypeAttemptResult({
+        userId: body.userId,
+        runId: exercise.archetypeRunId,
+        archetypeId: exercise.archetypeId,
+        boardId: exercise.boardId,
+        gradeId: exercise.gradeId,
+        subjectId: exercise.subjectId,
+        medium: exercise.medium,
+        chapter: exercise.chapter,
+        topic: exercise.topic,
+        result: graded.verdict,
+      });
+    }
+
+    const response: GradeExerciseResponse = graded
+      ? { verdict: graded.verdict, feedback: graded.feedback, answer: exercise.answer }
+      : {
+          verdict: "partially_correct",
+          feedback: "We couldn't automatically check this attempt -- compare it with the solution below.",
+          answer: exercise.answer,
+        };
+    res.json(response);
+  } catch (err) {
+    console.error("Exercise grading failed:", err);
+    res.status(502).json({ error: "Could not grade this attempt right now. Please try again shortly." });
   }
 });
 

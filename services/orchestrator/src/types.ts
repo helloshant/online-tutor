@@ -115,11 +115,52 @@ export type TopicExercisesRequest = {
   topic: string;
 };
 
-export type ExerciseItem = { question: string; answer: string };
+// id is the answered_questions row id -- every exercise returned to a
+// student (whether freshly generated or reused from the bank, see
+// server.ts's own topic-exercises handler) is a real stored row by the
+// time it's returned, so this is never optional. archetypeRunId/
+// archetypeId are set only when this specific exercise was generated
+// from (or matched to) a mined archetype -- see archetypeExercises.ts --
+// and are what /v1/topic-exercises/grade uses to credit
+// student_archetype_progress on a graded attempt.
+export type ExerciseItem = {
+  id: string;
+  question: string;
+  answer: string;
+  archetypeRunId?: string | null;
+  archetypeId?: string | null;
+};
 
 export type TopicExercisesResponse = {
   exercises: ExerciseItem[];
   source: "database" | "llm";
+};
+
+// A student's own attempt at one exercise, submitted BEFORE they've seen
+// the worked solution (see topic-summary-message.tsx) -- graded by an LLM
+// judge (buildGradingPrompt in prompts.ts), not exact-string matching,
+// since a correct answer can legitimately be phrased or worked many ways.
+// Deliberately carries no medium/language field -- the exercise's own
+// stored answered_questions.medium already IS the exact language it was
+// generated/shown in (see TopicExercisesRequest's own comment: "scope's
+// own medium is deliberately responseLanguage"), so grading feedback just
+// reuses that directly (see getExerciseForGrading) rather than trusting
+// the caller to resupply it consistently.
+export type GradeExerciseRequest = {
+  userId: string;
+  exerciseId: string;
+  studentAnswer: string;
+};
+
+export type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
+
+export type GradeExerciseResponse = {
+  verdict: ExerciseVerdict;
+  feedback: string;
+  // The worked solution -- withheld from the student until now (see
+  // GradeExerciseRequest's own comment), so the grading response is what
+  // finally reveals it, regardless of the verdict.
+  answer: string;
 };
 
 // Sent by the web app's admin Chapter Notes action right after it writes/

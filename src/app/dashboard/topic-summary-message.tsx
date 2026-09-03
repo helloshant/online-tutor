@@ -7,7 +7,36 @@ import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
-type ExerciseItem = { question: string; answer: string };
+// The primary "Relevant Exercises" path -- always has a real, stable
+// answered_questions row id (see /v1/topic-exercises's own response
+// shape), so these can be graded (see GradeState below). The tag-filter
+// path (SearchExercise, further down) reuses a DIFFERENT endpoint
+// (/api/answer-bank/search) that has no id in its response shape --
+// deliberately left showing its answer immediately, unchanged, rather
+// than extending that endpoint too; see the render branch below.
+type ExerciseItem = { id: string; question: string; answer: string };
+type SearchExercise = { question: string; answer: string };
+type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
+
+// Per-exercise submission/grading state, keyed by exercise id -- a
+// student attempts each exercise independently, so this can't be one
+// shared piece of state for the whole list. "idle" covers both "hasn't
+// typed anything yet" and "typed something, hasn't submitted" -- draft
+// alone distinguishes those, nothing in the UI needs a third status for it.
+type GradeState = {
+  draft: string;
+  status: "idle" | "submitting" | "graded";
+  verdict?: ExerciseVerdict;
+  feedback?: string;
+  revealedAnswer?: string;
+  error?: string;
+};
+
+const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> = {
+  correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
+  partially_correct: { box: "bg-yellow-50 text-yellow-800", label: "Partially correct." },
+  incorrect: { box: "bg-red-50 text-red-800", label: "Not quite." },
+};
 
 // Rendered as a message bubble inside the chat timeline (see chat-panel.tsx)
 // rather than a separate panel or modal -- clicking a syllabus topic drops
@@ -53,6 +82,7 @@ export function TopicSummaryMessage({
   const [exercises, setExercises] = useState<ExerciseItem[] | null>(null);
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
+  const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>({});
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -62,7 +92,7 @@ export function TopicSummaryMessage({
   // panel search.
   const [topicTags, setTopicTags] = useState<string[]>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
-  const [filteredExercises, setFilteredExercises] = useState<ExerciseItem[] | null>(null);
+  const [filteredExercises, setFilteredExercises] = useState<SearchExercise[] | null>(null);
   const [loadingFilter, setLoadingFilter] = useState(false);
 
   useEffect(() => {
@@ -140,6 +170,7 @@ export function TopicSummaryMessage({
     }
     setExercises(null);
     setExercisesError(null);
+    setGradeStates({});
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -194,7 +225,41 @@ export function TopicSummaryMessage({
     setFilteredExercises(null);
   }
 
-  const displayedExercises = activeTagFilter ? filteredExercises : exercises;
+  function getGradeState(exerciseId: string): GradeState {
+    return gradeStates[exerciseId] ?? { draft: "", status: "idle" };
+  }
+
+  function setGradeState(exerciseId: string, next: GradeState) {
+    setGradeStates((prev) => ({ ...prev, [exerciseId]: next }));
+  }
+
+  async function handleSubmitAnswer(exerciseId: string) {
+    const state = getGradeState(exerciseId);
+    if (!state.draft.trim() || state.status === "submitting") return;
+
+    setGradeState(exerciseId, { ...state, status: "submitting", error: undefined });
+    try {
+      const res = await fetch(`/api/exercises/${exerciseId}/grade`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: state.draft }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || typeof body?.verdict !== "string") {
+        setGradeState(exerciseId, { ...state, status: "idle", error: body?.error ?? "Could not grade this attempt." });
+        return;
+      }
+      setGradeState(exerciseId, {
+        ...state,
+        status: "graded",
+        verdict: body.verdict as ExerciseVerdict,
+        feedback: body.feedback,
+        revealedAnswer: body.answer,
+      });
+    } catch {
+      setGradeState(exerciseId, { ...state, status: "idle", error: "Could not grade this attempt." });
+    }
+  }
 
   return (
     <div className="flex justify-start">
@@ -295,40 +360,115 @@ export function TopicSummaryMessage({
 
                 {loadingFilter ? (
                   <p className="text-foreground/50">Filtering…</p>
-                ) : displayedExercises === null || displayedExercises.length === 0 ? (
-                  <p className="text-foreground/50">
-                    {activeTagFilter
-                      ? `No exercises tagged "${activeTagFilter}" for this topic.`
-                      : "No exercises available for this topic yet."}
-                  </p>
+                ) : activeTagFilter ? (
+                  // Tag-filtered results come from a different endpoint
+                  // (/api/answer-bank/search) with no stable id in its
+                  // response shape -- shown immediately, same as before
+                  // the grading flow existed, rather than extending that
+                  // endpoint too. See SearchExercise's own comment.
+                  filteredExercises === null || filteredExercises.length === 0 ? (
+                    <p className="text-foreground/50">No exercises tagged &quot;{activeTagFilter}&quot; for this topic.</p>
+                  ) : (
+                    <>
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                        Relevant exercises — &quot;{activeTagFilter}&quot;
+                      </p>
+                      <ol className="space-y-4">
+                        {filteredExercises.map((ex, i) => (
+                          <li key={i}>
+                            <p className="whitespace-pre-wrap font-medium">
+                              {i + 1}. <MathText text={ex.question} />
+                            </p>
+                            <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                              <MathText text={ex.answer} />
+                            </p>
+                            {/* No target_id -- several exercises share this one
+                                topic and this path has no stable per-instance
+                                row id available here (see FeedbackButtons' own
+                                comment on targetId); content_snapshot alone is
+                                what tells this exercise apart from its
+                                siblings for whoever reviews it. */}
+                            <FeedbackButtons
+                              kind="exercise"
+                              subjectId={topic.subject_id}
+                              question={`${topic.chapter} / ${topic.topic}`}
+                              contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
+                            />
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  )
+                ) : exercises.length === 0 ? (
+                  <p className="text-foreground/50">No exercises available for this topic yet.</p>
                 ) : (
                   <>
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                      {activeTagFilter ? `Relevant exercises — "${activeTagFilter}"` : "Relevant exercises"}
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                      Relevant exercises
+                    </p>
+                    <p className="mb-3 text-xs text-foreground/40">
+                      Try each one yourself first -- the worked solution shows once you check your answer.
                     </p>
                     <ol className="space-y-4">
-                      {displayedExercises.map((ex, i) => (
-                        <li key={i}>
-                          <p className="whitespace-pre-wrap font-medium">
-                            {i + 1}. <MathText text={ex.question} />
-                          </p>
-                          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                            <MathText text={ex.answer} />
-                          </p>
-                          {/* No target_id -- several exercises share this one
-                              topic and none has a stable per-instance row id
-                              available here (see FeedbackButtons' own
-                              comment on targetId); content_snapshot alone is
-                              what tells this exercise apart from its
-                              siblings for whoever reviews it. */}
-                          <FeedbackButtons
-                            kind="exercise"
-                            subjectId={topic.subject_id}
-                            question={`${topic.chapter} / ${topic.topic}`}
-                            contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
-                          />
-                        </li>
-                      ))}
+                      {exercises.map((ex, i) => {
+                        const state = getGradeState(ex.id);
+                        return (
+                          <li key={ex.id}>
+                            <p className="whitespace-pre-wrap font-medium">
+                              {i + 1}. <MathText text={ex.question} />
+                            </p>
+
+                            {state.status === "graded" ? (
+                              <div className="mt-1.5 space-y-2">
+                                <p className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}>
+                                  <span className="font-semibold">{VERDICT_STYLES[state.verdict as ExerciseVerdict].label}</span>{" "}
+                                  {state.feedback}
+                                </p>
+                                <div className="rounded-lg bg-background p-3 text-foreground/80">
+                                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                                    Solution
+                                  </p>
+                                  <p className="whitespace-pre-wrap">
+                                    <MathText text={state.revealedAnswer ?? ""} />
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-1.5 space-y-1.5">
+                                <textarea
+                                  value={state.draft}
+                                  onChange={(e) => setGradeState(ex.id, { ...state, draft: e.target.value })}
+                                  placeholder="Type your answer here…"
+                                  rows={2}
+                                  disabled={state.status === "submitting"}
+                                  className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground disabled:opacity-60"
+                                />
+                                {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+                                <button
+                                  type="button"
+                                  onClick={() => handleSubmitAnswer(ex.id)}
+                                  disabled={state.status === "submitting" || !state.draft.trim()}
+                                  className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                                >
+                                  {state.status === "submitting" ? "Checking…" : "Check my answer"}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* No target_id, same reasoning as the tag-filter
+                                path above -- FeedbackButtons is about the
+                                exercise's own quality, independent of
+                                whether (or how) the student has attempted
+                                it yet, so this stays visible either way. */}
+                            <FeedbackButtons
+                              kind="exercise"
+                              subjectId={topic.subject_id}
+                              question={`${topic.chapter} / ${topic.topic}`}
+                              contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
+                            />
+                          </li>
+                        );
+                      })}
                     </ol>
                   </>
                 )}

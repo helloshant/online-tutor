@@ -164,6 +164,20 @@ A: <complete worked solution, showing steps>
 
 Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
 
+// Only used when archetypes are supplied -- an extra "Pattern: N" line
+// naming which numbered pattern (from the list given in the task
+// instruction) each exercise instantiates, so the caller can credit the
+// RIGHT archetype when this specific exercise is later graded (see
+// exerciseParser.ts and server.ts's own mapping from patternIndex back to
+// the archetype list). The ungrounded path (no archetypes) has nothing to
+// tag and keeps the plain format above completely unchanged.
+const EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN = `Format each exercise exactly as:
+Q: <question>
+A: <complete worked solution, showing steps>
+Pattern: <the number of the pattern above this exercise instantiates>
+
+Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
+
 // One real, historically-mined reasoning pattern for this exact chapter/
 // topic (see archetypeExercises.ts) -- grounds a generated exercise in a
 // pattern proven to actually appear in this board's real exams, instead
@@ -222,7 +236,7 @@ Topic: "${topic}"
 
 Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. ${taskInstruction}
 
-${EXERCISE_FORMAT_INSTRUCTIONS}`;
+${archetypes.length > 0 ? EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN : EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
 
 // Used only by questionRewrite.ts, immediately before a chat Q&A pair is
@@ -270,4 +284,43 @@ Guidelines:
 5. ${TABLE_FORMAT_RULE}
 
 Keep responses focused and appropriately concise for a chat interface.`;
+}
+
+// Grades a student's own attempt at a practice exercise -- submitted
+// BEFORE they've seen the worked solution (see topic-summary-message.tsx),
+// so this is a real judgment call, not string comparison: a correct
+// answer can legitimately be phrased, worked, or rounded differently than
+// the stored solution. An LLM judge, not exact matching, is required for
+// that reason -- see exerciseGrading.ts's own comment on why nothing
+// simpler works for open-ended math/science responses.
+export function buildGradingPrompt(params: {
+  subjectName: string;
+  medium: Medium;
+  responseLanguage?: Medium;
+  question: string;
+  expectedAnswer: string;
+  studentAnswer: string;
+}): string {
+  const { subjectName, medium, responseLanguage = medium, question, expectedAnswer, studentAnswer } = params;
+
+  return `You are grading one student's own attempt at a ${subjectName} practice question, before showing them the worked solution.
+
+QUESTION
+${question}
+
+EXPECTED SOLUTION (the student has NOT seen this)
+${expectedAnswer}
+
+STUDENT'S OWN ANSWER
+${studentAnswer}
+
+TASK
+Judge whether the student's answer is correct -- based on whether their final result and reasoning are sound, NOT on whether their wording, method, or level of detail matches the expected solution exactly. A different valid method that reaches the same correct result is CORRECT. A right final answer reached through clearly flawed or missing reasoning, where the question calls for shown work, is PARTIALLY_CORRECT at best. An empty, off-topic, or clearly wrong answer is INCORRECT.
+
+Write your feedback ONLY in ${responseLanguage}, regardless of what language this prompt is in -- 1-2 short sentences, encouraging in tone, pointing at the specific thing that was right or wrong (not a generic "good job" or "try again"). Do not restate or reveal the full expected solution in your feedback -- the student will see it separately right after this.
+
+OUTPUT
+Return ONLY, in exactly this format, no markdown, no other text:
+Verdict: correct | partially_correct | incorrect
+Feedback: <your feedback>`;
 }
