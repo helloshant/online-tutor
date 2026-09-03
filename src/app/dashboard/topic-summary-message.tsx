@@ -5,75 +5,18 @@ import { MathText } from "@/components/math-text";
 import { TableText } from "@/components/markdown-table";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
+import { TopicPractice, type PracticeExerciseItem } from "./topic-practice";
 import type { SyllabusTopic } from "@/lib/supabase/types";
 
 // The primary "Relevant Exercises" path -- always has a real, stable
 // answered_questions row id (see /v1/topic-exercises's own response
-// shape), so these can be graded (see GradeState below). The tag-filter
-// path (SearchExercise, further down) reuses a DIFFERENT endpoint
-// (/api/answer-bank/search) that has no id in its response shape --
-// deliberately left showing its answer immediately, unchanged, rather
-// than extending that endpoint too; see the render branch below.
-type ExerciseItem = { id: string; question: string; answer: string };
+// shape), so these can be graded (see TopicPractice, which owns the whole
+// grading flow). The tag-filter path (SearchExercise, further down)
+// reuses a DIFFERENT endpoint (/api/answer-bank/search) that has no id in
+// its response shape -- deliberately left showing its answer immediately,
+// unchanged, rather than extending that endpoint too; see the render
+// branch below.
 type SearchExercise = { question: string; answer: string };
-type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
-type DifficultyLevel = "Easy" | "Medium" | "Hard";
-
-// A curated, real exam pattern mined for this exact topic -- powers the
-// "Practice a specific pattern" picker below the auto-loaded exercises
-// (Tier C/D). runId is carried through (never shown) purely so a click
-// can identify which pattern was picked back to the server -- archetypeId
-// alone isn't unique across runs. Empty (the common case for most
-// topics right now) just means the picker doesn't render at all.
-// difficultyDistribution (Tier D) is the pattern's own real historical
-// spread -- shown as a hint next to the Easy/Medium/Hard buttons so a
-// student can see up front how (un)common the level they're about to
-// pick actually is for this pattern, rather than it silently being
-// calibrated (or not) only after they've already asked.
-type Pattern = {
-  runId: string;
-  archetypeId: string;
-  name: string;
-  difficultyDistribution: Record<DifficultyLevel, number> | null;
-};
-
-// Per-exercise submission/grading state, keyed by exercise id -- a
-// student attempts each exercise independently, so this can't be one
-// shared piece of state for the whole list. "idle" covers both "hasn't
-// typed anything yet" and "typed something, hasn't submitted" -- draft
-// alone distinguishes those, nothing in the UI needs a third status for it.
-type GradeState = {
-  draft: string;
-  status: "idle" | "submitting" | "graded";
-  verdict?: ExerciseVerdict;
-  feedback?: string;
-  revealedAnswer?: string;
-  error?: string;
-};
-
-// Sentinel `generating` key for "Generate another" (no specific pattern),
-// distinct from any real archetypeId.
-const GENERATING_RANDOM = "__random__";
-
-const DIFFICULTY_LEVELS: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
-
-// "Usually Hard (7 of 10 mined)" -- raw counts, not a percentage, so this
-// stays honest about how little data some patterns have (a percentage of
-// 1 question would read as false precision) and never claims anything
-// about a pattern with nothing classified at all.
-function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): string | null {
-  if (!dist) return null;
-  const total = dist.Easy + dist.Medium + dist.Hard;
-  if (total === 0) return null;
-  const [top, topCount] = DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0];
-  return `Usually ${top} (${topCount} of ${total} mined)`;
-}
-
-const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> = {
-  correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
-  partially_correct: { box: "bg-yellow-50 text-yellow-800", label: "Partially correct." },
-  incorrect: { box: "bg-red-50 text-red-800", label: "Not quite." },
-};
 
 // Rendered as a message bubble inside the chat timeline (see chat-panel.tsx)
 // rather than a separate panel or modal -- clicking a syllabus topic drops
@@ -116,10 +59,9 @@ export function TopicSummaryMessage({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
 
-  const [exercises, setExercises] = useState<ExerciseItem[] | null>(null);
+  const [exercises, setExercises] = useState<PracticeExerciseItem[] | null>(null);
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
-  const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>({});
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -131,19 +73,6 @@ export function TopicSummaryMessage({
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [filteredExercises, setFilteredExercises] = useState<SearchExercise[] | null>(null);
   const [loadingFilter, setLoadingFilter] = useState(false);
-
-  // On-demand pattern picker (Tier C/D). `generating` holds the
-  // archetypeId of whichever button was clicked (or GENERATING_RANDOM for
-  // "Generate another"), so only THAT button shows a busy state -- not a
-  // single shared boolean that would grey out every button in the row at
-  // once. `pendingSelection` is which pattern (or, with pattern: null,
-  // "Generate another") the student has clicked but not yet chosen a
-  // difficulty for -- clicking a pattern name doesn't generate
-  // immediately, it opens the Easy/Medium/Hard/Any row below it first.
-  const [patterns, setPatterns] = useState<Pattern[]>([]);
-  const [pendingSelection, setPendingSelection] = useState<{ pattern: Pattern | null } | null>(null);
-  const [generating, setGenerating] = useState<string | null>(null);
-  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,13 +149,9 @@ export function TopicSummaryMessage({
     }
     setExercises(null);
     setExercisesError(null);
-    setGradeStates({});
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
-    setPatterns([]);
-    setPendingSelection(null);
-    setGenerateError(null);
   }, [preferEnglish]);
 
   async function handleLoadExercises() {
@@ -241,60 +166,21 @@ export function TopicSummaryMessage({
       }
       setExercises(body.exercises);
 
-      // Both best-effort -- if either fails, the tag chips or the pattern
-      // picker just don't show; the exercises themselves already loaded
-      // fine, so neither failure is surfaced as an error.
-      const [tagsRes, patternsRes] = await Promise.all([
-        fetch(`/api/answer-bank/tags?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}`),
-        fetch(`/api/topics/${topic.id}/exercises/patterns`),
-      ]);
+      // Best-effort -- if this fails, the tag chips just don't show, no
+      // error surfaced (the exercises themselves loaded fine). The pattern
+      // picker fetches its own data independently -- see TopicPractice/
+      // PatternPicker.
+      const tagsRes = await fetch(
+        `/api/answer-bank/tags?subjectId=${encodeURIComponent(topic.subject_id)}&topicId=${encodeURIComponent(topic.id)}`
+      );
       const tagsBody = await tagsRes.json().catch(() => null);
       if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
         setTopicTags(tagsBody.tags);
-      }
-      const patternsBody = await patternsRes.json().catch(() => null);
-      if (patternsRes.ok && Array.isArray(patternsBody?.patterns)) {
-        setPatterns(patternsBody.patterns);
       }
     } catch {
       setExercisesError("Could not load exercises.");
     } finally {
       setLoadingExercises(false);
-    }
-  }
-
-  async function handleGeneratePattern(pattern?: Pattern, requestedDifficulty?: DifficultyLevel) {
-    if (generating !== null) return;
-    setGenerating(pattern?.archetypeId ?? GENERATING_RANDOM);
-    setGenerateError(null);
-    setPendingSelection(null);
-    try {
-      const res = await fetch(`/api/topics/${topic.id}/exercises/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(pattern ? { archetypeId: pattern.archetypeId, archetypeRunId: pattern.runId } : {}),
-          ...(requestedDifficulty ? { requestedDifficulty } : {}),
-          preferEnglish,
-        }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        setGenerateError(body?.error ?? "Could not generate a question right now.");
-        return;
-      }
-      if (body?.exercise) {
-        // Appended to the same list the auto-loaded exercises render
-        // through -- one unified, hide-until-submitted list, not a
-        // separate section with its own grading UI to keep in sync.
-        setExercises((prev) => [...(prev ?? []), body.exercise as ExerciseItem]);
-      } else {
-        setGenerateError("Could not generate a question right now.");
-      }
-    } catch {
-      setGenerateError("Could not generate a question right now.");
-    } finally {
-      setGenerating(null);
     }
   }
 
@@ -317,42 +203,6 @@ export function TopicSummaryMessage({
   function clearTagFilter() {
     setActiveTagFilter(null);
     setFilteredExercises(null);
-  }
-
-  function getGradeState(exerciseId: string): GradeState {
-    return gradeStates[exerciseId] ?? { draft: "", status: "idle" };
-  }
-
-  function setGradeState(exerciseId: string, next: GradeState) {
-    setGradeStates((prev) => ({ ...prev, [exerciseId]: next }));
-  }
-
-  async function handleSubmitAnswer(exerciseId: string) {
-    const state = getGradeState(exerciseId);
-    if (!state.draft.trim() || state.status === "submitting") return;
-
-    setGradeState(exerciseId, { ...state, status: "submitting", error: undefined });
-    try {
-      const res = await fetch(`/api/exercises/${exerciseId}/grade`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answer: state.draft }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || typeof body?.verdict !== "string") {
-        setGradeState(exerciseId, { ...state, status: "idle", error: body?.error ?? "Could not grade this attempt." });
-        return;
-      }
-      setGradeState(exerciseId, {
-        ...state,
-        status: "graded",
-        verdict: body.verdict as ExerciseVerdict,
-        feedback: body.feedback,
-        revealedAnswer: body.answer,
-      });
-    } catch {
-      setGradeState(exerciseId, { ...state, status: "idle", error: "Could not grade this attempt." });
-    }
   }
 
   return (
@@ -494,168 +344,15 @@ export function TopicSummaryMessage({
                     </>
                   )
                 ) : (
-                  <>
-                    {exercises.length === 0 ? (
-                      <p className="text-foreground/50">No exercises available for this topic yet.</p>
-                    ) : (
-                      <>
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                          Relevant exercises
-                        </p>
-                        <p className="mb-3 text-xs text-foreground/40">
-                          Try each one yourself first -- the worked solution shows once you check your answer.
-                        </p>
-                        <ol className="space-y-4">
-                          {exercises.map((ex, i) => {
-                            const state = getGradeState(ex.id);
-                            return (
-                              <li key={ex.id}>
-                                <p className="whitespace-pre-wrap font-medium">
-                                  {i + 1}. <MathText text={ex.question} />
-                                </p>
-
-                                {state.status === "graded" ? (
-                                  <div className="mt-1.5 space-y-2">
-                                    <p className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}>
-                                      <span className="font-semibold">
-                                        {VERDICT_STYLES[state.verdict as ExerciseVerdict].label}
-                                      </span>{" "}
-                                      {state.feedback}
-                                    </p>
-                                    <div className="rounded-lg bg-background p-3 text-foreground/80">
-                                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                                        Solution
-                                      </p>
-                                      <p className="whitespace-pre-wrap">
-                                        <MathText text={state.revealedAnswer ?? ""} />
-                                      </p>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mt-1.5 space-y-1.5">
-                                    <textarea
-                                      value={state.draft}
-                                      onChange={(e) => setGradeState(ex.id, { ...state, draft: e.target.value })}
-                                      placeholder="Type your answer here…"
-                                      rows={2}
-                                      disabled={state.status === "submitting"}
-                                      className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground disabled:opacity-60"
-                                    />
-                                    {state.error && <p className="text-xs text-red-600">{state.error}</p>}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSubmitAnswer(ex.id)}
-                                      disabled={state.status === "submitting" || !state.draft.trim()}
-                                      className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-                                    >
-                                      {state.status === "submitting" ? "Checking…" : "Check my answer"}
-                                    </button>
-                                  </div>
-                                )}
-
-                                {/* No target_id, same reasoning as the tag-filter
-                                    path above -- FeedbackButtons is about the
-                                    exercise's own quality, independent of
-                                    whether (or how) the student has attempted
-                                    it yet, so this stays visible either way. */}
-                                <FeedbackButtons
-                                  kind="exercise"
-                                  subjectId={topic.subject_id}
-                                  question={`${topic.chapter} / ${topic.topic}`}
-                                  contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
-                                />
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      </>
-                    )}
-
-                    {patterns.length > 0 && (
-                      <div className="mt-4 border-t border-border pt-3">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                          Practice a specific pattern
-                        </p>
-                        {generateError && <p className="mb-2 text-xs text-red-600">{generateError}</p>}
-                        <div className="flex flex-wrap gap-1.5">
-                          {patterns.map((p) => {
-                            const isSelected = pendingSelection?.pattern?.archetypeId === p.archetypeId;
-                            return (
-                              <button
-                                key={`${p.runId}:${p.archetypeId}`}
-                                type="button"
-                                onClick={() => setPendingSelection(isSelected ? null : { pattern: p })}
-                                disabled={generating !== null}
-                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-                                  isSelected ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
-                                }`}
-                              >
-                                {generating === p.archetypeId ? "Generating…" : p.name}
-                              </button>
-                            );
-                          })}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingSelection(pendingSelection && !pendingSelection.pattern ? null : { pattern: null })
-                            }
-                            disabled={generating !== null}
-                            className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-                              pendingSelection && !pendingSelection.pattern
-                                ? "bg-foreground/70 text-white"
-                                : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
-                            }`}
-                          >
-                            {generating === GENERATING_RANDOM ? "Generating…" : "Generate another"}
-                          </button>
-                        </div>
-
-                        {/* Picking a pattern (or "Generate another") doesn't
-                            fire the request immediately -- it opens this
-                            difficulty row first, so a student can see the
-                            pattern's own real historical spread before
-                            deciding, rather than only finding out afterward
-                            that (say) "Easy" almost never appears in real
-                            exams for it. */}
-                        {pendingSelection && (
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-background p-2">
-                            <span className="text-xs text-foreground/50">
-                              {pendingSelection.pattern
-                                ? describeDifficultyHint(pendingSelection.pattern.difficultyDistribution) ??
-                                  "No difficulty data yet —"
-                                : "Difficulty:"}
-                            </span>
-                            {DIFFICULTY_LEVELS.map((level) => (
-                              <button
-                                key={level}
-                                type="button"
-                                onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined, level)}
-                                disabled={generating !== null}
-                                className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
-                              >
-                                {level}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined)}
-                              disabled={generating !== null}
-                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
-                            >
-                              Any
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPendingSelection(null)}
-                              className="ml-auto text-xs text-foreground/40 hover:underline"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
+                  <TopicPractice
+                    topicId={topic.id}
+                    subjectId={topic.subject_id}
+                    chapter={topic.chapter}
+                    topic={topic.topic}
+                    preferEnglish={preferEnglish}
+                    initialExercises={exercises}
+                    emptyLabel="No exercises available for this topic yet."
+                  />
                 )}
               </>
             )}

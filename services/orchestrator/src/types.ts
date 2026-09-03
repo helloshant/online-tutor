@@ -60,6 +60,19 @@ export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected" 
 export type ChatOrchestrationResponse = {
   reply: string;
   source?: ChatOrchestrationSource;
+  // Best-guess {chapter, topic} this reply is about (see syllabusFilter.ts's
+  // bestMatchingTopic) -- powers the "Practice a specific pattern" picker
+  // on an ordinary chat reply, not just a topic-summary bubble (which
+  // already knows its own topic statically, no guess needed). Only ever
+  // set for mode:"student", never "rejected" (out of syllabus scope, no
+  // topic to practice), and null when no topic scored above zero shared
+  // keywords with the question -- an unconfident guess is worse than no
+  // picker, not better. These are the SAME {chapter, topic} strings from
+  // the caller's own `topics` array (ChatOrchestrationRequest), never
+  // reworded/generated -- the web app can match them back to a real
+  // syllabus_topics row by exact string equality, no fuzzy matching
+  // needed, since it's the same source data round-tripped.
+  matchedTopic?: { chapter: string; topic: string } | null;
 };
 
 // Identifies a single question within the L1 (Redis) / L2 (Postgres answer

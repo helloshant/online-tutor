@@ -60,3 +60,31 @@ export function selectRelevantTopics<T extends SyllabusTopic>(
   if (scored.length === 0) return topics.slice(0, limit);
   return scored.slice(0, limit).map((entry) => entry.topic);
 }
+
+// Best single-topic guess for a question -- powers the "Practice a
+// specific pattern" picker on ordinary chat replies (not just topic-
+// summary bubbles, which already know their own topic statically). A
+// deliberately separate function from selectRelevantTopics above, not a
+// reuse of its top result: that function short-circuits below
+// FILTER_THRESHOLD (returns every topic unscored, since trimming the
+// prompt isn't worth the complexity at that size) -- fine for its own
+// job (bounding prompt size), wrong for this one, since "which ONE topic
+// is this about" matters at any syllabus size, including small ones.
+// Returns null on zero shared keywords -- an unconfident guess would
+// show a picker for the wrong topic, which is worse than showing none.
+export function bestMatchingTopic<T extends SyllabusTopic>(topics: T[], message: string): T | null {
+  const queryWords = new Set(tokenize(message));
+  if (queryWords.size === 0) return null;
+
+  let best: T | null = null;
+  let bestScore = 0;
+  for (const topic of topics) {
+    const words = tokenize(`${topic.chapter} ${topic.topic}`);
+    const score = words.reduce((acc, word) => acc + (queryWords.has(word) ? 1 : 0), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = topic;
+    }
+  }
+  return best;
+}

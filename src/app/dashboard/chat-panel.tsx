@@ -7,6 +7,7 @@ import { WorkedSteps } from "@/components/worked-steps";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
+import { TopicPractice } from "./topic-practice";
 import { buildRevealUnits, buildRevealedText, totalRevealWeight } from "@/lib/messageReveal";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -132,8 +133,24 @@ interface SubjectSummary {
 // clicking a topic had nothing to resolve "the poem" against, since a
 // topic bubble is never persisted to chat_messages the way an ordinary
 // exchange is.
+//
+// matchedTopic on a message entry is only ever set on an assistant reply,
+// from /api/chat's own matchedTopic response field (the orchestrator's
+// best-guess {chapter, topic} for that exchange, resolved server-side to
+// a real syllabus_topics row -- see that route's own comment) -- powers
+// mounting a TopicPractice ("Practice a specific pattern") under the
+// reply. Client-only, like previewImageUrl/revealOnMount above: never
+// persisted to chat_messages, so a reloaded conversation's older replies
+// don't get one retroactively -- an accepted scope trim, not an oversight
+// (see MessageBubble's own comment on this).
 type TimelineEntry =
-  | { kind: "message"; message: ChatMessage; previewImageUrl?: string; revealOnMount?: boolean }
+  | {
+      kind: "message";
+      message: ChatMessage;
+      previewImageUrl?: string;
+      revealOnMount?: boolean;
+      matchedTopic?: { id: string; chapter: string; topic: string } | null;
+    }
   | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean; summary?: string };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
@@ -186,11 +203,19 @@ const MessageBubble = memo(function MessageBubble({
   subjectId,
   isRegenerating,
   onRevealProgress,
+  preferEnglish,
 }: {
   entry: Extract<TimelineEntry, { kind: "message" }>;
   subjectId: string;
   isRegenerating: boolean;
   onRevealProgress: () => void;
+  // The CURRENT live toggle state, not a frozen historical snapshot the
+  // way a topic entry's own preferEnglish is (see TimelineEntry's own
+  // comment) -- generating a practice exercise is a new action taken
+  // right now, so it should reflect whatever the toggle is set to at
+  // click time, unlike a topic bubble's summary text, which only re-
+  // fetches for the toggle while it's still the last thing shown.
+  preferEnglish: boolean;
 }) {
   const { message, previewImageUrl } = entry;
   return (
@@ -241,6 +266,26 @@ const MessageBubble = memo(function MessageBubble({
           mid-regeneration). */}
       {message.role === "assistant" && !isRegenerating && !message.id.startsWith("optimistic-") && (
         <FeedbackButtons kind="chat_message" targetId={message.id} subjectId={subjectId} contentSnapshot={message.content} />
+      )}
+      {/* Practice a specific pattern -- only when the server confidently
+          matched this reply to a real syllabus topic (see TimelineEntry's
+          own comment on matchedTopic) and, same reasoning as the
+          FeedbackButtons guard above, only once this reply has actually
+          settled. Deliberately NOT width-capped like the bubble above it
+          -- same "no conversational reason to sit narrower than the space
+          it has" reasoning topic-summary-message.tsx's own card uses,
+          styled to match it (rounded-2xl border bg-surface) so it reads
+          as one attached card, not squeezed into the chat-bubble shape. */}
+      {message.role === "assistant" && !isRegenerating && !message.id.startsWith("optimistic-") && entry.matchedTopic && (
+        <div className="mt-1.5 w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+          <TopicPractice
+            topicId={entry.matchedTopic.id}
+            subjectId={subjectId}
+            chapter={entry.matchedTopic.chapter}
+            topic={entry.matchedTopic.topic}
+            preferEnglish={preferEnglish}
+          />
+        </div>
       )}
     </div>
   );
@@ -468,7 +513,12 @@ export function ChatPanel({
         setTimeline((prev) => [
           ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
           { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
-          { kind: "message", message: body.assistantMessage as ChatMessage, revealOnMount: true },
+          {
+            kind: "message",
+            message: body.assistantMessage as ChatMessage,
+            revealOnMount: true,
+            matchedTopic: body.matchedTopic ?? null,
+          },
         ]);
       } catch (err) {
         setTimeline((prev) =>
@@ -517,7 +567,12 @@ export function ChatPanel({
         setTimeline((prev) =>
           prev.map((entry) =>
             entry.kind === "message" && entry.message.id === assistantMessageId
-              ? { ...entry, message: body.assistantMessage as ChatMessage, revealOnMount: true }
+              ? {
+                  ...entry,
+                  message: body.assistantMessage as ChatMessage,
+                  revealOnMount: true,
+                  matchedTopic: body.matchedTopic ?? null,
+                }
               : entry
           )
         );
@@ -701,6 +756,7 @@ export function ChatPanel({
               subjectId={subject.id}
               isRegenerating={entry.message.id === regeneratingMessageId}
               onRevealProgress={handleRevealProgress}
+              preferEnglish={effectivePreferEnglish}
             />
           )
         )}

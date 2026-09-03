@@ -91,6 +91,15 @@ function parseTopicContext(raw: unknown): { chapter: string; topic: string; summ
   return { chapter, topic, summary };
 }
 
+// One row of the syllabus this request's topics were drawn from, WITH its
+// real id -- ChatOrchestrationRequest.topics itself only ever carries
+// {chapter, topic} (the orchestrator has no use for an id), but the web
+// app needs the id back afterward to resolve the orchestrator's own
+// matchedTopic response field (the SAME {chapter, topic} strings,
+// round-tripped) to a real syllabus_topics row for the "Practice a
+// specific pattern" picker (see the topicId resolution below).
+type SyllabusTopicWithId = { id: string; chapter: string; topic: string };
+
 // Shared by a real student's subscription-derived scope and a staff
 // member's preview-derived scope (see resolveStaffPreviewScope) -- both
 // resolve to the exact same board/grade/medium/topics/contentMedium/
@@ -110,7 +119,7 @@ async function buildStudentOrchestrationRequest(
     message: string;
     image?: ImageAttachment;
   }
-): Promise<ChatOrchestrationRequest> {
+): Promise<{ request: ChatOrchestrationRequest; topicsWithIds: SyllabusTopicWithId[] }> {
   const isEnglishSubject = params.subjectCode === ENGLISH_SUBJECT_CODE;
 
   // See the matching comments in the original single-branch version of this
@@ -126,7 +135,7 @@ async function buildStudentOrchestrationRequest(
     supabase.from("grades").select("name").eq("id", params.gradeId).single(),
     supabase
       .from("syllabus_topics")
-      .select("chapter, topic")
+      .select("id, chapter, topic")
       .eq("board_id", params.boardId)
       .eq("grade_id", params.gradeId)
       .eq("subject_id", params.subjectId)
@@ -134,21 +143,26 @@ async function buildStudentOrchestrationRequest(
       .order("sort_order"),
   ]);
 
+  const topicsWithIds = (topics ?? []) as SyllabusTopicWithId[];
+
   return {
-    mode: "student",
-    userId: params.userId,
-    subjectId: params.subjectId,
-    subjectName: params.subjectName,
-    boardId: params.boardId,
-    boardName: board?.name ?? "",
-    gradeId: params.gradeId,
-    gradeName: grade?.name ?? "",
-    medium: contentMedium,
-    responseLanguage,
-    topics: topics ?? [],
-    message: params.message,
-    image: params.image,
-    history: [],
+    request: {
+      mode: "student",
+      userId: params.userId,
+      subjectId: params.subjectId,
+      subjectName: params.subjectName,
+      boardId: params.boardId,
+      boardName: board?.name ?? "",
+      gradeId: params.gradeId,
+      gradeName: grade?.name ?? "",
+      medium: contentMedium,
+      responseLanguage,
+      topics: topicsWithIds.map(({ chapter, topic }) => ({ chapter, topic })),
+      message: params.message,
+      image: params.image,
+      history: [],
+    },
+    topicsWithIds,
   };
 }
 
@@ -223,6 +237,13 @@ async function handleChatRequest(request: Request) {
   let previewGradeId: string | null = null;
   let previewMedium: Medium | null = null;
   let orchestrationRequest: ChatOrchestrationRequest;
+  // Populated only alongside a student-mode orchestrationRequest (real
+  // student or staff preview) -- used after the orchestrator replies to
+  // resolve its matchedTopic {chapter, topic} back to a real
+  // syllabus_topics id for the "Practice a specific pattern" picker. Stays
+  // empty for unrestricted staff mode, where there's no syllabus scope to
+  // match against in the first place.
+  let syllabusTopicsWithIds: SyllabusTopicWithId[] = [];
 
   if (isStaff(profile?.role)) {
     // Staff never subscribe: only requirement is that the subject exists.
@@ -247,18 +268,21 @@ async function handleChatRequest(request: Request) {
       previewBoardId = preview.boardId;
       previewGradeId = preview.gradeId;
       previewMedium = preview.medium;
-      orchestrationRequest = await buildStudentOrchestrationRequest(supabase, {
-        userId: user.id,
-        subjectId,
-        subjectName: subject.name,
-        subjectCode: subject.code,
-        boardId: preview.boardId,
-        gradeId: preview.gradeId,
-        medium: preview.medium,
-        preferEnglish,
-        message,
-        image,
-      });
+      ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } = await buildStudentOrchestrationRequest(
+        supabase,
+        {
+          userId: user.id,
+          subjectId,
+          subjectName: subject.name,
+          subjectCode: subject.code,
+          boardId: preview.boardId,
+          gradeId: preview.gradeId,
+          medium: preview.medium,
+          preferEnglish,
+          message,
+          image,
+        }
+      ));
     } else {
       orchestrationRequest = {
         mode: "staff",
@@ -299,18 +323,21 @@ async function handleChatRequest(request: Request) {
     const subjectRow = (subjectLink as unknown as { subjects: { name: string; code: string } | null }).subjects;
 
     subscriptionId = subscription.id;
-    orchestrationRequest = await buildStudentOrchestrationRequest(supabase, {
-      userId: user.id,
-      subjectId,
-      subjectName: subjectRow?.name ?? "the subject",
-      subjectCode: subjectRow?.code ?? "",
-      boardId: subscription.board_id,
-      gradeId: subscription.grade_id,
-      medium: subscription.medium,
-      preferEnglish,
-      message,
-      image,
-    });
+    ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } = await buildStudentOrchestrationRequest(
+      supabase,
+      {
+        userId: user.id,
+        subjectId,
+        subjectName: subjectRow?.name ?? "the subject",
+        subjectCode: subjectRow?.code ?? "",
+        boardId: subscription.board_id,
+        gradeId: subscription.grade_id,
+        medium: subscription.medium,
+        preferEnglish,
+        message,
+        image,
+      }
+    ));
   }
 
   // Written with the service-role client: RLS deliberately allows no
@@ -447,8 +474,9 @@ async function handleChatRequest(request: Request) {
   }
 
   let assistantText: string;
+  let matchedTopic: { chapter: string; topic: string } | null | undefined;
   try {
-    ({ reply: assistantText } = await getOrchestratedReply(orchestrationRequest));
+    ({ reply: assistantText, matchedTopic } = await getOrchestratedReply(orchestrationRequest));
   } catch (err) {
     console.error("Orchestrator chat request failed:", err);
     return NextResponse.json(
@@ -456,6 +484,24 @@ async function handleChatRequest(request: Request) {
       { status: 502 }
     );
   }
+
+  // Resolves the orchestrator's own matchedTopic {chapter, topic} (see
+  // ChatOrchestrationResponse's own comment) back to a real syllabus_topics
+  // row, by exact string match against syllabusTopicsWithIds -- safe as an
+  // EXACT match (not fuzzy) because these are literally the same strings
+  // this route itself sent the orchestrator moments ago, just echoed back;
+  // no independent naming convention to reconcile the way, say, admin-typed
+  // archetype-miner data needed. null when nothing matched (unrestricted
+  // staff mode, or the orchestrator found no confident topic) -- the
+  // client's picker simply doesn't render either way, same "invisible when
+  // empty" posture as everywhere else this picker appears. Sent to the
+  // client as the full row (not just the id) since chat-panel.tsx's
+  // TopicPractice mount needs the chapter/topic labels too (for
+  // FeedbackButtons), and this route already has them right here.
+  const resolvedMatchedTopic =
+    matchedTopic != null
+      ? (syllabusTopicsWithIds.find((t) => t.chapter === matchedTopic!.chapter && t.topic === matchedTopic!.topic) ?? null)
+      : null;
 
   if (regenerateMessageId) {
     // Overwrite the existing assistant row in place -- the paired user
@@ -475,7 +521,7 @@ async function handleChatRequest(request: Request) {
       return NextResponse.json({ error: "Could not save the conversation" }, { status: 500 });
     }
 
-    return NextResponse.json({ assistantMessage: updated as ChatMessage });
+    return NextResponse.json({ assistantMessage: updated as ChatMessage, matchedTopic: resolvedMatchedTopic });
   }
 
   // Null for a real student (subscription_id already identifies their
@@ -526,5 +572,6 @@ async function handleChatRequest(request: Request) {
   return NextResponse.json({
     userMessage: rows.find((m) => m.role === "user"),
     assistantMessage: rows.find((m) => m.role === "assistant"),
+    matchedTopic: resolvedMatchedTopic,
   });
 }
