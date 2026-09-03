@@ -161,7 +161,14 @@ export default async function ArchetypeCoveragePage({
                             <p className="mt-1 text-sm text-foreground/70">{a.learning_objective}</p>
                             <p className="mt-1 text-xs text-foreground/50">{a.invariant_reasoning_structure}</p>
                             <p className="mt-2 text-xs text-foreground/40">
-                              {a.stats.question_count} question(s) in {a.stats.years_observed.join(", ") || "unknown year(s)"}
+                              {/* years_observed is typed as number[] but a handful of real rows (mostly
+                                  un-critiqued "candidate" ones, invisible under the default filter) have
+                                  it stored as null instead of [] -- confirmed live, e.g.
+                                  ar_chronological_events (status reviewed/KEEP, so even the default
+                                  filter isn't safe from this). .join on null crashes the whole page's
+                                  server render, so tolerate it here rather than trust the stored shape. */}
+                              {a.stats.question_count} question(s) in{" "}
+                              {(a.stats.years_observed ?? []).join(", ") || "unknown year(s)"}
                               {!a.generator_usable && " · not yet generator-usable"} ·{" "}
                               <Link href={`/admin/archetype-miner/${row.run_id}`} className="text-brand hover:underline">
                                 from run {row.run_id.slice(0, 8)}
