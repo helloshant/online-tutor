@@ -360,7 +360,17 @@ export async function mineFamiliesAction(formData: FormData): Promise<void> {
 // then, not the whole backfill's own completion (which can take a while).
 export async function recoverStage3Action(): Promise<void> {
   await requireAdminPage("archetype_miner");
-  await startStage3Recovery();
+  try {
+    await startStage3Recovery();
+  } catch (err) {
+    // The button is disabled while a pass is already running (see
+    // page.tsx's own inProgress check), so this should be rare -- a
+    // race between that check going stale and a click landing anyway.
+    // The service's own 409 guard already prevented a second pass from
+    // actually starting; swallow here rather than crashing the page over
+    // a request that was correctly rejected.
+    console.error("Failed to start Stage 3 recovery:", err);
+  }
   revalidatePath("/admin/archetype-miner");
 }
 

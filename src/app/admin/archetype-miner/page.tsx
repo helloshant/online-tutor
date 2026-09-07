@@ -84,9 +84,23 @@ export default async function ArchetypeMinerPage() {
             {stage3RecoveryPreview.affectedArchetypes} archetype(s) across {stage3RecoveryPreview.affectedRuns} run(s) are
             stuck REVIEW from a since-fixed Stage 3 bug (never actually reviewed by the model) — recovering re-runs
             Stage 3 on just those, in the background.
+            {stage3RecoveryPreview.inProgress && (
+              <span className="ml-1 font-medium">
+                A pass is already running — check `docker logs` for its own &quot;Stage 3 recovery: done.&quot; line, then reload this page.
+              </span>
+            )}
           </p>
-          <button type="submit" className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700">
-            Recover now
+          {/* Disabled while a pass is in progress -- a click here while
+              one is already running silently used to fire a SECOND,
+              fully independent pass over roughly the same backlog (see
+              the service's own comment on why this guard exists), rather
+              than either queuing or being rejected visibly. */}
+          <button
+            type="submit"
+            disabled={stage3RecoveryPreview.inProgress}
+            className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {stage3RecoveryPreview.inProgress ? "Recovery running…" : "Recover now"}
           </button>
         </form>
       )}

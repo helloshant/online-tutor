@@ -44,17 +44,38 @@ function isFallbackRationale(rationale: string | null | undefined): boolean {
 
 type StoredArchetypeRow = { run_id: string; archetype_id: string; archetype: Archetype };
 
+// PostgREST (Supabase's REST layer, what the JS client actually talks to)
+// caps a single query's returned rows by default -- confirmed directly in
+// production: with no pagination here, a live recovery run against a true
+// ~5,850-archetype backlog kept only ever processing ~865 archetypes
+// across ~37 runs per invocation, over and over, never advancing further
+// (a plain `count: "exact", head: true` query, like the admin page's own
+// pending-review banner uses, is NOT subject to this -- only a query that
+// actually returns row data is). Paged explicitly here so this reads the
+// WHOLE backlog regardless of the server's actual default cap, whatever
+// it happens to be.
+const FALLBACK_ROWS_PAGE_SIZE = 1000;
+
 async function loadFallbackRows(): Promise<StoredArchetypeRow[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("archetypes")
-    .select("run_id, archetype_id, archetype")
-    .eq("critic_decision", "REVIEW");
-  if (error) {
-    console.error("Stage 3 recovery: failed to load REVIEW archetypes:", error);
-    return [];
+  const rows: StoredArchetypeRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("archetypes")
+      .select("run_id, archetype_id, archetype")
+      .eq("critic_decision", "REVIEW")
+      .range(offset, offset + FALLBACK_ROWS_PAGE_SIZE - 1);
+    if (error) {
+      console.error("Stage 3 recovery: failed to load REVIEW archetypes:", error);
+      break;
+    }
+    const page = (data ?? []) as StoredArchetypeRow[];
+    rows.push(...page);
+    if (page.length < FALLBACK_ROWS_PAGE_SIZE) break;
+    offset += FALLBACK_ROWS_PAGE_SIZE;
   }
-  return ((data ?? []) as StoredArchetypeRow[]).filter((row) => isFallbackRationale(row.archetype.critic_rationale));
+  return rows.filter((row) => isFallbackRationale(row.archetype.critic_rationale));
 }
 
 export type Stage3RecoveryPreview = { affectedRuns: number; affectedArchetypes: number };
@@ -95,6 +116,22 @@ export type Stage3RecoveryResult = {
   runsFailed: number;
 };
 
+// Single-process, in-memory guard -- this service runs as one long-lived
+// Node process (see server.ts), so a plain module-level flag is enough.
+// Confirmed directly this matters: clicking "Recover now" more than once
+// (reasonable when the first click gives no visible progress until it's
+// entirely done, see the admin page's own banner) fires a SECOND, fully
+// independent runStage3Recovery() concurrently with the first -- both
+// call loadFallbackRows() at roughly the same time, both see roughly the
+// SAME still-pending backlog, and both then redundantly re-critique
+// largely the same archetypes rather than each making unique forward
+// progress, wasting real LLM calls on duplicate work.
+let recoveryInProgress = false;
+
+export function isStage3RecoveryInProgress(): boolean {
+  return recoveryInProgress;
+}
+
 // The actual recovery -- one runCritic call per affected run (never
 // mixing runs into one batch: each run has its own education_context and
 // its own llm_provider, and keeping the grouping matches how Stage 3 was
@@ -102,8 +139,23 @@ export type Stage3RecoveryResult = {
 // (this is exactly the same shape of work as a real pipeline run's own
 // Stage 3 pass, just replayed for a backlog instead of a fresh mining
 // run) -- callers should fire this in the background, not await it
-// inline in a request handler (see server.ts's own POST route).
+// inline in a request handler (see server.ts's own POST route), and
+// should check isStage3RecoveryInProgress() before calling this at all
+// (server.ts's own POST route does) rather than relying on the throw
+// below as the only guard.
 export async function runStage3Recovery(): Promise<Stage3RecoveryResult> {
+  if (recoveryInProgress) {
+    throw new Error("Stage 3 recovery is already running -- wait for it to finish before starting another pass.");
+  }
+  recoveryInProgress = true;
+  try {
+    return await runStage3RecoveryInner();
+  } finally {
+    recoveryInProgress = false;
+  }
+}
+
+async function runStage3RecoveryInner(): Promise<Stage3RecoveryResult> {
   const supabase = getSupabaseClient();
   const rows = await loadFallbackRows();
 

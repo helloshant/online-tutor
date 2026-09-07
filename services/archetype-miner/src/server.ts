@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { submitRun, type SubmitRunParams } from "./pipelineRunner.js";
 import { runFamilyMiner } from "./stage4FamilyMiner.js";
-import { previewStage3Recovery, runStage3Recovery, type Stage3RecoveryPreview } from "./stage3Recovery.js";
+import { previewStage3Recovery, runStage3Recovery, isStage3RecoveryInProgress, type Stage3RecoveryPreview } from "./stage3Recovery.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -379,7 +379,7 @@ app.get("/v1/archetype-families", requireSharedSecret, async (req: Request, res:
 app.get("/v1/stage3-recovery/preview", requireSharedSecret, async (_req: Request, res: Response) => {
   try {
     const preview = await previewStage3Recovery();
-    res.json(preview);
+    res.json({ ...preview, inProgress: isStage3RecoveryInProgress() });
   } catch (err) {
     console.error("Failed to preview Stage 3 recovery:", err);
     res.status(502).json({ error: "Failed to preview Stage 3 recovery" });
@@ -394,7 +394,19 @@ app.get("/v1/stage3-recovery/preview", requireSharedSecret, async (_req: Request
 // per-run, each affected run's own stats.review_queue count dropping on
 // the existing run list -- a one-time backfill, not a feature that
 // needed its own tracked-run infrastructure built specifically for it.
+//
+// Guarded against a second concurrent pass -- confirmed directly in
+// production that clicking "Recover now" again before the first pass's
+// own completion is visible anywhere (no progress bar, only a docker-log
+// line at the very end) fires a second, fully independent recovery that
+// redundantly re-critiques much of the same backlog the first one is
+// already working through, rather than making any unique progress.
 app.post("/v1/stage3-recovery/run", requireSharedSecret, async (_req: Request, res: Response) => {
+  if (isStage3RecoveryInProgress()) {
+    res.status(409).json({ error: "A Stage 3 recovery pass is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
   let preview: Stage3RecoveryPreview;
   try {
     preview = await previewStage3Recovery();
