@@ -43,6 +43,11 @@ const ACCEPTED_DECISIONS = ["KEEP", "REVISE", "ADD"];
 const MAX_ARCHETYPES = 5;
 
 type SignatureRow = { run_id: string; question_id: string; signature: { curriculum?: { chapter?: string; topic?: string } } };
+// Only paper.year is needed here -- the rest of Stage 0's SegmentedQuestion
+// shape (raw_text, extraction_confidence, ...) is irrelevant to this
+// lookup, same "define a minimal row shape for what this file actually
+// reads" convention SignatureRow above already follows.
+type SegmentedQuestionRow = { run_id: string; question_id: string; question: { paper?: { year?: number } } };
 
 type ArchetypeLookupRow = {
   run_id: string;
@@ -88,14 +93,23 @@ export async function findArchetypesForTopic(params: {
   const rows = archetypeRows as unknown as ArchetypeLookupRow[];
   const runIds = Array.from(new Set(rows.map((r) => r.run_id)));
 
-  const { data: signatureRows, error: sigError } = await supabase
-    .from("archetype_question_signatures")
-    .select("run_id, question_id, signature")
-    .in("run_id", runIds);
+  const [{ data: signatureRows, error: sigError }, { data: segmentedRows, error: segError }] = await Promise.all([
+    supabase.from("archetype_question_signatures").select("run_id, question_id, signature").in("run_id", runIds),
+    // For per-year question counts below -- year lives on Stage 0's own
+    // SegmentedQuestion.paper.year, not on the signature (QuestionSignature
+    // has no year field at all, see types.ts).
+    supabase.from("archetype_segmented_questions").select("run_id, question_id, question").in("run_id", runIds),
+  ]);
 
   if (sigError) {
     console.error("Signature lookup for exercise generation failed (falling back to ungrounded generation):", sigError);
     return [];
+  }
+  if (segError) {
+    // Non-fatal -- see yearByQuestion's own comment: a failed lookup here
+    // just means every archetype's questionCountByYear comes back empty,
+    // never a broken/ungrounded generation over it.
+    console.error("Segmented-question lookup for per-year counts failed (patterns will show with no year counts):", segError);
   }
 
   const chapterByQuestion = new Map<string, { chapter: string; topic: string }>();
@@ -103,6 +117,14 @@ export async function findArchetypesForTopic(params: {
     const curriculum = s.signature?.curriculum;
     if (!curriculum?.chapter || !curriculum?.topic) continue;
     chapterByQuestion.set(`${s.run_id}:${s.question_id}`, { chapter: curriculum.chapter, topic: curriculum.topic });
+  }
+
+  const yearByQuestion = new Map<string, number>();
+  for (const s of (segmentedRows ?? []) as SegmentedQuestionRow[]) {
+    const year = s.question?.paper?.year;
+    if (typeof year === "number" && Number.isFinite(year)) {
+      yearByQuestion.set(`${s.run_id}:${s.question_id}`, year);
+    }
   }
 
   const targetChapter = normalize(params.chapter);
@@ -128,6 +150,23 @@ export async function findArchetypesForTopic(params: {
         ? ((Object.entries(dist).sort((a, b) => b[1] - a[1])[0]?.[0] as "Easy" | "Medium" | "Hard" | undefined) ?? null)
         : null;
 
+    // Tallied here (from supporting_question_ids + yearByQuestion) rather
+    // than trusted from row.archetype.stats -- Stage 2's own stats object
+    // has no per-year count field at all (years_observed is only ever a
+    // distinct list, see its own comment below), and adding one there
+    // would mean every archetype ALREADY mined stays without counts until
+    // re-mined. This works retroactively for the whole existing catalogue
+    // instead, the same reasoning getArchetypesWithChapterTopic's own
+    // comment gives for deriving chapter/topic at read time rather than
+    // storing it.
+    const questionCountByYear: Record<string, number> = {};
+    for (const qid of row.archetype.supporting_question_ids) {
+      const year = yearByQuestion.get(`${row.run_id}:${qid}`);
+      if (year == null) continue;
+      const key = String(year);
+      questionCountByYear[key] = (questionCountByYear[key] ?? 0) + 1;
+    }
+
     matches.push({
       runId: row.run_id,
       archetypeId: row.archetype_id,
@@ -140,6 +179,7 @@ export async function findArchetypesForTopic(params: {
       // supporting question's own year, in whatever order clustering
       // happened to process them, with no guaranteed order or uniqueness.
       yearsObserved: Array.from(new Set(row.archetype.stats?.years_observed ?? [])).sort((a, b) => a - b),
+      questionCountByYear,
     });
 
     if (matches.length >= MAX_ARCHETYPES) break;

@@ -209,6 +209,14 @@ export type ExerciseArchetype = {
   // how to instantiate it); only ever read for display, see
   // TopicPattern's own comment in types.ts.
   yearsObserved: number[];
+  // How many of this pattern's own supporting questions came from each
+  // year, e.g. { "2025": 1, "2026": 2 } -- a student wants to know not
+  // just THAT a pattern recurred but how often, e.g. "asked twice in
+  // 2026" reads very differently from "asked once." Keyed by string (not
+  // number) purely because that's what a JSON object's own keys are --
+  // see findArchetypesForTopic's own comment on how this is derived.
+  // Unused by the generation prompt itself, same as yearsObserved above.
+  questionCountByYear: Record<string, number>;
 };
 
 function describeArchetype(a: ExerciseArchetype, index: number): string {

@@ -1034,6 +1034,7 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
       difficulty: a.difficulty,
       difficultyDistribution: a.difficultyDistribution,
       yearsObserved: a.yearsObserved,
+      questionCountByYear: a.questionCountByYear,
     })),
   };
   res.json(response);
