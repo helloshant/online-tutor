@@ -28,12 +28,23 @@ const ACCEPTED_DECISIONS = ["KEEP", "REVISE", "ADD"];
 // A chapter group larger than this is skipped rather than force-split --
 // splitting risks severing a real duplicate pair across two sub-batches
 // that never get compared against each other, which is worse than simply
-// not checking an unusually large chapter automatically. Confirmed this
-// is a generous ceiling for a real chapter's own archetype count (the
-// worst offender found in production, Bayes' theorem, was 10 copies in
-// ONE chapter -- nowhere near this).
-const MAX_GROUP_SIZE = 60;
-const MAX_TOKENS = 6000;
+// not checking an unusually large chapter automatically. The original
+// value here (60) was a guess based on the largest cross-run duplicate
+// COUNT seen at the time (Bayes' theorem, 10 copies) -- confirmed wrong
+// against real production data: a live run against CBSE Grade 12 Biology
+// hit three chapters at 71/79/113 archetypes each (a chapter's own TOTAL
+// archetype count, not its duplicate count, which is what this actually
+// bounds), all three silently skipped entirely. Raised well past the
+// largest real case seen so far, with headroom. This is safe to raise
+// much further than the earlier per-item-retyping bugs this session
+// already found (Stage 0/2/3, the backfill) would have allowed: the
+// prompt explicitly tells the model to OMIT any archetype with no
+// duplicate, so OUTPUT size scales with how many genuine duplicate
+// clusters actually exist, not with the group's own input size -- the
+// same live run found 56 clusters from ~400+ archetypes processed across
+// every checked chapter, a sparse ratio, not a 1:1 per-item echo.
+const MAX_GROUP_SIZE = 200;
+const MAX_TOKENS = 8000;
 
 type AcceptedRow = { run_id: string; archetype_id: string; archetype: Archetype };
 type SignatureRow = { run_id: string; question_id: string; signature: { curriculum?: { chapter?: string } } };
