@@ -156,6 +156,49 @@ export async function startStage3Recovery(): Promise<{ started: boolean } & Omit
   return { started: body.started, affectedRuns: body.affectedRuns, affectedArchetypes: body.affectedArchetypes };
 }
 
+export type StudentExplanationBackfillPreview = { pendingArchetypes: number; inProgress: boolean };
+
+// See the service's own studentExplanationBackfill.ts for what this
+// backfills and why -- a one-time pass generating the plain-language
+// concept explanation shown in the pattern picker for every archetype
+// mined before that field existed. Same preview/start/inProgress shape as
+// the Stage 3 recovery functions above, for the same reasons.
+export async function previewStudentExplanationBackfill(): Promise<StudentExplanationBackfillPreview> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/student-explanation-backfill/preview`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `student_explanation backfill preview failed with status ${res.status}`);
+  }
+  if (typeof body?.pendingArchetypes !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { pendingArchetypes: body.pendingArchetypes, inProgress: Boolean(body.inProgress) };
+}
+
+export async function startStudentExplanationBackfill(): Promise<{ started: boolean; pendingArchetypes: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/student-explanation-backfill/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `student_explanation backfill failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.pendingArchetypes !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, pendingArchetypes: body.pendingArchetypes };
+}
+
 export async function mineArchetypeFamilies(
   subjectOrCourse: string,
   llmProvider?: ArchetypeMinerLlmProvider

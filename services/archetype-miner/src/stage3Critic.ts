@@ -1,6 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCriticPrompt } from "./prompts.js";
-import { coerceInvariantReasoningStructure, normalizeStats } from "./textCoercion.js";
+import { coerceInvariantReasoningStructure, coerceStudentExplanation, normalizeStats } from "./textCoercion.js";
 import type { LlmProvider } from "./llm.js";
 import type { Archetype, CriticDecision } from "./types.js";
 
@@ -57,6 +57,8 @@ function normalizeReviewed(raw: Partial<Archetype> & { archetype_id: string }, o
     concept: raw.concept ?? "",
     learning_objective: raw.learning_objective ?? "",
     invariant_reasoning_structure: raw.invariant_reasoning_structure ?? "",
+    student_explanation:
+      typeof raw.student_explanation === "string" && raw.student_explanation.trim() ? raw.student_explanation : null,
     variations: [],
     supporting_question_ids: raw.supporting_question_ids ?? [],
     stats: normalizeStats(raw.stats, raw.supporting_question_ids?.length ?? 0),
@@ -81,6 +83,10 @@ function normalizeReviewed(raw: Partial<Archetype> & { archetype_id: string }, o
     concept: raw.concept ?? base.concept,
     learning_objective: raw.learning_objective ?? base.learning_objective,
     invariant_reasoning_structure: raw.invariant_reasoning_structure ?? base.invariant_reasoning_structure,
+    student_explanation:
+      typeof raw.student_explanation === "string" && raw.student_explanation.trim()
+        ? raw.student_explanation
+        : base.student_explanation,
     variations: Array.isArray(raw.variations) ? raw.variations : base.variations,
     supporting_question_ids: raw.supporting_question_ids ?? base.supporting_question_ids,
     generator_usable: raw.generator_usable ?? base.generator_usable,
@@ -154,7 +160,7 @@ async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider, r
       // below doesn't check invariant_reasoning_structure's shape at all,
       // so an uncoerced array would otherwise pass straight through into
       // normalizeReviewed rather than being caught by any validation.
-      const raw = coerceInvariantReasoningStructure(rawItem);
+      const raw = coerceStudentExplanation(coerceInvariantReasoningStructure(rawItem));
       if (isPlausibleReviewedArchetype(raw)) {
         reviewed.push(normalizeReviewed(raw, byId.get(raw.archetype_id)));
         seenIds.add(raw.archetype_id);

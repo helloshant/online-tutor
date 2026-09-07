@@ -238,6 +238,18 @@ export type Archetype = {
   concept: string;
   learning_objective: string;
   invariant_reasoning_structure: string;
+  // Plain-language, student-facing: what the underlying CONCEPT actually
+  // is, before a student attempts a question of this pattern -- distinct
+  // from invariant_reasoning_structure, which is a task instruction FOR
+  // A GENERATOR ("Describe the sequence of hormonal and neuroendocrine
+  // signaling events...") that would read as circular if shown to a
+  // student verbatim (it tells them what to DO, not what the mechanism
+  // actually IS). Generated once, at mining time (Stage 2) or by the
+  // one-time backfill for archetypes mined before this field existed --
+  // see studentExplanationBackfill.ts -- specifically so this is a cost
+  // paid once per archetype ever, not on every student's every click.
+  // null only for an archetype that hasn't been backfilled yet.
+  student_explanation: string | null;
   variations: ArchetypeVariation[];
   // All questions under this archetype, across variations.
   supporting_question_ids: string[];

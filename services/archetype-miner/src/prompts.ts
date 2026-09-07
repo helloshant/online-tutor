@@ -427,6 +427,10 @@ REQUIRED ANALYSIS
 7. Preserve full traceability: every question_id must appear in exactly
    one archetype's supporting_question_ids (or be explicitly flagged as
    not belonging).
+8. Write student_explanation per archetype -- see the SCHEMA's own field
+   description for exactly what this is (and, just as importantly, what
+   it is NOT: never invariant_reasoning_structure's task instruction
+   restated).
 
 NAMING
 Concise, concept-independent where possible, action-oriented, reusable.
@@ -457,6 +461,7 @@ merge_target_id, or split_result_ids, those are set later, not by you:
   "concept": "<must match a member question's curriculum.concept>",
   "learning_objective": "<observable, same style Stage 1 uses>",
   "invariant_reasoning_structure": "<ONE prose sentence/phrase naming the reasoning structure shared by every member/variation, e.g. Determine an unknown parameter from a stated condition on the roots, via the discriminant. This is NOT an array of steps -- do not reuse the shape of a QuestionSignature's own reasoning_pattern field (that's a list of steps for one question; this is a single descriptive string naming the shared structure across the whole archetype).>",
+  "student_explanation": "<2-4 plain-language sentences explaining the underlying CONCEPT itself, written for a student seeing this pattern's name for the first time, shown to them BEFORE they attempt a question of this type. This is NOT invariant_reasoning_structure restated -- invariant_reasoning_structure is an instruction describing the TASK ('Describe the sequence of hormonal and neuroendocrine signaling events that regulate parturition'); student_explanation actually TEACHES the mechanism/method/idea itself (e.g. what oxytocin and the positive-feedback loop actually do during parturition, in plain terms), so a student who doesn't already know this concept comes away knowing it, not just knowing what they're about to be asked to do. Keep it self-contained and accurate -- never invent facts beyond what the supporting questions/curriculum concept establish, and never reference 'this archetype,' 'this pattern,' or any exam-taxonomy language; write as if explaining the idea itself to a student, in the same style as a good textbook aside.>",
   "variations": [
     {
       "variation_id": "<id you assign>",
@@ -686,10 +691,11 @@ you to review them at all.
 - KEEP / MERGE / SPLIT / REVIEW / REMOVE: the six fields above are
   everything required. Do not include anything else.
 - REVISE: also include whichever of name / concept / learning_objective /
-  invariant_reasoning_structure / variations / supporting_question_ids /
-  generator_usable / generator_usability_rationale you are actually
-  revising (see Stage 2's own SCHEMA for each field's exact shape) --
-  omit anything your revision left unchanged.
+  invariant_reasoning_structure / student_explanation / variations /
+  supporting_question_ids / generator_usable / generator_usability_rationale
+  you are actually revising (see Stage 2's own SCHEMA for each field's
+  exact shape, including student_explanation's own description of what it
+  is and is not) -- omit anything your revision left unchanged.
 - ADD: return the FULL Archetype shape (Stage 2's own fields, see its own
   SCHEMA, plus the six fields above) with a freshly assigned archetype_id
   and critic_decision:"ADD" -- there is no existing candidate to fall
@@ -699,5 +705,77 @@ you to review them at all.
 
 OUTPUT
 Return ONLY valid JSON: an array with exactly one object per candidate you
+were given, matching the SCHEMA above. No markdown, no explanatory prose.`;
+}
+
+// ---------------------------------------------------------------------------
+// student_explanation backfill (added later, not part of the original
+// design doc's Stage 0-4 pipeline -- see studentExplanationBackfill.ts's
+// own comment for why this exists as a one-time backfill rather than
+// folding into Stage 2's own prompt retroactively). Deliberately its own
+// minimal prompt, not a cut-down buildMinerPrompt: the input here is only
+// each archetype's own already-mined name/concept/learning_objective/
+// invariant_reasoning_structure (nothing to re-derive from raw questions),
+// and the output is intentionally tiny per item -- exactly the lesson
+// this repo already paid for once with Stage 3's own prompt (see
+// buildCriticPrompt's own comment): never ask a model to retype anything
+// it doesn't have to, especially across a batch.
+// ---------------------------------------------------------------------------
+
+export function buildStudentExplanationBackfillPrompt(): string {
+  return `ROLE
+You are a textbook writer, explaining exam-syllabus concepts in plain
+language for a student about to practice questions on them.
+
+INPUT
+An array of already-mined archetypes (each with archetype_id, name,
+concept, learning_objective, invariant_reasoning_structure, and its
+education_context) -- no raw questions, nothing left to re-derive; every
+fact you need to write an accurate explanation is already in these
+fields.
+
+TASK
+For EVERY archetype in the array, write student_explanation: 2-4
+plain-language sentences explaining the underlying CONCEPT itself --
+what the idea, mechanism, or method actually IS -- not a restatement of
+invariant_reasoning_structure, which is a task instruction ("Describe
+the sequence of hormonal and neuroendocrine signaling events that
+regulate parturition"). student_explanation TEACHES the thing itself
+(e.g. what oxytocin and the positive-feedback loop actually do during
+parturition, in plain terms) so a student who doesn't already know this
+concept comes away knowing it, before they attempt a question of this
+type -- not just knowing what they're about to be asked to do.
+
+RULES
+- Never invent facts beyond what concept/learning_objective/
+  invariant_reasoning_structure already establish for this archetype --
+  if they don't give you enough to explain the underlying idea
+  accurately, write the clearest correct explanation those fields
+  support rather than fabricating specifics they don't contain.
+- Match the register to education_context.education_stage (secondary vs
+  senior_secondary vs undergraduate) -- explain at the level a student
+  actually at that stage would find clear, not over-simplified for a
+  senior-secondary/undergraduate concept or over-technical for a
+  secondary one.
+- Never reference "this archetype," "this pattern," "this question
+  type," or any exam-taxonomy language -- write as if explaining the
+  idea itself to a student, in the same style as a good textbook aside,
+  with no awareness that a taxonomy or exam pattern is involved at all.
+- Self-contained: a student should be able to read ONLY
+  student_explanation, with no other context, and come away
+  understanding the concept.
+
+SCHEMA
+Return exactly one object per archetype you were given -- never omit
+one, even if you're uncertain; write the clearest explanation you can
+from what's given rather than skipping it:
+{
+  "archetype_id": "<the SAME id you were given>",
+  "student_explanation": "<2-4 plain-language sentences, see TASK and RULES above>"
+}
+Nothing else -- no other field from the archetype needs echoing back.
+
+OUTPUT
+Return ONLY valid JSON: an array with exactly one object per archetype you
 were given, matching the SCHEMA above. No markdown, no explanatory prose.`;
 }

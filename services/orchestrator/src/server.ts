@@ -1043,6 +1043,7 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
       runId: a.runId,
       archetypeId: a.archetypeId,
       name: a.name,
+      studentExplanation: a.studentExplanation,
       difficulty: a.difficulty,
       difficultyDistribution: a.difficultyDistribution,
       yearsObserved: a.yearsObserved,
