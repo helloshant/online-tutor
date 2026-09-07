@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { submitPipelineRun, mineArchetypeFamilies, type ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
+import { submitPipelineRun, mineArchetypeFamilies, startStage3Recovery, type ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
 import type { EducationContext, EducationStage, CurriculumSourceType } from "@/lib/archetypeMinerTypes";
 
 const EDUCATION_STAGES: EducationStage[] = ["secondary", "senior_secondary", "undergraduate"];
@@ -350,6 +350,18 @@ export async function mineFamiliesAction(formData: FormData): Promise<void> {
 
   await mineArchetypeFamilies(subjectOrCourse, readLlmProvider(formData));
   revalidatePath("/admin/archetype-miner/families");
+}
+
+// One-time backfill for archetypes stuck REVIEW by a since-fixed Stage 3
+// prompt bug (see the service's own stage3Recovery.ts) -- kicked off from
+// the main archetype-miner page's own preview banner. Fire-and-forget on
+// the service side: this action just starts it and revalidates so the
+// page's next load reflects whichever runs have already finished by
+// then, not the whole backfill's own completion (which can take a while).
+export async function recoverStage3Action(): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  await startStage3Recovery();
+  revalidatePath("/admin/archetype-miner");
 }
 
 // Curriculum taxonomy documents are plain admin CRUD against Supabase

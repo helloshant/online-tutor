@@ -106,6 +106,50 @@ export async function getArchetypeMinerHealth(): Promise<{ llmProvider: Archetyp
   }
 }
 
+export type Stage3RecoveryPreview = { affectedRuns: number; affectedArchetypes: number };
+
+// See the service's own stage3Recovery.ts for what this backfills and
+// why -- a one-time recovery for archetypes stuck REVIEW by a since-fixed
+// Stage 3 prompt bug, never a genuine Stage 3 REVIEW a human should still
+// decide.
+export async function previewStage3Recovery(): Promise<Stage3RecoveryPreview> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/stage3-recovery/preview`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Stage 3 recovery preview failed with status ${res.status}`);
+  }
+  if (typeof body?.affectedRuns !== "number" || typeof body?.affectedArchetypes !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { affectedRuns: body.affectedRuns, affectedArchetypes: body.affectedArchetypes };
+}
+
+// Fire-and-forget on the service side (see its own POST route comment) --
+// this resolves as soon as the run has STARTED, not once it's finished.
+export async function startStage3Recovery(): Promise<{ started: boolean } & Stage3RecoveryPreview> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/stage3-recovery/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Stage 3 recovery failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.affectedRuns !== "number" || typeof body?.affectedArchetypes !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, affectedRuns: body.affectedRuns, affectedArchetypes: body.affectedArchetypes };
+}
+
 export async function mineArchetypeFamilies(
   subjectOrCourse: string,
   llmProvider?: ArchetypeMinerLlmProvider
