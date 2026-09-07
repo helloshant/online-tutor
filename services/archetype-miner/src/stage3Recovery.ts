@@ -156,19 +156,24 @@ export async function runStage3Recovery(): Promise<Stage3RecoveryResult> {
 
         if (existingIds.has(archetype.archetype_id) && !knownIds.has(archetype.archetype_id)) {
           // A same-id collision with an archetype that was NEVER part of
-          // this recovery -- almost certainly Stage 3 re-proposing (under
-          // reduced context) something that already exists properly
-          // reviewed elsewhere in this run. Never insert (constraint
-          // violation, as seen in production) and never update (that
-          // archetype's real, already-reviewed content would be
-          // overwritten by a pass that never actually looked at it) --
-          // just skip, leaving the pre-existing archetype exactly as it
-          // was. Nothing to resolve on the review queue either: a
-          // collided id never had its own pending entry.
+          // the fallback subset being recovered -- either it already
+          // existed elsewhere in this run before recovery started
+          // (almost certainly Stage 3 re-proposing, under reduced
+          // context, something already properly reviewed), or a
+          // DIFFERENT Stage 3 batch of this SAME run already inserted it
+          // earlier in this very loop (existingIds grows as inserts
+          // succeed below, specifically to catch this). Never insert
+          // (constraint violation, as seen in production both ways) and
+          // never update (that archetype's real content -- either
+          // already-reviewed, or already recorded by this pass under
+          // this same id -- would be overwritten by a redundant re-
+          // proposal) -- just skip, leaving whatever's already there
+          // exactly as it is. Nothing to resolve on the review queue
+          // either: a collided id never had its own pending entry.
           console.warn(
             `Stage 3 recovery: run ${runId} proposed archetype_id "${archetype.archetype_id}" which already exists ` +
-              "in this run outside the recovered subset -- skipping rather than inserting (constraint violation) " +
-              "or overwriting the existing, already-reviewed archetype."
+              "(either from before this recovery, or inserted by another batch of this same run earlier in this " +
+              "pass) -- skipping rather than inserting (constraint violation) or overwriting it."
           );
           continue;
         }
@@ -194,7 +199,24 @@ export async function runStage3Recovery(): Promise<Stage3RecoveryResult> {
             critic_decision: archetype.critic_decision,
             mining_confidence: archetype.mining_confidence,
           });
-          if (error) console.error(`Stage 3 recovery: failed to insert ADDed archetype ${archetype.archetype_id}:`, error);
+          if (error) {
+            console.error(`Stage 3 recovery: failed to insert ADDed archetype ${archetype.archetype_id}:`, error);
+          } else {
+            // Confirmed directly in production: a run whose fallback
+            // subset exceeds BATCH_SIZE gets split into multiple Stage 3
+            // batches (see runCritic), and two DIFFERENT batches of the
+            // SAME run independently proposed an ADD with the identical
+            // model-derived slug id ("determine-relation-properties")
+            // more than once -- existingIds was snapshotted once before
+            // this loop, so it never learned about an id THIS loop just
+            // inserted, and the second (and third) occurrence repeated
+            // the exact same constraint violation this file already
+            // fixed once for a cross-run collision. Recording it here
+            // closes that gap: any later occurrence in this same loop
+            // now correctly falls into the skip branch above instead of
+            // attempting another insert.
+            existingIds.add(archetype.archetype_id);
+          }
         } else {
           const { error } = await supabase
             .from("archetypes")
