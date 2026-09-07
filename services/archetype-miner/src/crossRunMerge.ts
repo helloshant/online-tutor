@@ -25,24 +25,18 @@ import type { Archetype } from "./types.js";
 // mining route already requires an explicit subject_or_course for.
 const ACCEPTED_STATUSES = ["reviewed", "final"];
 const ACCEPTED_DECISIONS = ["KEEP", "REVISE", "ADD"];
-// A chapter group larger than this is skipped rather than force-split --
-// splitting risks severing a real duplicate pair across two sub-batches
-// that never get compared against each other, which is worse than simply
-// not checking an unusually large chapter automatically. The original
-// value here (60) was a guess based on the largest cross-run duplicate
-// COUNT seen at the time (Bayes' theorem, 10 copies) -- confirmed wrong
-// against real production data: a live run against CBSE Grade 12 Biology
-// hit three chapters at 71/79/113 archetypes each (a chapter's own TOTAL
-// archetype count, not its duplicate count, which is what this actually
-// bounds), all three silently skipped entirely. Raised well past the
-// largest real case seen so far, with headroom. This is safe to raise
-// much further than the earlier per-item-retyping bugs this session
-// already found (Stage 0/2/3, the backfill) would have allowed: the
-// prompt explicitly tells the model to OMIT any archetype with no
-// duplicate, so OUTPUT size scales with how many genuine duplicate
-// clusters actually exist, not with the group's own input size -- the
-// same live run found 56 clusters from ~400+ archetypes processed across
-// every checked chapter, a sparse ratio, not a 1:1 per-item echo.
+// The largest batch sent to any ONE LLM call (see processChapterGroup's
+// own comment for what happens to a chapter group larger than this -- it
+// gets reduced across several rounds now, not skipped; this used to be a
+// hard skip boundary before that existed). Went 60 -> 200 after the first
+// wrong guess (60, based on the largest cross-run duplicate COUNT seen at
+// the time, Bayes' theorem's 10 copies) got disproven by real chapters at
+// 71/79/113 archetypes. This is safe to keep fairly high, unlike the
+// earlier per-item-retyping bugs this session found (Stage 0/2/3, the
+// backfill): the prompt explicitly tells the model to OMIT any archetype
+// with no duplicate, so a call's OUTPUT size scales with how many genuine
+// duplicate clusters actually exist within its own batch, not with the
+// batch's own input size.
 const MAX_GROUP_SIZE = 200;
 const MAX_TOKENS = 8000;
 
@@ -160,11 +154,13 @@ export async function previewCrossRunMerge(params: {
 
 type Cluster = { memberRefs: string[]; rationale: string };
 
+// Only ever called on a batch already guaranteed <= MAX_GROUP_SIZE (see
+// processChapterGroup below, the only caller) -- the length check here is
+// a defensive invariant guard, not the primary "too big" handling path
+// anymore (that's now real reduction, not a skip).
 async function detectDuplicateClusters(group: AcceptedRow[], provider: LlmProvider): Promise<Cluster[]> {
   if (group.length > MAX_GROUP_SIZE) {
-    console.warn(
-      `Cross-run merge: skipping a chapter group of ${group.length} archetype(s) -- exceeds ${MAX_GROUP_SIZE}, review it manually.`
-    );
+    console.warn(`Cross-run merge: internal invariant violated -- a batch of ${group.length} reached detectDuplicateClusters (cap ${MAX_GROUP_SIZE}).`);
     return [];
   }
 
@@ -324,6 +320,159 @@ export async function runCrossRunMerge(params: {
   }
 }
 
+type GroupPassResult = { clustersFound: number; archetypesMerged: number; survivors: AcceptedRow[] };
+
+// One LLM call (via detectDuplicateClusters) over a batch already
+// guaranteed <= MAX_GROUP_SIZE, plus applying whatever clusters it finds.
+// Returns the batch's own SURVIVORS (everything not absorbed into another
+// member this call) so a caller reducing an oversized chapter across
+// several rounds (see processChapterGroup) can pool them into the next,
+// smaller round.
+async function processBatch(
+  chapter: string,
+  batch: AcceptedRow[],
+  provider: LlmProvider,
+  supabase: ReturnType<typeof getSupabaseClient>
+): Promise<GroupPassResult> {
+  const byRef = new Map<string, AcceptedRow>();
+  for (const row of batch) byRef.set(`${row.run_id}:${row.archetype_id}`, row);
+
+  const clusters = await detectDuplicateClusters(batch, provider);
+  const absorbedRefs = new Set<string>();
+  let clustersFound = 0;
+  let archetypesMerged = 0;
+
+  for (const cluster of clusters) {
+    const members = cluster.memberRefs.map((ref) => byRef.get(ref)).filter((m): m is AcceptedRow => Boolean(m));
+    // A ref the model invented, or a cluster that resolved down to fewer
+    // than 2 real rows once unresolvable refs are dropped -- there is
+    // nothing safe to merge left, skip it rather than guessing.
+    if (members.length < 2) continue;
+    clustersFound++;
+
+    const survivor = members.reduce((best, m) =>
+      (m.archetype.stats?.question_count ?? 0) > (best.archetype.stats?.question_count ?? 0) ? m : best
+    );
+    const absorbed = members.filter((m) => m !== survivor);
+
+    const mergedStats = mergeArchetypeStats(survivor.archetype.stats, absorbed.map((m) => m.archetype.stats));
+    const { error: survivorErr } = await supabase
+      .from("archetypes")
+      .update({ archetype: { ...survivor.archetype, stats: mergedStats }, updated_at: new Date().toISOString() })
+      .eq("run_id", survivor.run_id)
+      .eq("archetype_id", survivor.archetype_id);
+    if (survivorErr) {
+      // Don't mark the absorbed members MERGE if the survivor itself
+      // didn't save -- that would lose their evidence into a survivor
+      // that never actually received it.
+      console.error(`Cross-run merge: failed to update survivor ${survivor.run_id}:${survivor.archetype_id}:`, survivorErr);
+      continue;
+    }
+    // Reflect the merged stats on the in-memory row too -- a LATER
+    // reduction round may pool this same survivor back in, and it should
+    // carry forward what it just absorbed, not the stale pre-merge stats
+    // still sitting in `batch`.
+    survivor.archetype = { ...survivor.archetype, stats: mergedStats };
+
+    for (const m of absorbed) {
+      const mergedArchetype: Archetype = {
+        ...m.archetype,
+        critic_decision: "MERGE",
+        merge_target_id: `${survivor.run_id}:${survivor.archetype_id}`,
+        critic_rationale: `Cross-run duplicate merge (chapter "${chapter}"): ${cluster.rationale}`,
+      };
+      const { error } = await supabase
+        .from("archetypes")
+        .update({ archetype: mergedArchetype, critic_decision: "MERGE", updated_at: new Date().toISOString() })
+        .eq("run_id", m.run_id)
+        .eq("archetype_id", m.archetype_id);
+      if (error) {
+        console.error(`Cross-run merge: failed to mark ${m.run_id}:${m.archetype_id} as MERGE:`, error);
+      } else {
+        archetypesMerged++;
+        absorbedRefs.add(`${m.run_id}:${m.archetype_id}`);
+      }
+    }
+  }
+
+  const survivors = batch.filter((row) => !absorbedRefs.has(`${row.run_id}:${row.archetype_id}`));
+  return { clustersFound, archetypesMerged, survivors };
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// A chapter this large can't be exhaustively compared in one call even at
+// this service's raised MAX_GROUP_SIZE (200) -- confirmed directly in
+// production: a real chapter reached 407 archetypes in one scope. Rather
+// than skip it (the old behavior) or force it through one oversized call
+// anyway, this reduces it in rounds: split into MAX_GROUP_SIZE-sized
+// sub-batches, detect + apply merges within each independently, then pool
+// every sub-batch's own SURVIVORS back together and repeat on that
+// smaller pooled set. Reshuffled before every round -- re-splitting
+// survivors along the SAME sub-batch boundaries every round would make
+// zero progress on a duplicate pair that happens to land in different
+// sub-batches (they'd simply never be compared against each other,
+// forever); shuffling gives every pair a fresh chance to land in the same
+// sub-batch on a later round, the same reasoning the outer iteration
+// loop's own repeated passes already rely on for ordinary-sized chapters.
+const MAX_REDUCTION_ROUNDS = 5;
+
+async function processChapterGroup(
+  chapter: string,
+  group: AcceptedRow[],
+  provider: LlmProvider,
+  supabase: ReturnType<typeof getSupabaseClient>
+): Promise<{ clustersFound: number; archetypesMerged: number }> {
+  let current = group;
+  let totalClusters = 0;
+  let totalMerged = 0;
+
+  let round = 0;
+  while (current.length > MAX_GROUP_SIZE && round < MAX_REDUCTION_ROUNDS) {
+    round++;
+    const shuffled = shuffle(current);
+    const subBatches: AcceptedRow[][] = [];
+    for (let i = 0; i < shuffled.length; i += MAX_GROUP_SIZE) subBatches.push(shuffled.slice(i, i + MAX_GROUP_SIZE));
+
+    console.log(
+      `Cross-run merge: chapter "${chapter}" has ${current.length} archetype(s) -- reduction round ${round}/${MAX_REDUCTION_ROUNDS}, ` +
+        `${subBatches.length} sub-batch(es) of up to ${MAX_GROUP_SIZE}.`
+    );
+
+    const survivorsThisRound: AcceptedRow[] = [];
+    for (const subBatch of subBatches) {
+      const { clustersFound, archetypesMerged, survivors } = await processBatch(chapter, subBatch, provider, supabase);
+      totalClusters += clustersFound;
+      totalMerged += archetypesMerged;
+      survivorsThisRound.push(...survivors);
+    }
+    current = survivorsThisRound;
+  }
+
+  if (current.length > MAX_GROUP_SIZE) {
+    console.warn(
+      `Cross-run merge: chapter "${chapter}" still has ${current.length} archetype(s) after ${MAX_REDUCTION_ROUNDS} reduction ` +
+        "round(s) -- stopping here for this chapter this pass; a further top-level iteration will pick up where this left off."
+    );
+    return { clustersFound: totalClusters, archetypesMerged: totalMerged };
+  }
+
+  if (current.length > 1) {
+    const { clustersFound, archetypesMerged } = await processBatch(chapter, current, provider, supabase);
+    totalClusters += clustersFound;
+    totalMerged += archetypesMerged;
+  }
+
+  return { clustersFound: totalClusters, archetypesMerged: totalMerged };
+}
+
 type CrossRunMergePassResult = { chapterGroupsChecked: number; clustersFound: number; archetypesMerged: number };
 
 async function runCrossRunMergeOnePass(params: {
@@ -343,61 +492,11 @@ async function runCrossRunMergeOnePass(params: {
       `${params.subjectName} (${params.boardName}, grade ${params.gradeName})...`
   );
 
-  const byRef = new Map<string, AcceptedRow>();
-  for (const group of groups.values()) {
-    for (const row of group) byRef.set(`${row.run_id}:${row.archetype_id}`, row);
-  }
-
   for (const [chapter, group] of groups) {
     result.chapterGroupsChecked++;
-    const clusters = await detectDuplicateClusters(group, provider);
-
-    for (const cluster of clusters) {
-      const members = cluster.memberRefs.map((ref) => byRef.get(ref)).filter((m): m is AcceptedRow => Boolean(m));
-      // A ref the model invented, or a cluster that resolved down to
-      // fewer than 2 real rows once unresolvable refs are dropped -- there
-      // is nothing safe to merge left, skip it rather than guessing.
-      if (members.length < 2) continue;
-      result.clustersFound++;
-
-      const survivor = members.reduce((best, m) =>
-        (m.archetype.stats?.question_count ?? 0) > (best.archetype.stats?.question_count ?? 0) ? m : best
-      );
-      const absorbed = members.filter((m) => m !== survivor);
-
-      const mergedStats = mergeArchetypeStats(survivor.archetype.stats, absorbed.map((m) => m.archetype.stats));
-      const { error: survivorErr } = await supabase
-        .from("archetypes")
-        .update({ archetype: { ...survivor.archetype, stats: mergedStats }, updated_at: new Date().toISOString() })
-        .eq("run_id", survivor.run_id)
-        .eq("archetype_id", survivor.archetype_id);
-      if (survivorErr) {
-        // Don't mark the absorbed members MERGE if the survivor itself
-        // didn't save -- that would lose their evidence into a survivor
-        // that never actually received it.
-        console.error(`Cross-run merge: failed to update survivor ${survivor.run_id}:${survivor.archetype_id}:`, survivorErr);
-        continue;
-      }
-
-      for (const m of absorbed) {
-        const mergedArchetype: Archetype = {
-          ...m.archetype,
-          critic_decision: "MERGE",
-          merge_target_id: `${survivor.run_id}:${survivor.archetype_id}`,
-          critic_rationale: `Cross-run duplicate merge (chapter "${chapter}"): ${cluster.rationale}`,
-        };
-        const { error } = await supabase
-          .from("archetypes")
-          .update({ archetype: mergedArchetype, critic_decision: "MERGE", updated_at: new Date().toISOString() })
-          .eq("run_id", m.run_id)
-          .eq("archetype_id", m.archetype_id);
-        if (error) {
-          console.error(`Cross-run merge: failed to mark ${m.run_id}:${m.archetype_id} as MERGE:`, error);
-        } else {
-          result.archetypesMerged++;
-        }
-      }
-    }
+    const { clustersFound, archetypesMerged } = await processChapterGroup(chapter, group, provider, supabase);
+    result.clustersFound += clustersFound;
+    result.archetypesMerged += archetypesMerged;
   }
 
   // No "done" log here -- the caller (runCrossRunMerge's own iteration
