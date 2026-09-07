@@ -247,7 +247,27 @@ function mergeArchetypeStats(target: Archetype["stats"], absorbed: Archetype["st
   };
 }
 
-export type CrossRunMergeResult = { chapterGroupsChecked: number; clustersFound: number; archetypesMerged: number };
+export type CrossRunMergeResult = {
+  iterationsRun: number;
+  chapterGroupsChecked: number;
+  clustersFound: number;
+  archetypesMerged: number;
+};
+
+// A single top-level call can genuinely need several iterations to reach a
+// clean 0 -- confirmed directly in production: a chapter group can now run
+// up to MAX_GROUP_SIZE (200) archetypes in one LLM call, and reliably
+// spotting every genuine duplicate in a batch that large, every single
+// time, isn't realistic for one pass -- five consecutive real runs against
+// the same scope found 51, 30, 36, 28, 23 clusters in a row, including one
+// FLAT repeat (30 then 36, not a strictly shrinking queue) rather than a
+// clean converge-to-zero. That's ordinary model non-determinism sampling a
+// different partial subset of the true duplicate set each call, not a
+// bug -- but it means an admin manually re-clicking "Run merge now" over
+// and over was doing exactly the right thing, just by hand. This bounds
+// how many iterations one call will do that automatically before it were
+// to loop forever chasing a vanishingly rare last catch.
+const MAX_ITERATIONS = 8;
 
 let mergeInProgress = false;
 
@@ -255,10 +275,11 @@ export function isCrossRunMergeInProgress(): boolean {
   return mergeInProgress;
 }
 
-// Long-running (one LLM call per chapter group with cross-run archetypes)
-// -- callers should fire this in the background, not await it inline in a
-// request handler (see server.ts's own POST route), and should check
-// isCrossRunMergeInProgress() first (that route does).
+// Long-running (up to MAX_ITERATIONS passes, each with one LLM call per
+// chapter group with cross-run archetypes) -- callers should fire this in
+// the background, not await it inline in a request handler (see
+// server.ts's own POST route), and should check isCrossRunMergeInProgress()
+// first (that route does).
 export async function runCrossRunMerge(params: {
   boardName: string;
   gradeName: string;
@@ -269,27 +290,57 @@ export async function runCrossRunMerge(params: {
   }
   mergeInProgress = true;
   try {
-    return await runCrossRunMergeInner(params);
+    const total: CrossRunMergeResult = { iterationsRun: 0, chapterGroupsChecked: 0, clustersFound: 0, archetypesMerged: 0 };
+    for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+      const pass = await runCrossRunMergeOnePass(params);
+      total.iterationsRun = iteration;
+      total.chapterGroupsChecked = pass.chapterGroupsChecked; // same 29-ish chapters re-scanned each pass, not additive
+      total.clustersFound += pass.clustersFound;
+      total.archetypesMerged += pass.archetypesMerged;
+
+      console.log(
+        `Cross-run merge: iteration ${iteration}/${MAX_ITERATIONS} done -- ${pass.clustersFound} cluster(s), ` +
+          `${pass.archetypesMerged} archetype(s) merged this pass.`
+      );
+
+      // Converged -- a clean pass with nothing left to merge. Stop rather
+      // than spending MAX_ITERATIONS regardless once the real signal is
+      // already "nothing more to find."
+      if (pass.archetypesMerged === 0) break;
+    }
+
+    console.log(
+      `Cross-run merge: fully done after ${total.iterationsRun} iteration(s) for ${params.subjectName} ` +
+        `(${params.boardName}, grade ${params.gradeName}) -- ${total.clustersFound} total cluster(s) found, ` +
+        `${total.archetypesMerged} total archetype(s) merged away.` +
+        (total.iterationsRun >= MAX_ITERATIONS
+          ? " Hit the iteration cap without reaching a clean pass -- run it again manually if you want to keep chasing the (likely small) remaining tail."
+          : "")
+    );
+
+    return total;
   } finally {
     mergeInProgress = false;
   }
 }
 
-async function runCrossRunMergeInner(params: {
+type CrossRunMergePassResult = { chapterGroupsChecked: number; clustersFound: number; archetypesMerged: number };
+
+async function runCrossRunMergeOnePass(params: {
   boardName: string;
   gradeName: string;
   subjectName: string;
-}): Promise<CrossRunMergeResult> {
+}): Promise<CrossRunMergePassResult> {
   const supabase = getSupabaseClient();
   const rows = await loadAcceptedWithChapter(params);
   const groups = groupByChapterCrossRun(rows);
   const provider = getActiveLlmProvider();
 
-  const result: CrossRunMergeResult = { chapterGroupsChecked: 0, clustersFound: 0, archetypesMerged: 0 };
+  const result: CrossRunMergePassResult = { chapterGroupsChecked: 0, clustersFound: 0, archetypesMerged: 0 };
 
   console.log(
-    `Cross-run merge: starting on ${groups.size} chapter group(s) with cross-run archetypes for ` +
-      `${params.subjectName} (${params.boardName}, grade ${params.gradeName}).`
+    `Cross-run merge: checking ${groups.size} chapter group(s) with cross-run archetypes for ` +
+      `${params.subjectName} (${params.boardName}, grade ${params.gradeName})...`
   );
 
   const byRef = new Map<string, AcceptedRow>();
@@ -349,10 +400,11 @@ async function runCrossRunMergeInner(params: {
     }
   }
 
-  console.log(
-    `Cross-run merge: done. ${result.chapterGroupsChecked} chapter group(s) checked, ${result.clustersFound} ` +
-      `duplicate cluster(s) found, ${result.archetypesMerged} archetype(s) merged away.`
-  );
+  // No "done" log here -- the caller (runCrossRunMerge's own iteration
+  // loop) logs each pass's result itself, immediately after this returns,
+  // and logs the final across-all-iterations summary once the loop ends.
+  // A second log line here would just repeat the same numbers under a
+  // different, more confusing "done" wording.
 
   return result;
 }
