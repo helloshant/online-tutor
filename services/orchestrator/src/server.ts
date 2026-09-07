@@ -60,6 +60,15 @@ const MAX_TOKENS = 1536;
 const SUMMARY_MAX_TOKENS = 700;
 const EXERCISE_MAX_TOKENS = 2048;
 const EXERCISE_GENERATION_COUNT = 5;
+// findArchetypesForTopic's own default limit (5, matching
+// EXERCISE_GENERATION_COUNT above) is right for grounding a batch of
+// generated exercises, but wrong for the picker/on-demand-generate routes
+// below, which need to see (and be able to pick) any of a chapter's real
+// mined patterns, not just an arbitrary first few -- see that function's
+// own comment for the production bug this fixes. Effectively "no cap" for
+// any realistic topic's mined-pattern count while still bounding a truly
+// pathological case.
+const PATTERN_PICKER_LIMIT = 200;
 // Tier D: validates a client-supplied requestedDifficulty on
 // /v1/topic-exercises/generate -- see that route's own comment.
 const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
@@ -1024,6 +1033,9 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
     subjectName: body.subjectName,
     chapter: body.chapter,
     topic: body.topic,
+    // The whole point of this endpoint is listing every mined pattern for
+    // a student to choose from -- see PATTERN_PICKER_LIMIT's own comment.
+    limit: PATTERN_PICKER_LIMIT,
   });
 
   const response: TopicPatternsResponse = {
@@ -1095,6 +1107,12 @@ app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Reques
       subjectName: body.subjectName,
       chapter: body.chapter,
       topic: body.topic,
+      // Must see the SAME full set the picker (/v1/topic-exercises/patterns)
+      // showed the student -- otherwise a requested archetypeId outside
+      // an arbitrary first-N here would silently fall through to a random
+      // pick below instead of the pattern actually clicked. See
+      // PATTERN_PICKER_LIMIT's own comment.
+      limit: PATTERN_PICKER_LIMIT,
     });
 
     if (archetypes.length === 0) {

@@ -38,8 +38,21 @@ import type { ExerciseArchetype } from "./prompts.js";
 
 const ACCEPTED_STATUSES = ["reviewed", "final"];
 const ACCEPTED_DECISIONS = ["KEEP", "REVISE", "ADD"];
-// Matches EXERCISE_GENERATION_COUNT in server.ts -- no reason to fetch/
-// pass more patterns than the exercise set could ever draw from.
+// Default cap, used only by the BATCH exercise-generation call site (see
+// server.ts's own /v1/topic-exercises) -- matches EXERCISE_GENERATION_COUNT
+// there, since a batch of ~5 generated exercises can't ground in more than
+// ~5 example patterns anyway. NOT appropriate for the other two call
+// sites (the interactive "list every mined pattern" picker, and "generate
+// THIS specific pattern"/"generate another" on-demand) -- confirmed
+// directly in production: a chapter with 25 real mined patterns only ever
+// showed students the first 5 in the picker, and clicking a pattern
+// outside that arbitrary first-5 (impossible from the picker itself,
+// since it never showed one, but a stale/cached picker state could still
+// send the request) silently fell back to a RANDOM one of the 5 instead
+// of the pattern actually requested -- because that route re-ran this
+// same lookup with the same default cap. Both of those call sites now
+// pass an explicit, effectively-unbounded limit instead of relying on
+// this default.
 const MAX_ARCHETYPES = 5;
 
 type SignatureRow = { run_id: string; question_id: string; signature: { curriculum?: { chapter?: string; topic?: string } } };
@@ -71,7 +84,13 @@ export async function findArchetypesForTopic(params: {
   subjectName: string;
   chapter: string;
   topic: string;
+  // Defaults to MAX_ARCHETYPES (5) -- see that constant's own comment on
+  // why that default is right for batch generation grounding but wrong
+  // for the picker/on-demand-generate call sites, which pass an explicit,
+  // much higher value instead.
+  limit?: number;
 }): Promise<ExerciseArchetype[]> {
+  const cap = params.limit ?? MAX_ARCHETYPES;
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
@@ -182,7 +201,7 @@ export async function findArchetypesForTopic(params: {
       questionCountByYear,
     });
 
-    if (matches.length >= MAX_ARCHETYPES) break;
+    if (matches.length >= cap) break;
   }
 
   return matches;
