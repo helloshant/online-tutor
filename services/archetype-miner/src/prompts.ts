@@ -779,3 +779,66 @@ OUTPUT
 Return ONLY valid JSON: an array with exactly one object per archetype you
 were given, matching the SCHEMA above. No markdown, no explanatory prose.`;
 }
+
+// ---------------------------------------------------------------------------
+// Cross-run duplicate detection (added later, deliberately separate from
+// Stage 3 -- see crossRunMerge.ts's own comment for why this exists as its
+// own one-off pass rather than folding into buildCriticPrompt: Stage 3's
+// own MERGE responsibility only ever compares candidates within ONE
+// mining run's own batch by construction (it has no visibility into any
+// OTHER run's archetypes at all), so this catches a genuinely different
+// class of duplicate Stage 3 was never positioned to see -- confirmed
+// directly in production: the same reasoning pattern, mined independently
+// across several separate runs, existing as several textually distinct
+// (differently-worded) archetypes with no MERGE ever proposed between
+// them, one real example reaching 10 separate copies of the same pattern.
+// ---------------------------------------------------------------------------
+
+export function buildCrossRunMergePrompt(): string {
+  return `ROLE
+You are auditing an already-mined archetype catalogue for CROSS-RUN
+duplicates: the SAME underlying reasoning pattern, mined independently
+under different wording, across separate mining runs. This is a
+different failure mode from what a normal duplicate-detection pass
+already caught -- each of these archetypes was already reviewed and
+accepted on its own, within its own run, by a critic that had no
+visibility into any OTHER run's own archetypes at all.
+
+INPUT
+An array of already-accepted archetypes, all narrowed in advance to ONE
+curriculum chapter (so every archetype you're given is at least
+topically related) -- each with a "ref" (its stable "run_id:archetype_id"
+identifier), name, concept, learning_objective, and
+invariant_reasoning_structure.
+
+TASK
+Group these into clusters where EVERY member represents the EXACT SAME
+underlying reasoning pattern -- the same task, requiring the same
+reasoning structure, merely worded differently. For example, "Determine
+chronological order of human evolution" and "Identify chronological
+order of human evolution" are the same pattern; "Determine parameter from
+root condition" and "Solve a quadratic for its nature of roots" are
+RELATED but NOT the same pattern unless they genuinely require identical
+reasoning, not just overlapping vocabulary or topic.
+
+BE CONSERVATIVE. A false merge is worse than a missed one: it would
+silently combine two genuinely distinct reasoning patterns into a single
+entry a student sees and practices, hiding the real distinction between
+them. Only cluster archetypes you are confident are the identical
+pattern. When in doubt, leave them as separate archetypes (i.e. omit
+them from any cluster).
+
+SCHEMA
+Return one entry per genuine duplicate cluster found -- OMIT any
+archetype that has no duplicate in this batch entirely; do not create a
+cluster of one, and do not echo every input archetype back:
+{
+  "member_refs": ["<ref>", "<ref>", "..."],
+  "rationale": "<plain-language justification for why these are the SAME pattern, not just related>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of cluster objects matching the SCHEMA
+above (empty array if you find no genuine cross-run duplicates in this
+batch -- the common case). No markdown, no explanatory prose.`;
+}

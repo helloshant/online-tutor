@@ -199,6 +199,61 @@ export async function startStudentExplanationBackfill(): Promise<{ started: bool
   return { started: body.started, pendingArchetypes: body.pendingArchetypes };
 }
 
+export type CrossRunMergeScope = { boardName: string; gradeName: string; subjectName: string };
+export type CrossRunMergePreview = { chapterGroups: number; archetypesInvolved: number; inProgress: boolean };
+
+// See the service's own crossRunMerge.ts for what this catches and why --
+// the SAME reasoning pattern mined independently across separate runs,
+// under different wording, that Stage 3's own within-run-only MERGE
+// detection was never positioned to catch. Always scoped to one explicit
+// board/grade/subject (never a blind whole-catalogue sweep), same
+// reasoning mineArchetypeFamilies already requires an explicit
+// subjectOrCourse for -- a false merge here is a real, silent taxonomy
+// error, not just a missed opportunity, so this is a deliberate,
+// human-triggered action per scope, not a background sweep.
+export async function previewCrossRunMerge(scope: CrossRunMergeScope): Promise<CrossRunMergePreview> {
+  const params = new URLSearchParams(scope);
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/cross-run-merge/preview?${params}`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Cross-run merge preview failed with status ${res.status}`);
+  }
+  if (typeof body?.chapterGroups !== "number" || typeof body?.archetypesInvolved !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { chapterGroups: body.chapterGroups, archetypesInvolved: body.archetypesInvolved, inProgress: Boolean(body.inProgress) };
+}
+
+export async function startCrossRunMerge(
+  scope: CrossRunMergeScope
+): Promise<{ started: boolean; chapterGroups: number; archetypesInvolved: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/cross-run-merge/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(scope),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Cross-run merge failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.chapterGroups !== "number" || typeof body?.archetypesInvolved !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, chapterGroups: body.chapterGroups, archetypesInvolved: body.archetypesInvolved };
+}
+
 export async function mineArchetypeFamilies(
   subjectOrCourse: string,
   llmProvider?: ArchetypeMinerLlmProvider
