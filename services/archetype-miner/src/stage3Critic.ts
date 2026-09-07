@@ -114,19 +114,24 @@ type BatchResult = { reviewed: Archetype[]; model: string; usage: { promptTokens
 const EMPTY_USAGE = { promptTokens: 0, completionTokens: 0 };
 
 // retriesLeft caps a batch that comes back missing some candidates'
-// decisions to ONE re-ask, of just the missing subset -- confirmed
-// directly against production data that this was overwhelmingly the
-// dominant failure mode (far more than genuine truncation or a malformed
-// response), and that a smaller, missing-only re-ask is a real fix, not
-// just a retry for its own sake: the prompt's own SCHEMA now asks for
-// only ~6 short fields per KEEP/MERGE/SPLIT/REVIEW/REMOVE decision (see
-// buildCriticPrompt's own comment on why the OLD schema -- retyping the
-// full archetype, including a stats object the code below never even
-// reads back -- was the actual root cause of giving up partway through a
-// batch), so a retry of just the missing few is both cheap and, on its
-// own reduced scope, far less likely to hit whatever made the FULL batch
-// incomplete the first time.
-async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider, retriesLeft = 1): Promise<BatchResult> {
+// decisions to TWO re-asks (each of just the still-missing subset) --
+// confirmed directly against production data that this was overwhelmingly
+// the dominant failure mode (far more than genuine truncation or a
+// malformed response), and that a smaller, missing-only re-ask is a real
+// fix, not just a retry for its own sake: the prompt's own SCHEMA now
+// asks for only ~6 short fields per KEEP/MERGE/SPLIT/REVIEW/REMOVE
+// decision (see buildCriticPrompt's own comment on why the OLD schema --
+// retyping the full archetype, including a stats object the code below
+// never even reads back -- was the actual root cause of giving up
+// partway through a batch), so a retry of just the missing few is both
+// cheap and, on its own reduced scope, far less likely to hit whatever
+// made the FULL batch incomplete the first time. Raised from one retry to
+// two after confirming, on a real (small, bounded) leftover stuck subset
+// even a single retry couldn't clear, that the sizes involved rule out
+// "still too big" as the explanation -- this is model non-determinism on
+// a genuinely hard/ambiguous batch, where a further independent attempt
+// has real (if not guaranteed) odds of landing a decision retry #1 missed.
+async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider, retriesLeft = 2): Promise<BatchResult> {
   const byId = new Map(candidates.map((a) => [a.archetype_id, a]));
 
   try {
