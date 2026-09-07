@@ -11,6 +11,7 @@ import {
   mineArchetypeFamilies,
   startStage3Recovery,
   startStudentExplanationBackfill,
+  startCrossRunMerge,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
 import type { EducationContext, EducationStage, CurriculumSourceType } from "@/lib/archetypeMinerTypes";
@@ -394,6 +395,37 @@ export async function backfillStudentExplanationAction(): Promise<void> {
     console.error("Failed to start student_explanation backfill:", err);
   }
   revalidatePath("/admin/archetype-miner");
+}
+
+// See the service's own crossRunMerge.ts for what this catches -- the
+// SAME reasoning pattern mined independently under different wording
+// across separate runs, which Stage 3's own within-run-only MERGE
+// detection was never positioned to catch. Always requires an explicit
+// board/grade/subject scope (see readCrossRunMergeFormScope below), never
+// a blind whole-catalogue sweep -- a false merge is a real, silent
+// taxonomy error, not just a missed opportunity.
+function readCrossRunMergeFormScope(formData: FormData): { boardName: string; gradeName: string; subjectName: string } {
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName) {
+    throw new Error("Board, grade, and subject are all required.");
+  }
+  return { boardName, gradeName, subjectName };
+}
+
+export async function runCrossRunMergeAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const scope = readCrossRunMergeFormScope(formData);
+  try {
+    await startCrossRunMerge(scope);
+  } catch (err) {
+    // Same reasoning as recoverStage3Action's own catch -- the button is
+    // disabled while a pass for this scope is running, so this should be
+    // rare.
+    console.error("Failed to start cross-run merge:", err);
+  }
+  revalidatePath("/admin/archetype-miner/cross-run-merge");
 }
 
 // Curriculum taxonomy documents are plain admin CRUD against Supabase

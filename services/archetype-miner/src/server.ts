@@ -10,6 +10,12 @@ import {
   isStudentExplanationBackfillInProgress,
   type StudentExplanationBackfillPreview,
 } from "./studentExplanationBackfill.js";
+import {
+  previewCrossRunMerge,
+  runCrossRunMerge,
+  isCrossRunMergeInProgress,
+  type CrossRunMergePreview,
+} from "./crossRunMerge.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -464,6 +470,65 @@ app.post("/v1/student-explanation-backfill/run", requireSharedSecret, async (_re
   }
   void runStudentExplanationBackfill().catch((err) => {
     console.error("Unhandled error in student_explanation backfill:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
+});
+
+function readCrossRunMergeScope(source: Record<string, unknown>): { boardName: string; gradeName: string; subjectName: string } | null {
+  const boardName = source.boardName;
+  const gradeName = source.gradeName;
+  const subjectName = source.subjectName;
+  if (typeof boardName !== "string" || !boardName.trim()) return null;
+  if (typeof gradeName !== "string" || !gradeName.trim()) return null;
+  if (typeof subjectName !== "string" || !subjectName.trim()) return null;
+  return { boardName, gradeName, subjectName };
+}
+
+// See crossRunMerge.ts's own comment for what this catches and why it's
+// its own deliberate, scoped tool rather than a blind whole-catalogue
+// sweep -- always requires an explicit board/grade/subject, same
+// reasoning /v1/archetype-families/mine already applies to
+// subject_or_course.
+app.get("/v1/cross-run-merge/preview", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.query as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  try {
+    const preview = await previewCrossRunMerge(scope);
+    res.json({ ...preview, inProgress: isCrossRunMergeInProgress() });
+  } catch (err) {
+    console.error("Failed to preview cross-run merge:", err);
+    res.status(502).json({ error: "Failed to preview cross-run merge" });
+  }
+});
+
+app.post("/v1/cross-run-merge/run", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  if (isCrossRunMergeInProgress()) {
+    res.status(409).json({ error: "A cross-run merge pass is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: CrossRunMergePreview;
+  try {
+    preview = await previewCrossRunMerge(scope);
+  } catch (err) {
+    console.error("Failed to preview cross-run merge before starting it:", err);
+    res.status(502).json({ error: "Failed to preview cross-run merge" });
+    return;
+  }
+  if (preview.archetypesInvolved === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runCrossRunMerge(scope).catch((err) => {
+    console.error("Unhandled error in cross-run merge:", err);
   });
   res.status(202).json({ started: true, ...preview });
 });
