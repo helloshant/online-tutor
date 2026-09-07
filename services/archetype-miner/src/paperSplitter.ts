@@ -198,9 +198,26 @@ export function splitPaperText(text: string): SplitResult {
 // guarantee -- a paper that doesn't state its own count (or phrases it
 // differently) just means this returns null and pipelineRunner.ts falls
 // back to relying on finishReason alone, same as before this existed.
+//
+// Confirmed directly against a real CBSE Class 10 Science paper (31/4/1)
+// that this used to return null for, silently disabling looksIncomplete
+// for that entire paper: its actual General Instructions block -- the
+// text that matters, since chunksFromBoundaries only ever prepends the
+// cover page + general instructions onto chunk 1 -- reads "This question
+// paper COMPRISES 39 questions," not "contains." The only occurrence of
+// "contains" is a separate, secondary restatement in the cover page's own
+// narrow NOTE table ("Please check that this question paper contains 39
+// questions"), which OCR can (and for this exact paper, does) line-wrap
+// with a newline where the pattern needs a space. The Hindi instruction
+// has its own equivalent mismatch: "इस प्रश्न-पत्र में कुल 39 प्रश्न हैं"
+// inserts "कुल" ("total") between "में" and the digits, which the old
+// pattern didn't allow for at all. Every literal space below is now \s+
+// (tolerating an OCR line-wrap in place of a space, same reasoning as the
+// cover-page NOTE table above) and "कुल" is optional so both Hindi
+// phrasings match.
 const DECLARED_COUNT_PATTERNS = [
-  /question paper contains\s+(\d{1,3})\s+questions/i,
-  /प्रश्न[\s-]*पत्र में\s+(\d{1,3})\s+प्रश्न/u,
+  /question\s+paper\s+(?:contains|comprises)\s+(\d{1,3})\s+questions/i,
+  /प्रश्न[\s-]*पत्र\s+में\s+(?:कुल\s+)?(\d{1,3})\s+प्रश्न/u,
 ];
 
 export function extractDeclaredQuestionCount(text: string): number | null {
