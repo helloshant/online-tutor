@@ -154,7 +154,11 @@ export async function findArchetypesForTopic(params: {
   const targetChapter = normalize(params.chapter);
   const targetTopic = normalize(params.topic);
 
-  const matches: ExerciseArchetype[] = [];
+  // Not capped here -- deduplication below (see its own comment) needs to
+  // see every match for this chapter/topic before cap is applied, or a
+  // cross-run duplicate could fill a slot that should have gone to a
+  // genuinely distinct pattern.
+  const rawMatches: { archetype: ExerciseArchetype; totalQuestions: number }[] = [];
   for (const row of rows) {
     const resolved = row.archetype.supporting_question_ids
       .map((qid) => chapterByQuestion.get(`${row.run_id}:${qid}`))
@@ -191,26 +195,76 @@ export async function findArchetypesForTopic(params: {
       questionCountByYear[key] = (questionCountByYear[key] ?? 0) + 1;
     }
 
-    matches.push({
-      runId: row.run_id,
-      archetypeId: row.archetype_id,
-      name: row.archetype.name,
-      invariantReasoningStructure: row.archetype.invariant_reasoning_structure,
-      studentExplanation: row.archetype.student_explanation ?? null,
-      variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
-      difficulty,
-      difficultyDistribution: dist && total > 0 ? dist : null,
-      // Sorted, deduped ascending -- Stage 2 builds this from every
-      // supporting question's own year, in whatever order clustering
-      // happened to process them, with no guaranteed order or uniqueness.
-      yearsObserved: Array.from(new Set(row.archetype.stats?.years_observed ?? [])).sort((a, b) => a - b),
-      questionCountByYear,
+    rawMatches.push({
+      archetype: {
+        runId: row.run_id,
+        archetypeId: row.archetype_id,
+        name: row.archetype.name,
+        invariantReasoningStructure: row.archetype.invariant_reasoning_structure,
+        studentExplanation: row.archetype.student_explanation ?? null,
+        variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
+        difficulty,
+        difficultyDistribution: dist && total > 0 ? dist : null,
+        // Sorted, deduped ascending -- Stage 2 builds this from every
+        // supporting question's own year, in whatever order clustering
+        // happened to process them, with no guaranteed order or uniqueness.
+        yearsObserved: Array.from(new Set(row.archetype.stats?.years_observed ?? [])).sort((a, b) => a - b),
+        questionCountByYear,
+      },
+      totalQuestions: Object.values(questionCountByYear).reduce((sum, n) => sum + n, 0),
     });
-
-    if (matches.length >= cap) break;
   }
 
-  return matches;
+  // Cross-run exact-name deduplication -- confirmed directly in
+  // production against a real catalogue: Stage 3's own MERGE detection
+  // only ever compares candidates WITHIN one mining run's own batch (see
+  // stage3Critic.ts's own comment on this trade-off), so the same
+  // reasoning pattern mined independently across several separate runs
+  // (the same chapter submitted as several different past papers, most
+  // commonly) produces several textually-identical archetypes with no
+  // cross-run MERGE ever catching it -- one real example found this way:
+  // "Calculate conditional probability using Bayes' theorem" existed as
+  // 10 SEPARATE archetypes across 10 different runs, all shown as
+  // distinct choices in the picker. This is the cheap, zero-LLM-cost half
+  // of the fix: an exact (case/whitespace-insensitive) name match is
+  // unambiguously the same pattern, so these are merged here for free,
+  // combining every group member's own year evidence onto whichever
+  // member has the MOST supporting evidence (its own text -- reasoning
+  // structure, explanation, difficulty data -- is what actually gets
+  // shown/used, not some averaged/concatenated hybrid). A near-duplicate
+  // with genuinely different wording ("Determine chronological order of
+  // human evolution" vs "Identify chronological order of human
+  // evolution") is NOT caught by this -- that needs real semantic
+  // judgment (an LLM call), a separate, deliberate decision from this
+  // free fix, not bundled into it.
+  const byName = new Map<string, { archetype: ExerciseArchetype; totalQuestions: number }[]>();
+  for (const m of rawMatches) {
+    const key = normalize(m.archetype.name);
+    const group = byName.get(key);
+    if (group) group.push(m);
+    else byName.set(key, [m]);
+  }
+
+  const deduped: { archetype: ExerciseArchetype; totalQuestions: number }[] = [];
+  for (const group of byName.values()) {
+    const canonical = group.reduce((best, m) => (m.totalQuestions > best.totalQuestions ? m : best));
+    const yearsObserved = Array.from(new Set(group.flatMap((m) => m.archetype.yearsObserved))).sort((a, b) => a - b);
+    const questionCountByYear: Record<string, number> = {};
+    for (const m of group) {
+      for (const [year, count] of Object.entries(m.archetype.questionCountByYear)) {
+        questionCountByYear[year] = (questionCountByYear[year] ?? 0) + count;
+      }
+    }
+    const totalQuestions = Object.values(questionCountByYear).reduce((sum, n) => sum + n, 0);
+    deduped.push({ archetype: { ...canonical.archetype, yearsObserved, questionCountByYear }, totalQuestions });
+  }
+
+  // Most-evidence-first -- so a capped slice (the batch-generation call
+  // site's own cap=5) keeps the strongest, best-attested patterns rather
+  // than an arbitrary DB-return order.
+  deduped.sort((a, b) => b.totalQuestions - a.totalQuestions);
+
+  return deduped.slice(0, cap).map((m) => m.archetype);
 }
 
 // Both the "just shown" event (generation, no result yet) and a graded
