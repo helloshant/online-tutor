@@ -68,6 +68,11 @@ type ArchetypeLookupRow = {
   archetype: {
     name: string;
     invariant_reasoning_structure: string;
+    // Plain-language, student-facing concept explanation -- generated
+    // once at mining time (or by the one-time backfill), never per
+    // request. Optional/nullable: an archetype mined before this field
+    // existed, or one the backfill hasn't reached yet, simply has none.
+    student_explanation?: string | null;
     variations: { description: string }[];
     supporting_question_ids: string[];
     stats: { difficulty_distribution: { Easy: number; Medium: number; Hard: number }; years_observed?: number[] };
@@ -191,6 +196,7 @@ export async function findArchetypesForTopic(params: {
       archetypeId: row.archetype_id,
       name: row.archetype.name,
       invariantReasoningStructure: row.archetype.invariant_reasoning_structure,
+      studentExplanation: row.archetype.student_explanation ?? null,
       variationDescriptions: (row.archetype.variations ?? []).map((v) => v.description),
       difficulty,
       difficultyDistribution: dist && total > 0 ? dist : null,

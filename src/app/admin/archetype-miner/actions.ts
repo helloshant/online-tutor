@@ -6,7 +6,13 @@ import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { submitPipelineRun, mineArchetypeFamilies, startStage3Recovery, type ArchetypeMinerLlmProvider } from "@/lib/archetypeMinerClient";
+import {
+  submitPipelineRun,
+  mineArchetypeFamilies,
+  startStage3Recovery,
+  startStudentExplanationBackfill,
+  type ArchetypeMinerLlmProvider,
+} from "@/lib/archetypeMinerClient";
 import type { EducationContext, EducationStage, CurriculumSourceType } from "@/lib/archetypeMinerTypes";
 
 const EDUCATION_STAGES: EducationStage[] = ["secondary", "senior_secondary", "undergraduate"];
@@ -370,6 +376,22 @@ export async function recoverStage3Action(): Promise<void> {
     // actually starting; swallow here rather than crashing the page over
     // a request that was correctly rejected.
     console.error("Failed to start Stage 3 recovery:", err);
+  }
+  revalidatePath("/admin/archetype-miner");
+}
+
+// One-time backfill for archetypes mined before student_explanation
+// existed (see the service's own studentExplanationBackfill.ts) --
+// kicked off from the main archetype-miner page's own preview banner,
+// same fire-and-forget/revalidate shape as recoverStage3Action above.
+export async function backfillStudentExplanationAction(): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  try {
+    await startStudentExplanationBackfill();
+  } catch (err) {
+    // Same reasoning as recoverStage3Action's own catch -- the button is
+    // disabled while a pass is running, so this should be rare.
+    console.error("Failed to start student_explanation backfill:", err);
   }
   revalidatePath("/admin/archetype-miner");
 }

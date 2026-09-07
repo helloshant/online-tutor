@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getArchetypeMinerHealth, previewStage3Recovery } from "@/lib/archetypeMinerClient";
+import { getArchetypeMinerHealth, previewStage3Recovery, previewStudentExplanationBackfill } from "@/lib/archetypeMinerClient";
 import { SubmitRunForm } from "./submit-run-form";
-import { recoverStage3Action } from "./actions";
+import { recoverStage3Action, backfillStudentExplanationAction } from "./actions";
 import type { PipelineRunRow } from "@/lib/archetypeMinerTypes";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -22,7 +22,7 @@ export default async function ArchetypeMinerPage() {
   await requireAdminPage("archetype_miner");
   const admin = createAdminClient();
 
-  const [{ data: runs }, { count: pendingReviewCount }, health, stage3RecoveryPreview] = await Promise.all([
+  const [{ data: runs }, { count: pendingReviewCount }, health, stage3RecoveryPreview, studentExplanationPreview] = await Promise.all([
     admin.from("archetype_pipeline_runs").select("*").order("created_at", { ascending: false }).limit(50),
     admin.from("archetype_review_queue").select("*", { count: "exact", head: true }).eq("status", "pending"),
     getArchetypeMinerHealth(),
@@ -30,6 +30,7 @@ export default async function ArchetypeMinerPage() {
     // getArchetypeMinerHealth above -- a preview failure just hides the
     // recovery banner below rather than a broken page load.
     previewStage3Recovery().catch(() => null),
+    previewStudentExplanationBackfill().catch(() => null),
   ]);
 
   const rows = (runs ?? []) as PipelineRunRow[];
@@ -101,6 +102,37 @@ export default async function ArchetypeMinerPage() {
             className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {stage3RecoveryPreview.inProgress ? "Recovery running…" : "Recover now"}
+          </button>
+        </form>
+      )}
+
+      {/* One-time backfill for student_explanation (see the service's own
+          studentExplanationBackfill.ts) -- the plain-language concept
+          paragraph now shown in the pattern picker before the Easy/Medium/
+          Hard row, for every archetype mined before that field existed.
+          Deliberately generated once here, at backfill time, never per
+          student click -- see that file's own comment on why. Only shown
+          once there's actually something to backfill. */}
+      {studentExplanationPreview && studentExplanationPreview.pendingArchetypes > 0 && (
+        <form
+          action={backfillStudentExplanationAction}
+          className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm text-purple-800"
+        >
+          <p>
+            {studentExplanationPreview.pendingArchetypes} archetype(s) have no student-facing concept explanation yet
+            (mined before that field existed) — backfilling generates one for each, once, in the background.
+            {studentExplanationPreview.inProgress && (
+              <span className="ml-1 font-medium">
+                A pass is already running — check `docker logs` for its own &quot;student_explanation backfill: done.&quot; line, then reload this page.
+              </span>
+            )}
+          </p>
+          <button
+            type="submit"
+            disabled={studentExplanationPreview.inProgress}
+            className="shrink-0 rounded-lg bg-purple-600 px-3 py-1.5 font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {studentExplanationPreview.inProgress ? "Backfill running…" : "Backfill now"}
           </button>
         </form>
       )}

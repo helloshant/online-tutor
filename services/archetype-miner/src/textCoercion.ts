@@ -30,6 +30,23 @@ export function coerceInvariantReasoningStructure(value: unknown): unknown {
   return coerced === null ? value : { ...value, invariant_reasoning_structure: coerced };
 }
 
+// Same shape-confusion risk as invariant_reasoning_structure above, for
+// the same reason -- student_explanation is explicitly asked to be
+// "2-4 plain-language sentences" (see prompts.ts's own SCHEMA), an easy
+// nudge toward the model returning an array of sentence strings instead
+// of one prose string. Joined with a plain space, not coerceToString's
+// own " -> " (that reads fine for discrete reasoning STEPS, but four
+// sentences joined with arrows would read as nonsense prose).
+export function coerceStudentExplanation(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("student_explanation" in value)) return value;
+  const raw = (value as { student_explanation: unknown }).student_explanation;
+  if (typeof raw === "string") return value;
+  if (Array.isArray(raw) && raw.length > 0 && raw.every((v) => typeof v === "string")) {
+    return { ...value, student_explanation: raw.join(" ") };
+  }
+  return value;
+}
+
 type ArchetypeStats = {
   question_count: number;
   years_observed: number[];

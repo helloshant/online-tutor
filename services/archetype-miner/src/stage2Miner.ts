@@ -1,6 +1,6 @@
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildMinerPrompt } from "./prompts.js";
-import { coerceInvariantReasoningStructure, normalizeStats } from "./textCoercion.js";
+import { coerceInvariantReasoningStructure, coerceStudentExplanation, normalizeStats } from "./textCoercion.js";
 import type { LlmProvider } from "./llm.js";
 import type { Archetype, ClusterInput } from "./types.js";
 
@@ -33,6 +33,7 @@ function normalizeCandidate(raw: Partial<Archetype> & { archetype_id: string }, 
     concept: raw.concept ?? "",
     learning_objective: raw.learning_objective ?? "",
     invariant_reasoning_structure: raw.invariant_reasoning_structure ?? "",
+    student_explanation: typeof raw.student_explanation === "string" && raw.student_explanation.trim() ? raw.student_explanation : null,
     variations: Array.isArray(raw.variations) ? raw.variations : [],
     supporting_question_ids: raw.supporting_question_ids ?? [],
     stats: normalizeStats(raw.stats, raw.supporting_question_ids?.length ?? 0),
@@ -81,7 +82,7 @@ export async function runMiner(cluster: ClusterInput, provider?: LlmProvider): P
 
     const archetypes: Archetype[] = [];
     for (const rawItem of data) {
-      const raw = coerceInvariantReasoningStructure(rawItem);
+      const raw = coerceStudentExplanation(coerceInvariantReasoningStructure(rawItem));
       if (isPlausibleArchetype(raw)) {
         archetypes.push(normalizeCandidate(raw, cluster.education_context));
       } else {

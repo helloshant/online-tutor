@@ -4,6 +4,12 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { submitRun, type SubmitRunParams } from "./pipelineRunner.js";
 import { runFamilyMiner } from "./stage4FamilyMiner.js";
 import { previewStage3Recovery, runStage3Recovery, isStage3RecoveryInProgress, type Stage3RecoveryPreview } from "./stage3Recovery.js";
+import {
+  previewStudentExplanationBackfill,
+  runStudentExplanationBackfill,
+  isStudentExplanationBackfillInProgress,
+  type StudentExplanationBackfillPreview,
+} from "./studentExplanationBackfill.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -421,6 +427,43 @@ app.post("/v1/stage3-recovery/run", requireSharedSecret, async (_req: Request, r
   }
   void runStage3Recovery().catch((err) => {
     console.error("Unhandled error in Stage 3 recovery:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
+});
+
+// See studentExplanationBackfill.ts's own comment for what this backfills
+// and why -- same GET-preview-first, POST-fire-and-forget, in-memory
+// concurrency-guard shape as the Stage 3 recovery routes just above.
+app.get("/v1/student-explanation-backfill/preview", requireSharedSecret, async (_req: Request, res: Response) => {
+  try {
+    const preview = await previewStudentExplanationBackfill();
+    res.json({ ...preview, inProgress: isStudentExplanationBackfillInProgress() });
+  } catch (err) {
+    console.error("Failed to preview student_explanation backfill:", err);
+    res.status(502).json({ error: "Failed to preview student_explanation backfill" });
+  }
+});
+
+app.post("/v1/student-explanation-backfill/run", requireSharedSecret, async (_req: Request, res: Response) => {
+  if (isStudentExplanationBackfillInProgress()) {
+    res.status(409).json({ error: "A student_explanation backfill is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: StudentExplanationBackfillPreview;
+  try {
+    preview = await previewStudentExplanationBackfill();
+  } catch (err) {
+    console.error("Failed to preview student_explanation backfill before starting it:", err);
+    res.status(502).json({ error: "Failed to preview student_explanation backfill" });
+    return;
+  }
+  if (preview.pendingArchetypes === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runStudentExplanationBackfill().catch((err) => {
+    console.error("Unhandled error in student_explanation backfill:", err);
   });
   res.status(202).json({ started: true, ...preview });
 });

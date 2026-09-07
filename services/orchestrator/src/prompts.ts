@@ -191,6 +191,14 @@ export type ExerciseArchetype = {
   archetypeId: string;
   name: string;
   invariantReasoningStructure: string;
+  // Plain-language, student-facing explanation of the underlying concept
+  // -- shown to the student BEFORE they attempt a question of this
+  // pattern, not read by the generation prompt itself (which reads
+  // invariantReasoningStructure instead -- see that field's own comment
+  // on why the two are deliberately different). null when this archetype
+  // predates the field or the backfill hasn't reached it yet -- see
+  // archetypeExercises.ts's own comment.
+  studentExplanation: string | null;
   variationDescriptions: string[];
   // Dominant (most-common) historical difficulty -- kept as its own field
   // since the batch prompt's "Typically X difficulty" note only ever

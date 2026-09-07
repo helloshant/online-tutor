@@ -202,6 +202,10 @@ export type TopicPattern = {
   runId: string;
   archetypeId: string;
   name: string;
+  // Plain-language concept explanation shown before the difficulty picker
+  // -- see the orchestrator's own TopicPattern comment. null when this
+  // archetype predates the field or hasn't been backfilled yet.
+  studentExplanation: string | null;
   difficulty: DifficultyLevel | null;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
   // Sorted ascending years this pattern actually appeared in real exams,

@@ -164,6 +164,13 @@ export type TopicPattern = {
   runId: string;
   archetypeId: string;
   name: string;
+  // Plain-language explanation of the underlying concept, shown to a
+  // student BEFORE the Easy/Medium/Hard picker once they select this
+  // pattern -- see ExerciseArchetype's own comment in prompts.ts. null
+  // when this archetype predates the field or hasn't been backfilled yet
+  // -- the picker just skips straight to difficulty selection then, same
+  // as the flow before this field existed.
+  studentExplanation: string | null;
   // Dominant historical difficulty -- kept for a compact display, e.g.
   // "usually Hard." difficultyDistribution below is the full spread
   // behind it (Tier D: shown as a hint next to the Easy/Medium/Hard

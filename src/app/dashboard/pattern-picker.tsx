@@ -19,6 +19,14 @@ type Pattern = {
   runId: string;
   archetypeId: string;
   name: string;
+  // Plain-language explanation of the underlying concept -- shown once
+  // this pattern is selected, ABOVE the Easy/Medium/Hard row, so a
+  // student gets a short refresher on the concept itself before
+  // attempting a question of this type, not just the pattern's own
+  // (often terse) name. null for an archetype that predates this field
+  // or hasn't been backfilled yet -- the difficulty row just shows with
+  // no paragraph above it then, same as the flow before this existed.
+  studentExplanation: string | null;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
   // Sorted ascending, e.g. [2025, 2026] -- suffixed onto the button label
   // (see describeYearsSuffix) so a student can see which real exam years
@@ -205,39 +213,49 @@ export function PatternPicker({
       </div>
 
       {/* Picking a pattern (or "Generate another") doesn't fire the
-          request immediately -- it opens this difficulty row first, so a
-          student can see the pattern's own real historical spread before
-          deciding, rather than only finding out afterward that (say)
-          "Easy" almost never appears in real exams for it. */}
+          request immediately -- it opens this panel first: a short
+          concept refresher (when this pattern has one -- see
+          studentExplanation's own comment) above the difficulty row, so a
+          student sees what the underlying idea actually IS before being
+          asked to reason through it, not just the pattern's own (often
+          terse) name; then the difficulty row itself, so they can also
+          see the pattern's real historical spread before deciding, rather
+          than only finding out afterward that (say) "Easy" almost never
+          appears in real exams for it. */}
       {pendingSelection && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-background p-2">
-          <span className="text-xs text-foreground/50">
-            {pendingSelection.pattern
-              ? (describeDifficultyHint(pendingSelection.pattern.difficultyDistribution) ?? "No difficulty data yet —")
-              : "Difficulty:"}
-          </span>
-          {DIFFICULTY_LEVELS.map((level) => (
+        <div className="mt-2 rounded-lg bg-background p-2">
+          {pendingSelection.pattern?.studentExplanation && (
+            <p className="mb-2 text-xs text-foreground/70">{pendingSelection.pattern.studentExplanation}</p>
+          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-foreground/50">
+              {pendingSelection.pattern
+                ? (describeDifficultyHint(pendingSelection.pattern.difficultyDistribution) ?? "No difficulty data yet —")
+                : "Difficulty:"}
+            </span>
+            {DIFFICULTY_LEVELS.map((level) => (
+              <button
+                key={level}
+                type="button"
+                onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined, level)}
+                disabled={generating !== null}
+                className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
+              >
+                {level}
+              </button>
+            ))}
             <button
-              key={level}
               type="button"
-              onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined, level)}
+              onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined)}
               disabled={generating !== null}
-              className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
+              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
             >
-              {level}
+              Any
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined)}
-            disabled={generating !== null}
-            className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
-          >
-            Any
-          </button>
-          <button type="button" onClick={() => setPendingSelection(null)} className="ml-auto text-xs text-foreground/40 hover:underline">
-            Cancel
-          </button>
+            <button type="button" onClick={() => setPendingSelection(null)} className="ml-auto text-xs text-foreground/40 hover:underline">
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
