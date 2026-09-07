@@ -126,11 +126,20 @@ export async function runStage3Recovery(): Promise<Stage3RecoveryResult> {
 
   for (const [runId, runRows] of byRun) {
     try {
-      const { data: runRow } = await supabase
-        .from("archetype_pipeline_runs")
-        .select("llm_provider")
-        .eq("id", runId)
-        .maybeSingle();
+      const [{ data: runRow }, { data: existingRows }] = await Promise.all([
+        supabase.from("archetype_pipeline_runs").select("llm_provider").eq("id", runId).maybeSingle(),
+        // The run's FULL existing archetype_id set, not just the fallback
+        // subset being recovered (runRows below) -- confirmed directly in
+        // production: an ADD this recovery pass proposed (working from
+        // only the fallback subset, with less cross-candidate context
+        // than the original run had) generated the exact same slug-style
+        // id as an archetype ELSEWHERE in the same run that was never
+        // part of this recovery at all (already properly reviewed the
+        // first time around). Checking isNew against runRows alone
+        // wrongly called that "new" and tried to INSERT it, colliding
+        // with the real row on the (run_id, archetype_id) primary key.
+        supabase.from("archetypes").select("archetype_id").eq("run_id", runId),
+      ]);
       // Re-review under the SAME provider the original run used --
       // matches SubmitRunParams.llmProvider's own "fixed for a run's
       // whole lifetime" reasoning; an undefined value just falls back to
@@ -141,9 +150,30 @@ export async function runStage3Recovery(): Promise<Stage3RecoveryResult> {
       const { reviewed } = await runCritic(candidates, llmProvider);
 
       const knownIds = new Set(runRows.map((r) => r.archetype_id));
+      const existingIds = new Set(((existingRows ?? []) as { archetype_id: string }[]).map((r) => r.archetype_id));
       for (const archetype of reviewed) {
         result.archetypesProcessed++;
-        const isNew = !knownIds.has(archetype.archetype_id);
+
+        if (existingIds.has(archetype.archetype_id) && !knownIds.has(archetype.archetype_id)) {
+          // A same-id collision with an archetype that was NEVER part of
+          // this recovery -- almost certainly Stage 3 re-proposing (under
+          // reduced context) something that already exists properly
+          // reviewed elsewhere in this run. Never insert (constraint
+          // violation, as seen in production) and never update (that
+          // archetype's real, already-reviewed content would be
+          // overwritten by a pass that never actually looked at it) --
+          // just skip, leaving the pre-existing archetype exactly as it
+          // was. Nothing to resolve on the review queue either: a
+          // collided id never had its own pending entry.
+          console.warn(
+            `Stage 3 recovery: run ${runId} proposed archetype_id "${archetype.archetype_id}" which already exists ` +
+              "in this run outside the recovered subset -- skipping rather than inserting (constraint violation) " +
+              "or overwriting the existing, already-reviewed archetype."
+          );
+          continue;
+        }
+
+        const isNew = !existingIds.has(archetype.archetype_id);
         if (isNew) {
           // A genuine ADD this recovery pass itself noticed -- rare
           // (this call only ever sees the fallback subset, not the full
