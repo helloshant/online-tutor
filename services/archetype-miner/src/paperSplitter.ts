@@ -118,16 +118,34 @@ function findQuestionBoundaries(text: string): number[] {
 }
 
 function chunksFromBoundaries(text: string, boundaryIndices: number[]): string[] {
-  // Everything before the first boundary (a cover page, general
-  // instructions, etc.) is prepended to the first real chunk rather than
-  // becoming its own tiny fragment -- it's never independently
-  // segmentable, but Stage 0 may still want the context (e.g. total marks
-  // stated there).
-  const starts = boundaryIndices[0] === 0 ? boundaryIndices : [0, ...boundaryIndices];
-  const raw = starts.map((start, i) => text.slice(start, starts[i + 1] ?? text.length));
+  const raw = boundaryIndices.map((start, i) => text.slice(start, boundaryIndices[i + 1] ?? text.length));
 
-  // Merge any chunk under MIN_CHUNK_CHARS into its predecessor instead of
-  // sending a near-empty fragment through its own LLM call.
+  // Everything before the first REAL boundary (a cover page, general
+  // instructions, etc.) is unconditionally prepended onto the first real
+  // chunk -- never independently segmentable on its own (Stage 0 has
+  // nothing but instructional text to work with there), but Stage 0 may
+  // still want the context (e.g. total marks, the paper's own declared
+  // question count, stated there).
+  //
+  // Confirmed directly this was NOT actually happening before: a
+  // synthetic leading `0` start used to be spliced into the boundary list
+  // instead, making front matter its own entry in `raw`, and the ONLY
+  // thing that could have folded it into chunk 1 afterward was the small-
+  // chunk merge loop below -- which only ever merges a chunk INTO its
+  // PREDECESSOR, and front matter, being first, never has one. A real
+  // CBSE paper's own "General Instructions" block routinely exceeds
+  // MIN_CHUNK_CHARS, so it silently survived as its OWN chunk instead --
+  // wasting a whole Stage 0 call segmenting pure instructional text (no
+  // real questions in it at all), and explaining exactly the "chunk 1 ...
+  // 1 question(s), no further splitting possible" symptom seen in
+  // production. This now prepends it explicitly, regardless of length.
+  if (boundaryIndices[0] !== 0) {
+    raw[0] = text.slice(0, boundaryIndices[0]) + raw[0];
+  }
+
+  // Merge any (later) chunk under MIN_CHUNK_CHARS into its predecessor
+  // instead of sending a near-empty fragment through its own LLM call --
+  // e.g. an unusually short final section.
   const merged: string[] = [];
   for (const chunk of raw) {
     if (merged.length > 0 && chunk.trim().length < MIN_CHUNK_CHARS) {
