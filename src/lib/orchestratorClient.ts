@@ -207,6 +207,10 @@ export type TopicPattern = {
   // Sorted ascending years this pattern actually appeared in real exams,
   // e.g. [2025, 2026] -- see the orchestrator's own TopicPattern comment.
   yearsObserved: number[];
+  // How many of this pattern's own supporting questions came from each
+  // year, e.g. { "2025": 1, "2026": 2 } -- see the orchestrator's own
+  // TopicPattern comment.
+  questionCountByYear: Record<string, number>;
 };
 
 export type TopicPatternsRequest = {

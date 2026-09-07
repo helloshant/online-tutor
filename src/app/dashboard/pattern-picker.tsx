@@ -24,6 +24,10 @@ type Pattern = {
   // (see describeYearsSuffix) so a student can see which real exam years
   // actually tested this pattern before picking it.
   yearsObserved: number[];
+  // How many of this pattern's own supporting questions came from each
+  // year, e.g. { "2025": 1, "2026": 2 } -- also suffixed onto the button
+  // label so "asked twice in 2026" reads differently from "asked once."
+  questionCountByYear: Record<string, number>;
 };
 
 // Sentinel `generating` key for "Generate another" (no specific pattern),
@@ -43,10 +47,19 @@ function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): s
   return `Usually ${top} (${topCount} of ${total} mined)`;
 }
 
-// " (2025, 2026)" -- empty string (no suffix at all) when nothing's
-// classified, rather than an empty "()" hanging off the name.
-function describeYearsSuffix(years: number[]): string {
-  return years.length > 0 ? ` (${years.join(", ")})` : "";
+// " (2025, 2026 ×2)" -- how many of this pattern's own questions came
+// from each year, not just which years it appeared in; a year with no
+// count data (a lookup failure, or a paper with no recorded year) falls
+// back to the bare year rather than hiding it. Empty string (no suffix at
+// all) when nothing's classified, rather than an empty "()" hanging off
+// the name.
+function describeYearsSuffix(years: number[], countByYear: Record<string, number>): string {
+  if (years.length === 0) return "";
+  const parts = years.map((year) => {
+    const count = countByYear[String(year)];
+    return count ? `${year} ×${count}` : `${year}`;
+  });
+  return ` (${parts.join(", ")})`;
 }
 
 // Curated "practice a specific mined pattern" picker (Tier C/D) --
@@ -173,7 +186,7 @@ export function PatternPicker({
                 isSelected ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
               }`}
             >
-              {generating === p.archetypeId ? "Generating…" : `${p.name}${describeYearsSuffix(p.yearsObserved)}`}
+              {generating === p.archetypeId ? "Generating…" : `${p.name}${describeYearsSuffix(p.yearsObserved, p.questionCountByYear)}`}
             </button>
           );
         })}

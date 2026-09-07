@@ -181,6 +181,13 @@ export type TopicPattern = {
   // year for any of the archetype's supporting questions -- the picker
   // just shows the bare name then, no empty "()" suffix.
   yearsObserved: number[];
+  // How many of this pattern's own supporting questions came from each
+  // year, e.g. { "2025": 1, "2026": 2 } -- suffixed onto the picker's
+  // button label alongside yearsObserved (e.g. "... (2025, 2026 x2)") so
+  // a student sees not just THAT a pattern recurred but how often each
+  // year. See archetypeExercises.ts's own comment on why this is derived
+  // at read time rather than trusted from Stage 2's own stats object.
+  questionCountByYear: Record<string, number>;
 };
 
 export type TopicPatternsRequest = {
