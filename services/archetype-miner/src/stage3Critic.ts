@@ -113,7 +113,20 @@ type BatchResult = { reviewed: Archetype[]; model: string; usage: { promptTokens
 
 const EMPTY_USAGE = { promptTokens: 0, completionTokens: 0 };
 
-async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider): Promise<BatchResult> {
+// retriesLeft caps a batch that comes back missing some candidates'
+// decisions to ONE re-ask, of just the missing subset -- confirmed
+// directly against production data that this was overwhelmingly the
+// dominant failure mode (far more than genuine truncation or a malformed
+// response), and that a smaller, missing-only re-ask is a real fix, not
+// just a retry for its own sake: the prompt's own SCHEMA now asks for
+// only ~6 short fields per KEEP/MERGE/SPLIT/REVIEW/REMOVE decision (see
+// buildCriticPrompt's own comment on why the OLD schema -- retyping the
+// full archetype, including a stats object the code below never even
+// reads back -- was the actual root cause of giving up partway through a
+// batch), so a retry of just the missing few is both cheap and, on its
+// own reduced scope, far less likely to hit whatever made the FULL batch
+// incomplete the first time.
+async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider, retriesLeft = 1): Promise<BatchResult> {
   const byId = new Map(candidates.map((a) => [a.archetype_id, a]));
 
   try {
@@ -145,16 +158,39 @@ async function runCriticBatch(candidates: Archetype[], provider?: LlmProvider): 
       }
     }
 
+    let usedModel = model;
+    let promptTokens = usage.promptTokens;
+    let completionTokens = usage.completionTokens;
+
     // The prompt requires every candidate to come back with a decision --
-    // a model that silently omits one shouldn't leave it unreviewed with
-    // no trace, same reasoning as a whole-batch failure just above.
+    // a model that silently omits some shouldn't leave them unreviewed
+    // with no trace. Retry once, with just the missing subset (see this
+    // function's own doc comment on why a smaller re-ask is a real fix
+    // here, not just a retry for its own sake) -- only fall back to a
+    // synthesized REVIEW for whatever still doesn't come back after that.
     const missing = candidates.filter((c) => !seenIds.has(c.archetype_id));
-    if (missing.length > 0) {
-      console.warn(`Stage 3 did not return a decision for ${missing.length} of ${candidates.length} candidate(s) in this batch.`);
-      reviewed.push(...fallbackToReview(missing, "Stage 3's response for this batch did not include a decision for this archetype."));
+    if (missing.length > 0 && retriesLeft > 0) {
+      console.warn(
+        `Stage 3 did not return a decision for ${missing.length} of ${candidates.length} candidate(s) in this batch -- retrying just the missing one(s).`
+      );
+      const retryResult = await runCriticBatch(missing, provider, retriesLeft - 1);
+      reviewed.push(...retryResult.reviewed);
+      usedModel = retryResult.model || usedModel;
+      promptTokens += retryResult.usage.promptTokens;
+      completionTokens += retryResult.usage.completionTokens;
+    } else if (missing.length > 0) {
+      console.warn(
+        `Stage 3 did not return a decision for ${missing.length} of ${candidates.length} candidate(s) in this batch, even after retrying just the missing one(s).`
+      );
+      reviewed.push(
+        ...fallbackToReview(
+          missing,
+          "Stage 3's response for this batch did not include a decision for this archetype, even after retrying just the missing one(s)."
+        )
+      );
     }
 
-    return { reviewed, model, usage };
+    return { reviewed, model: usedModel, usage: { promptTokens, completionTokens } };
   } catch (err) {
     console.warn(`Stage 3 failed for a batch of ${candidates.length} candidate(s):`, err);
     return {

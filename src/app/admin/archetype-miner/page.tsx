@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getArchetypeMinerHealth } from "@/lib/archetypeMinerClient";
+import { getArchetypeMinerHealth, previewStage3Recovery } from "@/lib/archetypeMinerClient";
 import { SubmitRunForm } from "./submit-run-form";
+import { recoverStage3Action } from "./actions";
 import type { PipelineRunRow } from "@/lib/archetypeMinerTypes";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -21,10 +22,14 @@ export default async function ArchetypeMinerPage() {
   await requireAdminPage("archetype_miner");
   const admin = createAdminClient();
 
-  const [{ data: runs }, { count: pendingReviewCount }, health] = await Promise.all([
+  const [{ data: runs }, { count: pendingReviewCount }, health, stage3RecoveryPreview] = await Promise.all([
     admin.from("archetype_pipeline_runs").select("*").order("created_at", { ascending: false }).limit(50),
     admin.from("archetype_review_queue").select("*", { count: "exact", head: true }).eq("status", "pending"),
     getArchetypeMinerHealth(),
+    // Best-effort, same "never break the page over this" posture as
+    // getArchetypeMinerHealth above -- a preview failure just hides the
+    // recovery banner below rather than a broken page load.
+    previewStage3Recovery().catch(() => null),
   ]);
 
   const rows = (runs ?? []) as PipelineRunRow[];
@@ -63,6 +68,27 @@ export default async function ArchetypeMinerPage() {
           {pendingReviewCount} item(s) pending human review across all runs — open a run below to
           resolve its own review-queue items.
         </p>
+      )}
+
+      {/* A now-fixed Stage 3 prompt bug (see stage3Recovery.ts) forced a
+          synthesized REVIEW, with no real critic judgment behind it, on
+          any candidate a batch response happened to omit -- overwhelmingly
+          the dominant reason in the review queue above, not genuine
+          ambiguity a human needs to weigh in on. This re-runs Stage 3
+          under the fixed prompt on exactly that stuck subset, never on a
+          real REVIEW. Only shown once there's actually something to
+          recover. */}
+      {stage3RecoveryPreview && stage3RecoveryPreview.affectedArchetypes > 0 && (
+        <form action={recoverStage3Action} className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          <p>
+            {stage3RecoveryPreview.affectedArchetypes} archetype(s) across {stage3RecoveryPreview.affectedRuns} run(s) are
+            stuck REVIEW from a since-fixed Stage 3 bug (never actually reviewed by the model) — recovering re-runs
+            Stage 3 on just those, in the background.
+          </p>
+          <button type="submit" className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700">
+            Recover now
+          </button>
+        </form>
       )}
 
       <details className="mt-6 rounded-xl border border-border bg-surface">

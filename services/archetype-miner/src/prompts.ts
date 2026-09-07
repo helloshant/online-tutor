@@ -660,30 +660,44 @@ WHAT NOT TO DO
   is comparable to a "Hard" at another.
 
 SCHEMA
-For every candidate you were given, return exactly one object with the
-SAME archetype_id (even for KEEP -- echo it back, never omit an untouched
-archetype), carrying the SAME fields Stage 2 produces (archetype_id, name,
-concept, learning_objective, invariant_reasoning_structure, variations,
-supporting_question_ids, stats, generator_usable,
-generator_usability_rationale, mining_confidence, possible_duplicate_of --
-see Stage 2's own SCHEMA for each field's exact shape; unchanged unless
-your decision is REVISE, in which case update whichever of these your
-revision actually changes), PLUS:
+For every candidate you were given, return exactly one object -- never
+omit an untouched candidate, even for KEEP. Every object must always
+include:
 {
+  "archetype_id": "<the SAME id you were given -- required so the caller
+    can match your decision back to the right candidate>",
   "critic_decision": "KEEP" | "MERGE" | "SPLIT" | "REVISE" | "REVIEW" | "ADD" | "REMOVE",
   "critic_rationale": "<plain-language justification, required for every decision>",
   "critic_evidence": ["<question_id or archetype_id that grounds this decision>"],
   "merge_target_id": "<archetype_id being merged into, set only when critic_decision is MERGE, else null>",
   "split_result_ids": ["<new child archetype_id>", "... -- set only when critic_decision is SPLIT, else empty"]
 }
-For a new ADD, assign a fresh archetype_id and return the FULL Archetype
-shape above (Stage 2's fields plus the critic_* fields) with
-critic_decision:"ADD". Do NOT include education_context -- it is stamped
-on by the caller after your response.
+Do NOT re-transcribe any field beyond the six above that your decision
+didn't actually change -- the caller already has each candidate's own
+Stage 2 output on hand and fills in anything you omit from that. This
+matters, not just as an efficiency nicety: retyping every field (name,
+concept, learning_objective, invariant_reasoning_structure, variations,
+stats, ...) for a whole batch, including every ordinary KEEP where
+nothing changed, is the single most common way a batch response comes
+back incomplete -- a large repetitive transcription task you give up on
+partway through costs the exact archetypes you never got to a synthesized
+REVIEW instead of your real judgment, which defeats the point of asking
+you to review them at all.
+- KEEP / MERGE / SPLIT / REVIEW / REMOVE: the six fields above are
+  everything required. Do not include anything else.
+- REVISE: also include whichever of name / concept / learning_objective /
+  invariant_reasoning_structure / variations / supporting_question_ids /
+  generator_usable / generator_usability_rationale you are actually
+  revising (see Stage 2's own SCHEMA for each field's exact shape) --
+  omit anything your revision left unchanged.
+- ADD: return the FULL Archetype shape (Stage 2's own fields, see its own
+  SCHEMA, plus the six fields above) with a freshly assigned archetype_id
+  and critic_decision:"ADD" -- there is no existing candidate to fall
+  back to for a brand-new archetype, so this is the one decision that
+  genuinely needs everything. Do NOT include education_context -- it is
+  stamped on by the caller after your response.
 
 OUTPUT
-Return ONLY valid JSON: an array of Archetype objects matching the SCHEMA
-above exactly, each with status:"reviewed" (or status:"candidate" for a
-new ADD -- the caller sets status itself based on critic_decision, so it's
-fine to omit it). No markdown, no explanatory prose.`;
+Return ONLY valid JSON: an array with exactly one object per candidate you
+were given, matching the SCHEMA above. No markdown, no explanatory prose.`;
 }
