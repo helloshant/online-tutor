@@ -128,7 +128,24 @@ async function runSegmenterWithAutoSplit(
     caughtErr = err;
   }
 
-  const incomplete = result ? looksIncomplete(rawText, result.questions) : false;
+  // Only ever checked at depth 0, against the WHOLE paper's own text --
+  // extractDeclaredQuestionCount looks for "this question paper contains
+  // N questions," which only ever appears once, in the paper's own front
+  // matter. chunksFromBoundaries prepends that front matter onto chunk 1
+  // ONLY (see its own comment), so re-running this same check against a
+  // CHUNK's text at depth > 0 doesn't re-derive a chunk-scoped count --
+  // for chunk 1 specifically it finds the SAME whole-paper total and
+  // compares it against just that one section's own count, which can
+  // never reach it; for every other chunk it silently returns null (no
+  // front matter there) and never fires at all. Confirmed directly: this
+  // produced a false "chunk 1 looks incomplete" on every paper that
+  // needed section-splitting, triggering a pointless further split that
+  // still couldn't reach the impossible bar, hit MAX_SPLIT_DEPTH, and
+  // discarded most of section 1's real, correctly-segmented content down
+  // to a handful of questions -- there is no valid per-section expected
+  // count to check a chunk against, so this signal is only meaningful
+  // once, at the whole-paper level.
+  const incomplete = result && depth === 0 ? looksIncomplete(rawText, result.questions) : false;
   if (result && !incomplete) {
     return result;
   }
@@ -222,6 +239,24 @@ async function runSegmenterWithAutoSplit(
     );
     return result as SegmenterResult;
   }
+
+  // Informational only, never triggers another split -- the split budget
+  // for this paper is already spent. Only meaningful at depth 0 (see
+  // `incomplete`'s own comment on why a chunk-scoped comparison is never
+  // valid); a genuine shortfall in the fully-merged, whole-paper total
+  // is exactly the operational signal the depth>0 false positives this
+  // fix removes were drowning out.
+  if (depth === 0 && rawText) {
+    const declared = extractDeclaredQuestionCount(rawText);
+    const mergedCount = topLevelCount(merged.questions);
+    if (declared != null && mergedCount < declared * COMPLETENESS_THRESHOLD) {
+      console.warn(
+        `${paperLabel}: after auto-splitting and merging every chunk, still only ${mergedCount} of the ` +
+          `${declared} questions the paper itself declares were segmented -- worth reviewing this run's output.`
+      );
+    }
+  }
+
   return merged;
 }
 
