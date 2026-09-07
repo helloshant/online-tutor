@@ -7,6 +7,7 @@ import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
 import { InboxPanel } from "./inbox-panel";
 import { TopicList } from "./topic-list";
+import { ExamYearTrends } from "./exam-year-trends";
 import { StaffPreviewPicker } from "./staff-preview-picker";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -45,7 +46,14 @@ function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
 // state entirely. Same for "topics": desktop already has SyllabusPanel as a
 // persistent sidebar, so a "Topics" destination only has meaning on mobile,
 // where it's the only way to reach topic browsing at all (see topic-list.tsx).
-type MainTab = "subjects" | "topics" | "chat" | "inbox";
+// "trends" (ExamYearTrends) has no desktop-persistent equivalent the way
+// "topics" does -- it's a real tab on both desktop and mobile.
+type MainTab = "subjects" | "topics" | "trends" | "chat" | "inbox";
+
+// Only tabs whose id wouldn't already read fine through the row's own
+// `capitalize` CSS need an entry here -- "chat"/"inbox" fall through to
+// their raw tab id unchanged.
+const TAB_LABELS: Partial<Record<MainTab, string>> = { trends: "Past years" };
 
 export function DashboardShell({
   userName,
@@ -123,6 +131,7 @@ export function DashboardShell({
   const mobileNavItems: { tab: MainTab; icon: string; label: string }[] = [
     { tab: "subjects", icon: "📚", label: "Subjects" },
     ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
+    ...(hasSyllabusScope ? [{ tab: "trends" as const, icon: "📈", label: "Past years" }] : []),
     { tab: "chat", icon: "💬", label: "Chat" },
     ...(!isStaffUser ? [{ tab: "inbox" as const, icon: "🔔", label: "Inbox" }] : []),
   ];
@@ -259,7 +268,7 @@ export function DashboardShell({
                       left off this row entirely for them rather than shown
                       and rendering nothing (see the !isStaffUser guard
                       further down where its panel is actually rendered). */}
-                  {(isStaffUser ? (["chat"] as const) : (["chat", "inbox"] as const)).map((tab) => (
+                  {(isStaffUser ? (["chat", "trends"] as const) : (["chat", "trends", "inbox"] as const)).map((tab) => (
                     <button
                       key={tab}
                       type="button"
@@ -270,7 +279,7 @@ export function DashboardShell({
                           : "text-foreground/50 hover:text-foreground"
                       }`}
                     >
-                      {tab}
+                      {TAB_LABELS[tab] ?? tab}
                     </button>
                   ))}
                 </div>
@@ -290,6 +299,17 @@ export function DashboardShell({
                     subjectId={selectedSubject.id}
                     medium={syllabusMediumFor(selectedSubject, medium)}
                     selectedTopicId={topicClick?.topic.id ?? null}
+                    onSelectTopic={handleSelectTopic}
+                  />
+                </div>
+              )}
+              {boardId && gradeId && medium && (
+                <div className={mainTab === "trends" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
+                  <ExamYearTrends
+                    boardId={boardId}
+                    gradeId={gradeId}
+                    subjectId={selectedSubject.id}
+                    medium={syllabusMediumFor(selectedSubject, medium)}
                     onSelectTopic={handleSelectTopic}
                   />
                 </div>

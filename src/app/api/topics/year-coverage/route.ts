@@ -1,0 +1,105 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getArchetypesWithChapterTopic } from "@/lib/archetypeCoverage";
+import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
+import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
+
+// Powers the student-facing "which years was this topic actually asked in"
+// browser (ExamYearTrends) -- same board/grade/subject/medium scope as
+// /api/topics/archetype-progress, and deliberately built the same way (this
+// app matching syllabus_topics against getArchetypesWithChapterTopic
+// directly, not a call out to the orchestrator's own findArchetypesForTopic)
+// since that's a per-topic exercise-grounding lookup, a different job from
+// this one: "list every topic in the subject with its own year coverage,"
+// batched once per subject the same way TopicList's own progress badges are.
+//
+// Returns each topic's FULL syllabus_topics row (not just id/chapter/topic)
+// so the client can hand it straight to the same onSelectTopic(topic:
+// SyllabusTopic) callback TopicList already uses -- clicking a topic here
+// drops into the exact same chat-summary-plus-pattern-picker flow, rather
+// than this page needing its own parallel practice UI.
+export type TopicYearCoverage = { topic: SyllabusTopic; years: number[] };
+export type YearCoverageResponse = { years: number[]; topics: TopicYearCoverage[] };
+
+export async function GET(request: Request) {
+  try {
+    return await handleGet(request);
+  } catch (err) {
+    console.error("Unexpected error in GET /api/topics/year-coverage:", err);
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
+}
+
+async function handleGet(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const boardId = url.searchParams.get("boardId");
+  const gradeId = url.searchParams.get("gradeId");
+  const subjectId = url.searchParams.get("subjectId");
+  const mediumParam = url.searchParams.get("medium");
+  if (!boardId || !gradeId || !subjectId || !mediumParam) {
+    return NextResponse.json({ error: "boardId, gradeId, subjectId, and medium are required" }, { status: 400 });
+  }
+  const VALID_MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
+  if (!VALID_MEDIUMS.includes(mediumParam as Medium)) {
+    return NextResponse.json({ error: "medium must be one of English, Hindi, Bengali" }, { status: 400 });
+  }
+  const medium = mediumParam as Medium;
+
+  const [{ data: board }, { data: grade }, { data: subject }, { data: topics }] = await Promise.all([
+    supabase.from("boards").select("name").eq("id", boardId).single(),
+    supabase.from("grades").select("name").eq("id", gradeId).single(),
+    supabase.from("subjects").select("name").eq("id", subjectId).single(),
+    supabase
+      .from("syllabus_topics")
+      .select("*")
+      .eq("board_id", boardId)
+      .eq("grade_id", gradeId)
+      .eq("subject_id", subjectId)
+      .eq("medium", medium),
+  ]);
+
+  if (!board || !grade || !subject || !topics) {
+    return NextResponse.json({ years: [], topics: [] } satisfies YearCoverageResponse);
+  }
+
+  // Matching archetypes to a curriculum scope needs admin-level read
+  // access, same reasoning as archetype-progress's own comment -- this
+  // data is curated/internal, a student only ever sees the derived
+  // chapter/topic/year rows this route computes from it.
+  const admin = createAdminClient();
+  const gradeOrYear = toArchetypeGradeOrYear(grade.name);
+  const archetypeRows = await getArchetypesWithChapterTopic(admin, { board: board.name, grade: gradeOrYear, subject: subject.name });
+
+  // Same EITHER-field match as archetype-progress -- see that route's own
+  // comment on why syllabus_topics' two different chapter/topic
+  // granularity conventions both need checking, not just t.chapter.
+  const normalize = (s: string) => s.trim().toLowerCase();
+  const allYears = new Set<number>();
+  const topicRows: TopicYearCoverage[] = (topics as SyllabusTopic[]).map((t) => {
+    const matching = archetypeRows.filter(
+      (a) => normalize(a.resolvedChapter) === normalize(t.chapter) || normalize(a.resolvedChapter) === normalize(t.topic)
+    );
+    const years = Array.from(new Set(matching.flatMap((a) => a.archetype.stats?.years_observed ?? []))).sort((a, b) => a - b);
+    for (const y of years) allYears.add(y);
+    return { topic: t, years };
+  });
+
+  return NextResponse.json({
+    years: Array.from(allYears).sort((a, b) => a - b),
+    // Only topics with at least one real year of mined data -- a topic
+    // with nothing mined for it yet has nothing to show on a page whose
+    // whole point is "which years was this actually asked," so it's
+    // omitted the same way archetype-progress's own badges omit a
+    // total:0 topic rather than showing an empty "0 years" row.
+    topics: topicRows.filter((t) => t.years.length > 0),
+  } satisfies YearCoverageResponse);
+}
