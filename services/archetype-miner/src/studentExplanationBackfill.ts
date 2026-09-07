@@ -74,16 +74,20 @@ export function isStudentExplanationBackfillInProgress(): boolean {
 }
 
 // One getJsonCompletion call per batch, asking ONLY for {archetype_id,
-// student_explanation} pairs -- see the prompt's own SCHEMA. Retries once,
-// with just the still-missing subset, on the same reasoning stage3Critic.ts's
+// student_explanation} pairs -- see the prompt's own SCHEMA. Retries, with
+// just the still-missing subset, on the same reasoning stage3Critic.ts's
 // own missing-decision retry uses -- cheap insurance even though a tiny,
 // fixed-shape per-item output should rarely trigger the "model gives up
 // partway through a long repetitive transcription" failure this repo has
-// already diagnosed twice this way (Stage 0, Stage 3).
+// already diagnosed twice this way (Stage 0, Stage 3). Raised from one
+// retry to two after confirming, on a real (small, 30-item, spread across
+// 6 unrelated runs) leftover tail even the original retry couldn't clear,
+// that size/content isn't the explanation -- same conclusion, same fix,
+// as stage3Critic.ts's own retry count bump.
 async function requestExplanations(
   batch: PendingRow[],
   provider: LlmProvider,
-  retriesLeft = 1
+  retriesLeft = 2
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   try {
