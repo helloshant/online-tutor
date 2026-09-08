@@ -873,21 +873,45 @@ Two lists, both scoped to the same one board/grade/subject:
   paraphrase or alter punctuation.
 
 TASK
-For each entry in "unmatched" that genuinely refers to the SAME real
-chapter as one entry in "syllabus" -- just worded, punctuated, or spelled
-differently -- output a mapping from the unmatched value onto that
-syllabus value. Some "unmatched" entries may be genuinely different from
-anything in "syllabus" (e.g. a chapter since removed from the current
-syllabus, a stray misclassification into the wrong grade/subject
-entirely, or too vague/generic to confidently place -- "General
-Instructions", "Writing Skills") -- do NOT force a mapping for these;
-omit them.
+Map an "unmatched" value onto a "syllabus" value whenever a real question
+carrying that label genuinely belongs, as actual exam content, under that
+one syllabus chapter -- this covers TWO distinct cases, both real and
+both worth mapping:
+1. The SAME chapter, just worded, punctuated, or spelled differently
+   ("Human Health and Diseases" -> "Human Health and Disease").
+2. A more specific SECTION or SUB-TOPIC that a student studies as PART OF
+   one specific syllabus chapter, even though the label itself doesn't
+   read as a paraphrase of the chapter name. For example, "Human Genome
+   Project" is a named section INSIDE the "Molecular Basis of
+   Inheritance" chapter, not a separate chapter of its own -- a real
+   exam question labeled that way still belongs there. Likewise
+   "Reproduction in Organisms" (general reproduction concepts) and
+   "Reproductive Structure in Flowering Plants" both belong under "Sexual
+   Reproduction in Flowering Plants" once you consider what that chapter
+   actually covers, not just its four-word name. Use your own subject-
+   matter knowledge of what each syllabus chapter actually contains to
+   recognize case 2 -- don't require the unmatched label to visually
+   resemble the syllabus name.
 
-BE CONSERVATIVE. A wrong mapping silently reassigns real, already-mined
-questions to the wrong chapter -- worse than leaving a genuinely
-unresolved value alone (it just keeps not matching anything, the same
-state it's already in). Only map a value you are confident refers to the
-exact same real-world chapter as a specific syllabus entry.
+Do NOT force a mapping when an "unmatched" entry is genuinely NOT part of
+any listed chapter's real content:
+- A chapter genuinely since REMOVED from the current syllabus (real
+  content, but not covered by anything in "syllabus" at all -- e.g. an
+  older chapter no longer examined).
+- Content that actually belongs to a DIFFERENT grade or DIFFERENT
+  subject than this scope (a real chapter name, just not one that's
+  actually taught in THIS board/grade/subject's own syllabus).
+- Too vague, generic, or clearly non-subject text to confidently place
+  at all ("General Instructions", "Writing Skills" -- likely exam
+  boilerplate or cross-subject contamination, not real content in this
+  subject).
+
+BE CONSERVATIVE about these three exclusion cases specifically -- a wrong
+mapping silently reassigns real, already-mined questions to the wrong
+chapter, worse than leaving a genuinely unresolved value alone. But don't
+let that conservatism make you UNDER-map case 2 above: a real question
+whose label is simply more specific than the chapter's own short name
+still deserves to be found and mapped, not left behind out of caution.
 
 SCHEMA
 Return one entry per confident mapping -- omit anything you're not
