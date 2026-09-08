@@ -6,6 +6,17 @@ import { previewOffScopeContentScan } from "@/lib/archetypeMinerClient";
 import { runOffScopeContentScanAction } from "../actions";
 import { AutoSubmitSelect } from "../auto-submit-select";
 
+// Mirrors the service's own isLanguageArtsSubject() (offScopeContentScan.ts)
+// -- reimplemented here, same as every other small helper this file's
+// siblings already duplicate rather than share, purely so the page can show
+// its OWN explanation instead of reusing the generic "already checked"
+// copy, which would be misleading for a scope this scan never actually
+// looks at (see that function's own comment for why).
+const LANGUAGE_ARTS_SUBJECTS = new Set(["english", "hindi", "bengali"]);
+function isLanguageArtsSubject(subjectName: string): boolean {
+  return LANGUAGE_ARTS_SUBJECTS.has(subjectName.trim().toLowerCase());
+}
+
 // See the service's own offScopeContentScan.ts for what this catches:
 // content that reached the catalogue BEFORE pipelineRunner.ts started
 // checking for this at mining time (see OFF_SCOPE_CONTENT_FLAG) -- a
@@ -125,7 +136,18 @@ export default async function OffScopeContentScanPage({
         </p>
       )}
 
-      {scopeChosen && preview && preview.candidateQuestions === 0 && (
+      {scopeChosen && subject && isLanguageArtsSubject(subject) && (
+        <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          {subject} is a language-arts subject, so this scan doesn&apos;t run against it at all --
+          reading-comprehension passages are deliberately drawn from arbitrary real-world topics to
+          test reading skill, not subject knowledge, so a &quot;does this content&apos;s topic belong
+          to this subject&quot; check would flag most of the subject by design. Confirmed live: a
+          single run against English (CBSE, grade 10) flagged 50 of ~800 questions this way, every
+          one a false positive.
+        </p>
+      )}
+
+      {scopeChosen && subject && !isLanguageArtsSubject(subject) && preview && preview.candidateQuestions === 0 && (
         <p className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
           Nothing left to scan in this scope -- every question here has already been checked (or
           flagged) by a previous pass.
