@@ -147,10 +147,22 @@ export default async function OffScopeContentScanPage({
         </p>
       )}
 
+      {scopeChosen && preview && preview.flaggedQuestions > 0 && (
+        <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {preview.flaggedQuestions} question(s) in this scope are already flagged as off-scope and
+          waiting on a human decision -- open the run(s) they belong to from the{" "}
+          <Link href="/admin/archetype-miner" className="underline">
+            Archetype Miner
+          </Link>{" "}
+          page to resolve them.
+        </p>
+      )}
+
       {scopeChosen && subject && !isLanguageArtsSubject(subject) && preview && preview.candidateQuestions === 0 && (
         <p className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
-          Nothing left to scan in this scope -- every question here has already been checked (or
-          flagged) by a previous pass.
+          {preview.flaggedQuestions > 0
+            ? "Every other question in this scope has already been checked and found clean."
+            : "Nothing left to scan in this scope -- every question here has already been checked (or flagged) by a previous pass."}
         </p>
       )}
 
