@@ -3,6 +3,7 @@ import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCrossRunMergePrompt } from "./prompts.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype } from "./types.js";
+import { toYear } from "./textCoercion.js";
 
 // A genuinely different duplicate-detection gap from anything Stage 3 (or
 // its own recovery, see stage3Recovery.ts) already covers: Stage 3's own
@@ -262,7 +263,11 @@ async function detectDuplicateClustersResilient(batch: AcceptedRow[], provider: 
 // assuming every id in the array belongs to that one run. The plain
 // aggregate numbers/lists below carry no such run-scoping risk.
 function mergeArchetypeStats(target: Archetype["stats"], absorbed: Archetype["stats"][]): Archetype["stats"] {
-  const years = new Set(target.years_observed ?? []);
+  // toYear guards against the same mixed number/numeric-string years
+  // seen in production (see textCoercion.ts's own comment) -- an
+  // unguarded `new Set` here would silently carry a duplicate-looking
+  // year through a merge instead of actually deduping it.
+  const years = new Set((target.years_observed ?? []).map(toYear).filter((y): y is number => y !== null));
   let questionCount = target.question_count ?? 0;
   const marks: Record<string, number> = { ...target.marks_distribution };
   const formats: Record<string, number> = { ...target.formats };
@@ -270,7 +275,10 @@ function mergeArchetypeStats(target: Archetype["stats"], absorbed: Archetype["st
   const gradeYear: Record<string, number> = { ...target.grade_or_year_distribution };
 
   for (const s of absorbed) {
-    for (const y of s.years_observed ?? []) years.add(y);
+    for (const y of s.years_observed ?? []) {
+      const yr = toYear(y);
+      if (yr !== null) years.add(yr);
+    }
     questionCount += s.question_count ?? 0;
     for (const [k, v] of Object.entries(s.marks_distribution ?? {})) marks[k] = (marks[k] ?? 0) + v;
     for (const [k, v] of Object.entries(s.formats ?? {})) formats[k] = (formats[k] ?? 0) + v;

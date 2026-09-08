@@ -83,6 +83,20 @@ function normalize(s: string): string {
   return s.trim().toLowerCase();
 }
 
+// A model occasionally emits a year as a numeric STRING ("2025") instead
+// of a number, inconsistently within the same array -- confirmed live in
+// production: several archetypes.archetype->stats->years_observed arrays
+// held both [2025, "2025"] for the exact same year, which silently
+// defeated the `new Set(years_observed)` dedup below (2025 !== "2025" in
+// JS) and showed the same year twice in the pattern picker's own year
+// suffix. Same fix as the archetype-miner service's own textCoercion.ts
+// (no shared package between services, see this file's own convention of
+// reimplementing rather than importing across service boundaries).
+function toYear(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) ? n : null;
+}
+
 export async function findArchetypesForTopic(params: {
   boardName: string;
   gradeName: string;
@@ -208,7 +222,9 @@ export async function findArchetypesForTopic(params: {
         // Sorted, deduped ascending -- Stage 2 builds this from every
         // supporting question's own year, in whatever order clustering
         // happened to process them, with no guaranteed order or uniqueness.
-        yearsObserved: Array.from(new Set(row.archetype.stats?.years_observed ?? [])).sort((a, b) => a - b),
+        yearsObserved: Array.from(
+          new Set((row.archetype.stats?.years_observed ?? []).map(toYear).filter((y): y is number => y !== null))
+        ).sort((a, b) => a - b),
         questionCountByYear,
       },
       totalQuestions: Object.values(questionCountByYear).reduce((sum, n) => sum + n, 0),

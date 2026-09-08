@@ -22,6 +22,13 @@ import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 export type TopicYearCoverage = { topic: SyllabusTopic; years: number[] };
 export type YearCoverageResponse = { years: number[]; topics: TopicYearCoverage[] };
 
+// See its own use below -- coerces a possibly-string year to a real
+// number, or null if it isn't one.
+function toYear(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) ? n : null;
+}
+
 export async function GET(request: Request) {
   try {
     return await handleGet(request);
@@ -88,7 +95,18 @@ async function handleGet(request: Request) {
     const matching = archetypeRows.filter(
       (a) => normalize(a.resolvedChapter) === normalize(t.chapter) || normalize(a.resolvedChapter) === normalize(t.topic)
     );
-    const years = Array.from(new Set(matching.flatMap((a) => a.archetype.stats?.years_observed ?? []))).sort((a, b) => a - b);
+    // toYear guards against a real production data-quality issue: a model
+    // occasionally emitted a year as a numeric STRING ("2025") instead of
+    // a number, inconsistently within the same archetype's own
+    // years_observed array -- an unguarded `new Set` here treats 2025 and
+    // "2025" as different values (JS !== on mixed types), which showed
+    // the same year twice in this exact pill row. See the archetype-miner
+    // service's own textCoercion.ts for the source-side fix; this guards
+    // the read side too since the data can't be trusted to always be
+    // clean numbers.
+    const years = Array.from(new Set(matching.flatMap((a) => (a.archetype.stats?.years_observed ?? []).map(toYear)).filter((y): y is number => y !== null))).sort(
+      (a, b) => a - b
+    );
     for (const y of years) allYears.add(y);
     return { topic: t, years };
   });
