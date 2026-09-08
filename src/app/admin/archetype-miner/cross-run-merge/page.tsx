@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getArchetypeFilterOptions } from "@/lib/archetypeCoverage";
 import { previewCrossRunMerge } from "@/lib/archetypeMinerClient";
 import { runCrossRunMergeAction } from "../actions";
+import { AutoSubmitSelect } from "../auto-submit-select";
 
 // See the service's own crossRunMerge.ts for what this catches: the SAME
 // reasoning pattern mined independently under different wording across
@@ -54,9 +55,10 @@ export default async function CrossRunMergePage({
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Board
-          <select
+          <AutoSubmitSelect
             name="board"
             defaultValue={board ?? ""}
+            clearFieldNames={["grade", "subject"]}
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
           >
             <option value="">Select a board</option>
@@ -65,13 +67,14 @@ export default async function CrossRunMergePage({
                 {b}
               </option>
             ))}
-          </select>
+          </AutoSubmitSelect>
         </label>
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Grade / year
-          <select
+          <AutoSubmitSelect
             name="grade"
             defaultValue={grade ?? ""}
+            clearFieldNames={["subject"]}
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
           >
             <option value="">Select a grade</option>
@@ -80,7 +83,7 @@ export default async function CrossRunMergePage({
                 {g}
               </option>
             ))}
-          </select>
+          </AutoSubmitSelect>
         </label>
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Subject
