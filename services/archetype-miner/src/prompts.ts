@@ -1001,55 +1001,78 @@ You are auditing real exam questions to confirm each one genuinely
 belongs to the ONE board/grade/subject it's declared under.
 
 INPUT
-The declared board, grade, and subject for this entire batch (every
-question below claims to be this), and an array of questions, each with
-a "ref" (its stable "run_id:question_id" identifier) and "text" (the
-question itself, possibly truncated).
+- The declared board, grade, and subject for this entire batch (every
+  question below claims to be this).
+- "syllabus": the REAL, complete, authoritative list of chapter/topic
+  names that make up this exact subject's real curriculum for this exact
+  grade, taken directly from this app's own curriculum catalogue. This
+  list, not your own general knowledge of "what counts as [subject]," is
+  the AUTHORITATIVE definition of the declared subject's scope --
+  omitted only when this app has no such catalogue for this scope, in
+  which case fall back to your own subject-matter knowledge instead.
+- An array of questions, each with a "ref" (its stable
+  "run_id:question_id" identifier) and "text" (the question itself,
+  possibly truncated).
 
 TASK
-Flag any question whose actual content is CLEARLY:
+Flag a question ONLY when its actual content is CLEARLY:
 - A different SUBJECT entirely (e.g. an English literature question, a
   writing/composition task, a different science) mixed into this
   subject's own paper, or
-- A different GRADE/level's own syllabus content than the one declared
-  (use your own subject-matter knowledge of what each grade actually
-  covers -- a topic that's real content for an EARLIER or LATER grade in
-  the same subject, not this one).
+- A different GRADE/level's own syllabus content than the one declared.
+
+Before flagging on either ground, check the question's content against
+EVERY entry in "syllabus" first. If it plausibly belongs to ANY ONE
+chapter/topic in that list -- even loosely, even if it's a specific
+technical sub-topic that isn't spelled out verbatim in that chapter's own
+short name -- it is NOT off-scope. Full stop. Do not flag it, no matter
+how specialized, technical, or like-its-own-separate-discipline it
+sounds. A subject's real syllabus is made of many specialized-sounding
+chapters, not one homogeneous "general [subject]" -- CONFIRMED AS A REAL,
+REPEATED MISTAKE this check has already made multiple times: real Grade
+12 CBSE Biology content covering PCR/restriction enzymes/gene cloning
+(the Biotechnology chapter), human evolution (the Evolution chapter),
+invasive species and biodiversity loss (the Biodiversity and
+Conservation chapter), and drug/tobacco abuse (part of the Human Health
+and Disease chapter) were ALL wrongly flagged as "not really Biology" --
+reasoning it belonged to "Biotechnology, not general Biology," or
+"Anthropology, not core Biology," or "Ecology/Environmental Science, not
+Grade 12 Biology," or "Health Education, not Biology." Every one of
+those chapters IS the declared subject -- Biotechnology, Evolution,
+Ecology, and Health topics are not separate disciplines here, they are
+chapters OF Biology. This is the single most important rule in this
+prompt: never invent a narrower definition of the subject than what
+"syllabus" actually lists, and never treat a specialized or technical-
+sounding chapter as if it must belong to some OTHER field.
+
+Similarly, do NOT flag a question just because it covers a different
+chapter/topic than most of the OTHER questions in this same batch. A
+batch is an arbitrary slice of a scope's own questions, not one paper or
+one chapter -- questions from several different chapters of the SAME
+declared subject and grade, mixed together in one batch, is the normal,
+expected case. Judge each question only against "syllabus" (or, absent
+that, your own subject knowledge of the declared board/grade/subject) --
+never against what the rest of the batch happens to be about.
 
 Do NOT flag a question just because it's unusually difficult, unusually
 easy, oddly worded, or an OCR-damaged fragment -- none of those is a
-subject/grade mismatch. Only flag genuine cross-subject or cross-grade
-content.
-
-Do NOT flag a question just because it covers a different CHAPTER or TOPIC
-than most of the other questions in this same batch. A batch is an
-arbitrary slice of a scope's own questions, not one paper or one chapter
--- questions from several different chapters of the SAME declared
-subject and grade, mixed together in the same batch, is the NORMAL,
-EXPECTED case, not a signal of anything wrong. Confirmed as a real
-mistake this check has already made once: a Biology question about PCR
-and restriction enzymes (the Biotechnology chapter) was wrongly flagged
-as off-scope because most of the OTHER questions in its batch happened
-to be about Reproduction -- but Biotechnology and Reproduction are both
-completely legitimate chapters of the SAME Grade 12 Biology syllabus.
-That is never off-scope. Judge each question ONLY against the declared
-board/grade/subject at the top of this prompt, in isolation -- never
-against what chapter the rest of the batch happens to be about.
+subject/grade mismatch.
 
 BE CONSERVATIVE. This determines whether real, already-mined content gets
 excluded from the catalogue and an archetype built on it gets removed --
 a false positive here silently discards legitimate content, worse than
 missing a genuine case (which stays exactly as visible as it already is,
 available to be caught on a later pass). Only flag a question you are
-confident is genuinely off-scope.
+confident is genuinely off-scope AFTER checking it against every
+"syllabus" entry and finding no plausible match at all.
 
 SCHEMA
 Return one entry per confidently-flagged question -- omit every question
-that's a legitimate (even if unusual) example of the declared
-board/grade/subject; the common case is an EMPTY array:
+that's a legitimate (even if unusual or highly specific) example of the
+declared board/grade/subject; the common case is an EMPTY array:
 {
   "ref": "<verbatim, copied EXACTLY from the input>",
-  "reason": "<one sentence: what subject/grade this actually is, and why>"
+  "reason": "<one sentence: what subject/grade this actually is, and why -- and confirm it matches none of the \"syllabus\" entries>"
 }
 
 OUTPUT
