@@ -58,6 +58,9 @@ export default async function ArchetypeMinerPage() {
           <Link href="/admin/archetype-miner/cross-run-merge" className="text-brand hover:underline">
             Cross-run merge
           </Link>
+          <Link href="/admin/archetype-miner/curriculum-reconciliation" className="text-brand hover:underline">
+            Curriculum reconciliation
+          </Link>
           <Link href="/admin/archetype-miner/taxonomies" className="text-brand hover:underline">
             Curriculum taxonomies
           </Link>

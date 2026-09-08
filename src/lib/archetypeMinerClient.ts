@@ -254,6 +254,71 @@ export async function startCrossRunMerge(
   return { started: body.started, chapterGroups: body.chapterGroups, archetypesInvolved: body.archetypesInvolved };
 }
 
+export type CurriculumReconciliationScope = { boardName: string; gradeName: string; subjectName: string };
+export type CurriculumReconciliationPreview = {
+  unmatchedPairs: number;
+  affectedQuestions: number;
+  syllabusPairsAvailable: number;
+  inProgress: boolean;
+};
+
+// See the service's own curriculumReconciliation.ts for what this fixes
+// and why -- already-mined questions whose curriculum.chapter/topic don't
+// exactly match this app's own curated syllabus_topics wording, which
+// silently excludes them from every exact-string match this app does
+// against a real syllabus topic (year-coverage, archetype-progress, the
+// pattern picker's own lookup). Same scoped, human-triggered,
+// preview-first shape as cross-run merge above, for the same reason -- a
+// wrong mapping is a real, silent data error, not just a missed
+// opportunity.
+export async function previewCurriculumReconciliation(scope: CurriculumReconciliationScope): Promise<CurriculumReconciliationPreview> {
+  const params = new URLSearchParams(scope);
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/preview?${params}`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Curriculum reconciliation preview failed with status ${res.status}`);
+  }
+  if (typeof body?.unmatchedPairs !== "number" || typeof body?.affectedQuestions !== "number" || typeof body?.syllabusPairsAvailable !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return {
+    unmatchedPairs: body.unmatchedPairs,
+    affectedQuestions: body.affectedQuestions,
+    syllabusPairsAvailable: body.syllabusPairsAvailable,
+    inProgress: Boolean(body.inProgress),
+  };
+}
+
+export async function startCurriculumReconciliation(
+  scope: CurriculumReconciliationScope
+): Promise<{ started: boolean; unmatchedPairs: number; affectedQuestions: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(scope),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Curriculum reconciliation failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.unmatchedPairs !== "number" || typeof body?.affectedQuestions !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, unmatchedPairs: body.unmatchedPairs, affectedQuestions: body.affectedQuestions };
+}
+
 export async function mineArchetypeFamilies(
   subjectOrCourse: string,
   llmProvider?: ArchetypeMinerLlmProvider
