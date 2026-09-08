@@ -2,18 +2,19 @@ import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
-import { saveTaxonomyAction, deleteTaxonomyAction } from "../actions";
+import { saveTaxonomyAction, deleteTaxonomyAction, generateTaxonomyFromSyllabusAction } from "../actions";
 import type { ArchetypeCurriculumTaxonomyRow } from "@/lib/archetypeMinerTypes";
 
 export default async function ArchetypeTaxonomiesPage() {
   await requireAdminPage("archetype_miner");
   const admin = createAdminClient();
 
-  const { data } = await admin
-    .from("archetype_curriculum_taxonomies")
-    .select("*")
-    .order("curriculum_source_name", { ascending: true });
+  const [{ data }, { data: boardRows }] = await Promise.all([
+    admin.from("archetype_curriculum_taxonomies").select("*").order("curriculum_source_name", { ascending: true }),
+    admin.from("boards").select("name").order("name", { ascending: true }),
+  ]);
   const taxonomies = (data ?? []) as ArchetypeCurriculumTaxonomyRow[];
+  const boardNames = (boardRows ?? []).map((b) => b.name as string);
 
   return (
     <div>
@@ -28,6 +29,43 @@ export default async function ArchetypeTaxonomiesPage() {
         it in per run. Most university courses won&apos;t have one; Stage 1 classifies at capped
         confidence for those, exactly as intended.
       </p>
+
+      {/* Auto-derives a taxonomy document from this app's own syllabus_topics
+          catalogue instead of an admin hand-typing/keeping one in sync
+          manually (see syllabusTaxonomyText.ts's own comment on the real
+          drift this prevents -- mined chapter names that don't exactly
+          match the curated syllabus wording, which then never surface in
+          the student-facing "Past Years" / progress views). Regenerating
+          for the same board overwrites its existing taxonomy in place. */}
+      <div className="mt-6 rounded-xl border border-purple-200 bg-purple-50 p-4">
+        <h2 className="text-sm font-semibold text-purple-900">Generate from this app&apos;s own syllabus catalogue</h2>
+        <p className="mt-1 text-xs text-purple-800">
+          Builds a taxonomy document straight from syllabus_topics for a school board -- the exact
+          chapter/topic wording Stage 1 is then told to match verbatim, instead of drifting from it
+          on its own judgment. Safe to regenerate any time the syllabus catalogue changes.
+        </p>
+        <form action={generateTaxonomyFromSyllabusAction} className="mt-3 flex flex-wrap items-end gap-3 text-sm">
+          <label className="flex flex-col gap-1 text-xs text-purple-800">
+            Board
+            <select
+              name="syllabusBoardName"
+              required
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+            >
+              <option value="">Select a board</option>
+              {boardNames.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="rounded-lg bg-purple-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-purple-700">
+            Generate &amp; save
+          </button>
+        </form>
+        {boardNames.length === 0 && <p className="mt-2 text-xs text-purple-800">No boards found in the syllabus catalogue yet.</p>}
+      </div>
 
       <details className="mt-6 rounded-xl border border-border bg-surface">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">

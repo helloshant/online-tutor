@@ -16,6 +16,12 @@ import {
   isCrossRunMergeInProgress,
   type CrossRunMergePreview,
 } from "./crossRunMerge.js";
+import {
+  previewCurriculumReconciliation,
+  runCurriculumReconciliation,
+  isCurriculumReconciliationInProgress,
+  type CurriculumReconciliationPreview,
+} from "./curriculumReconciliation.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -529,6 +535,56 @@ app.post("/v1/cross-run-merge/run", requireSharedSecret, async (req: Request, re
   }
   void runCrossRunMerge(scope).catch((err) => {
     console.error("Unhandled error in cross-run merge:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
+});
+
+// See curriculumReconciliation.ts's own comment for what this fixes and
+// why -- same board/grade/subject scope shape as cross-run merge above
+// (readCrossRunMergeScope validates the same three fields regardless of
+// which tool is calling it), same preview-first/fire-and-forget/in-memory-
+// concurrency-guard shape as every other admin-triggered pass in this
+// file.
+app.get("/v1/curriculum-reconciliation/preview", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.query as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  try {
+    const preview = await previewCurriculumReconciliation(scope);
+    res.json({ ...preview, inProgress: isCurriculumReconciliationInProgress() });
+  } catch (err) {
+    console.error("Failed to preview curriculum reconciliation:", err);
+    res.status(502).json({ error: "Failed to preview curriculum reconciliation" });
+  }
+});
+
+app.post("/v1/curriculum-reconciliation/run", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  if (isCurriculumReconciliationInProgress()) {
+    res.status(409).json({ error: "A curriculum reconciliation pass is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: CurriculumReconciliationPreview;
+  try {
+    preview = await previewCurriculumReconciliation(scope);
+  } catch (err) {
+    console.error("Failed to preview curriculum reconciliation before starting it:", err);
+    res.status(502).json({ error: "Failed to preview curriculum reconciliation" });
+    return;
+  }
+  if (preview.unmatchedPairs === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runCurriculumReconciliation(scope).catch((err) => {
+    console.error("Unhandled error in curriculum reconciliation:", err);
   });
   res.status(202).json({ started: true, ...preview });
 });

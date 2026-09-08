@@ -12,8 +12,10 @@ import {
   startStage3Recovery,
   startStudentExplanationBackfill,
   startCrossRunMerge,
+  startCurriculumReconciliation,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
+import { buildTaxonomyTextFromSyllabus } from "@/lib/syllabusTaxonomyText";
 import type { EducationContext, EducationStage, CurriculumSourceType } from "@/lib/archetypeMinerTypes";
 
 const EDUCATION_STAGES: EducationStage[] = ["secondary", "senior_secondary", "undergraduate"];
@@ -428,6 +430,36 @@ export async function runCrossRunMergeAction(formData: FormData): Promise<void> 
   revalidatePath("/admin/archetype-miner/cross-run-merge");
 }
 
+// See the service's own curriculumReconciliation.ts for what this fixes --
+// already-mined questions whose curriculum.chapter/topic don't exactly
+// match this app's own curated syllabus_topics wording, silently excluded
+// from every exact-string match this app does against a real syllabus
+// topic. Same scope shape (and same reasoning for requiring it explicitly)
+// as readCrossRunMergeFormScope above.
+function readCurriculumReconciliationFormScope(formData: FormData): { boardName: string; gradeName: string; subjectName: string } {
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName) {
+    throw new Error("Board, grade, and subject are all required.");
+  }
+  return { boardName, gradeName, subjectName };
+}
+
+export async function runCurriculumReconciliationAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const scope = readCurriculumReconciliationFormScope(formData);
+  try {
+    await startCurriculumReconciliation(scope);
+  } catch (err) {
+    // Same reasoning as runCrossRunMergeAction's own catch -- the button
+    // is disabled while a pass for this scope is running, so this should
+    // be rare.
+    console.error("Failed to start curriculum reconciliation:", err);
+  }
+  revalidatePath("/admin/archetype-miner/curriculum-reconciliation");
+}
+
 // Curriculum taxonomy documents are plain admin CRUD against Supabase
 // directly -- same posture as chapter_documents (see
 // supabase/migrations/0039_archetype_miner_admin_and_families.sql's own
@@ -456,6 +488,42 @@ export async function saveTaxonomyAction(formData: FormData): Promise<void> {
       curriculum_source_type: curriculumSourceType as CurriculumSourceType,
       curriculum_source_name: curriculumSourceName,
       country_or_region: countryOrRegion,
+      taxonomy_text: taxonomyText,
+      updated_by: session.user.id,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "curriculum_source_type,curriculum_source_name,country_or_region_key" }
+  );
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin/archetype-miner/taxonomies");
+}
+
+// Auto-derives a taxonomy document from this app's own syllabus_topics
+// catalogue instead of an admin hand-typing/maintaining one -- see
+// syllabusTaxonomyText.ts's own comment for why this exists and what it
+// fixes. Only meaningful for a school board with real syllabus_topics
+// rows (a university_program has no such catalogue in this app at all,
+// see this page's own intro paragraph), so this always saves type
+// "school_board" with no region -- the same admin who wants a
+// region-scoped or hand-curated document can still use the manual form
+// above afterward; saving again with the same source just overwrites it.
+export async function generateTaxonomyFromSyllabusAction(formData: FormData): Promise<void> {
+  const session = await requireAdminPage("archetype_miner");
+  const boardName = ((formData.get("syllabusBoardName") as string | null) ?? "").trim();
+  if (!boardName) throw new Error("Pick a board to generate a taxonomy for.");
+
+  const admin = createAdminClient();
+  const taxonomyText = await buildTaxonomyTextFromSyllabus(admin, boardName);
+  if (!taxonomyText) {
+    throw new Error(`No syllabus_topics rows found for board "${boardName}" -- nothing to generate.`);
+  }
+
+  const { error } = await admin.from("archetype_curriculum_taxonomies").upsert(
+    {
+      curriculum_source_type: "school_board" as CurriculumSourceType,
+      curriculum_source_name: boardName,
+      country_or_region: null,
       taxonomy_text: taxonomyText,
       updated_by: session.user.id,
       updated_at: new Date().toISOString(),

@@ -842,3 +842,62 @@ Return ONLY valid JSON: an array of cluster objects matching the SCHEMA
 above (empty array if you find no genuine cross-run duplicates in this
 batch -- the common case). No markdown, no explanatory prose.`;
 }
+
+// See curriculumReconciliation.ts's own comment for the full context: this
+// realigns Stage 1's own already-mined curriculum.chapter/topic labels
+// (assigned before this app started auto-generating a syllabus-derived
+// taxonomy document, or for a scope that still doesn't have one) onto this
+// app's own curated syllabus_topics wording, so every exact-string match
+// this app does between the two (year-coverage, archetype-progress, the
+// pattern picker's own topic lookup) actually succeeds instead of silently
+// excluding the archetype.
+export function buildCurriculumReconciliationPrompt(): string {
+  return `ROLE
+You are aligning already-classified exam-question chapter/topic labels
+against this app's own curated syllabus catalogue, for one board/grade/
+subject scope.
+
+INPUT
+Two lists, both scoped to the same one board/grade/subject:
+- "unmatched": distinct (chapter, topic) pairs already assigned to real
+  mined questions that do NOT exactly match any real syllabus entry
+  (paraphrased, differently punctuated, missing/extra words, or
+  genuinely wrong) -- each with "count", how many questions currently
+  carry it.
+- "syllabus": the complete, authoritative list of real (chapter, topic)
+  pairs for this exact scope, taken directly from this app's own
+  curriculum catalogue. This is the ONLY set of values a mapping's
+  to_chapter/to_topic may use -- copy them verbatim, character for
+  character, do not paraphrase or alter punctuation.
+
+TASK
+For each entry in "unmatched" that genuinely refers to the SAME real
+chapter/topic as one entry in "syllabus" -- just worded, punctuated, or
+scoped differently -- output a mapping from the unmatched pair onto that
+syllabus pair. Some "unmatched" entries may be genuinely different from
+anything in "syllabus" (e.g. a chapter since removed from the current
+syllabus, or a stray misclassification into the wrong grade entirely, or
+too vague/generic to confidently place) -- do NOT force a mapping for
+these; omit them.
+
+BE CONSERVATIVE. A wrong mapping silently reassigns real, already-mined
+questions to the wrong topic -- worse than leaving a genuinely
+unresolved pair alone (it just keeps not matching anything, the same
+state it's already in). Only map a pair you are confident refers to the
+exact same real-world chapter/topic as a specific syllabus entry.
+
+SCHEMA
+Return one entry per confident mapping -- omit anything you're not
+confident about:
+{
+  "from_chapter": "<verbatim, copied EXACTLY from the unmatched list>",
+  "from_topic": "<verbatim, copied EXACTLY from the unmatched list>",
+  "to_chapter": "<verbatim, copied EXACTLY from one syllabus entry>",
+  "to_topic": "<verbatim, copied EXACTLY from the SAME syllabus entry>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of mapping objects matching the SCHEMA
+above (empty array if nothing in "unmatched" confidently matches
+anything in "syllabus"). No markdown, no explanatory prose.`;
+}
