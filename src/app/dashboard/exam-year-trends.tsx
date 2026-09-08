@@ -144,6 +144,13 @@ export function ExamYearTrends({
                   // signal than one that only happened to hit a year the
                   // student currently has checked.
                   const askedEveryYear = coverage.years.length >= 2 && row.years.length === coverage.years.length;
+                  // Same "did it hit a year you actually checked" filter
+                  // the top-level row already got -- a sub-topic can have
+                  // its own narrower year coverage than its parent (it's
+                  // only some of the archetypes contributing to the
+                  // parent's own year list), so it needs the same check
+                  // rather than inheriting the parent's pass automatically.
+                  const visibleSubTopics = row.subTopics.filter((st) => st.years.some((y) => checkedYears.has(y)));
                   return (
                     <li key={row.topic.id}>
                       <button
@@ -164,6 +171,24 @@ export function ExamYearTrends({
                         </span>
                         <span className="shrink-0 text-[10px] font-medium text-foreground/40">{row.years.join(", ")}</span>
                       </button>
+                      {/* Informational only, not its own click target -- there's
+                          no finer-grained selection this app's chat flow
+                          supports below a syllabus topic, so tapping one of
+                          these would have nowhere more specific to go than
+                          the parent row above already leads to. */}
+                      {visibleSubTopics.length > 0 && (
+                        <ul className="ml-4 mt-0.5 space-y-0.5 border-l border-border pl-2">
+                          {visibleSubTopics.map((st) => (
+                            <li
+                              key={st.topic}
+                              className="flex items-center justify-between gap-2 px-2 py-0.5 text-xs text-foreground/50"
+                            >
+                              <span>{st.topic}</span>
+                              <span className="shrink-0 text-[10px] text-foreground/35">{st.years.join(", ")}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
                   );
                 })}

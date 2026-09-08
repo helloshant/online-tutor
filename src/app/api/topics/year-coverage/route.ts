@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getArchetypesWithChapterTopic } from "@/lib/archetypeCoverage";
+import { getArchetypesWithChapterTopic, UNKNOWN_TOPIC, type ArchetypeWithChapterTopic } from "@/lib/archetypeCoverage";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
@@ -19,7 +19,25 @@ import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 // SyllabusTopic) callback TopicList already uses -- clicking a topic here
 // drops into the exact same chat-summary-plus-pattern-picker flow, rather
 // than this page needing its own parallel practice UI.
-export type TopicYearCoverage = { topic: SyllabusTopic; years: number[] };
+// One archetype's own resolvedTopic (see archetypeCoverage.ts's own
+// comment: the most common curriculum.topic among that ONE archetype's
+// supporting questions) -- deliberately NOT the raw per-question
+// curriculum.topic, which is far noisier: confirmed directly against real
+// data, a single syllabus chapter's own mined questions carry topic
+// strings like "Drugs and Substance Abuse", "Drug and Alcohol Abuse",
+// "Drugs and Their Effects", and "Drug Abuse and its Effects" for what's
+// really the same underlying idea (curriculum.topic was deliberately never
+// reconciled the way curriculum.chapter is -- see curriculumReconciliation.ts's
+// own top comment on why that pair-level reconciliation doesn't work).
+// resolvedTopic is already one step cleaner since Stage 2's own clustering
+// grouped the underlying questions into one archetype first, but it can
+// still show near-duplicate phrasing ACROSS different archetypes under the
+// same chapter -- shown as-is here rather than attempting a fuzzy merge
+// with no more grounding than free-text similarity, the same class of
+// unreliable judgment this session's own off-scope-content-scan work
+// found repeatedly not safe to trust for anything automatic.
+export type SubTopicYearCoverage = { topic: string; years: number[] };
+export type TopicYearCoverage = { topic: SyllabusTopic; years: number[]; subTopics: SubTopicYearCoverage[] };
 export type YearCoverageResponse = { years: number[]; topics: TopicYearCoverage[] };
 
 // See its own use below -- coerces a possibly-string year to a real
@@ -86,6 +104,20 @@ async function handleGet(request: Request) {
   const gradeOrYear = toArchetypeGradeOrYear(grade.name);
   const archetypeRows = await getArchetypesWithChapterTopic(admin, { board: board.name, grade: gradeOrYear, subject: subject.name });
 
+  // toYear guards against a real production data-quality issue: a model
+  // occasionally emitted a year as a numeric STRING ("2025") instead of a
+  // number, inconsistently within the same archetype's own years_observed
+  // array -- an unguarded `new Set` here treats 2025 and "2025" as
+  // different values (JS !== on mixed types), which showed the same year
+  // twice in a pill row. See the archetype-miner service's own
+  // textCoercion.ts for the source-side fix; this guards the read side
+  // too since the data can't be trusted to always be clean numbers.
+  function distinctYears(rows: ArchetypeWithChapterTopic[]): number[] {
+    return Array.from(new Set(rows.flatMap((a) => (a.archetype.stats?.years_observed ?? []).map(toYear)).filter((y): y is number => y !== null))).sort(
+      (a, b) => a - b
+    );
+  }
+
   // Same EITHER-field match as archetype-progress -- see that route's own
   // comment on why syllabus_topics' two different chapter/topic
   // granularity conventions both need checking, not just t.chapter.
@@ -95,20 +127,31 @@ async function handleGet(request: Request) {
     const matching = archetypeRows.filter(
       (a) => normalize(a.resolvedChapter) === normalize(t.chapter) || normalize(a.resolvedChapter) === normalize(t.topic)
     );
-    // toYear guards against a real production data-quality issue: a model
-    // occasionally emitted a year as a numeric STRING ("2025") instead of
-    // a number, inconsistently within the same archetype's own
-    // years_observed array -- an unguarded `new Set` here treats 2025 and
-    // "2025" as different values (JS !== on mixed types), which showed
-    // the same year twice in this exact pill row. See the archetype-miner
-    // service's own textCoercion.ts for the source-side fix; this guards
-    // the read side too since the data can't be trusted to always be
-    // clean numbers.
-    const years = Array.from(new Set(matching.flatMap((a) => (a.archetype.stats?.years_observed ?? []).map(toYear)).filter((y): y is number => y !== null))).sort(
-      (a, b) => a - b
-    );
+    const years = distinctYears(matching);
     for (const y of years) allYears.add(y);
-    return { topic: t, years };
+
+    // See SubTopicYearCoverage's own comment on what these are (each
+    // MATCHING archetype's own resolvedTopic, not raw per-question
+    // curriculum.topic) and why they're shown as-is. Grouped by exact
+    // string -- two archetypes that happen to share the same resolvedTopic
+    // combine into one row with their years unioned; UNKNOWN_TOPIC (no
+    // supporting question had a usable curriculum.topic at all) is
+    // dropped, same as an unresolved chapter never gets its own row above.
+    const byResolvedTopic = new Map<string, ArchetypeWithChapterTopic[]>();
+    for (const a of matching) {
+      if (a.resolvedTopic === UNKNOWN_TOPIC) continue;
+      const group = byResolvedTopic.get(a.resolvedTopic);
+      if (group) group.push(a);
+      else byResolvedTopic.set(a.resolvedTopic, [a]);
+    }
+    const subTopics: SubTopicYearCoverage[] = Array.from(byResolvedTopic.entries())
+      .map(([topic, rows]) => ({ topic, years: distinctYears(rows) }))
+      // Most-covered first -- the same "worth a student's attention"
+      // ordering the chapter list's own "every year" badge already
+      // signals, just applied one level down.
+      .sort((a, b) => b.years.length - a.years.length || a.topic.localeCompare(b.topic));
+
+    return { topic: t, years, subTopics };
   });
 
   return NextResponse.json({
