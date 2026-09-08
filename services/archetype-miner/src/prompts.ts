@@ -1021,6 +1021,21 @@ easy, oddly worded, or an OCR-damaged fragment -- none of those is a
 subject/grade mismatch. Only flag genuine cross-subject or cross-grade
 content.
 
+Do NOT flag a question just because it covers a different CHAPTER or TOPIC
+than most of the other questions in this same batch. A batch is an
+arbitrary slice of a scope's own questions, not one paper or one chapter
+-- questions from several different chapters of the SAME declared
+subject and grade, mixed together in the same batch, is the NORMAL,
+EXPECTED case, not a signal of anything wrong. Confirmed as a real
+mistake this check has already made once: a Biology question about PCR
+and restriction enzymes (the Biotechnology chapter) was wrongly flagged
+as off-scope because most of the OTHER questions in its batch happened
+to be about Reproduction -- but Biotechnology and Reproduction are both
+completely legitimate chapters of the SAME Grade 12 Biology syllabus.
+That is never off-scope. Judge each question ONLY against the declared
+board/grade/subject at the top of this prompt, in isolation -- never
+against what chapter the rest of the batch happens to be about.
+
 BE CONSERVATIVE. This determines whether real, already-mined content gets
 excluded from the catalogue and an archetype built on it gets removed --
 a false positive here silently discards legitimate content, worse than
