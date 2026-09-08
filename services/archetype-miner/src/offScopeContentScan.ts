@@ -47,7 +47,11 @@ const TEXT_TRUNCATE_LENGTH = 500;
 const BATCH_SIZE = 40;
 const MAX_TOKENS = 3000;
 
-type SignatureRow = { run_id: string; question_id: string; signature: { flags?: string[] } };
+type SignatureRow = { run_id: string; question_id: string; signature: { flags?: string[]; curriculum?: { chapter?: string } } };
+
+function normalize(s: string): string {
+  return s.trim().toLowerCase();
+}
 type SegmentedQuestionRow = { run_id: string; question_id: string; question: { raw_text?: string; cleaned_text?: string } };
 type Scope = { boardName: string; gradeName: string; subjectName: string };
 
@@ -111,10 +115,29 @@ async function loadTextByRef(scope: Scope): Promise<Map<string, string>> {
 
 type Candidate = { ref: string; runId: string; questionId: string; text: string };
 
-async function loadCandidates(scope: Scope): Promise<Candidate[]> {
+// The single biggest source of every false positive found so far: asking
+// an LLM to re-derive "does this content match the subject" from raw
+// text, for EVERY question, even the ones already correctly classified.
+// Stage 1 already assigned curriculum.chapter to every question at mining
+// time -- when that stored value is an EXACT match to a real syllabus
+// entry (the same ground truth the LLM check below is given), the
+// question is unambiguously in-scope BY CONSTRUCTION and needs no LLM
+// judgment at all: a plain string comparison against syllabus_topics
+// can't suffer a vocabulary-override mistake the way free-text reasoning
+// can. This is the reason a question about osmosis or vitamin deficiency
+// diseases -- already correctly classified as "Solutions" or
+// "Biomolecules" -- should never have reached the LLM step in the first
+// place. Only a question whose stored chapter does NOT already match
+// (either genuinely off-scope content, or a chapter-name variant
+// curriculum reconciliation hasn't normalized yet) is genuinely
+// ambiguous enough to need the LLM's judgment.
+async function loadCandidates(scope: Scope, syllabus: string[]): Promise<Candidate[]> {
   const [signatures, textByRef] = await Promise.all([loadSignaturesInScope(scope), loadTextByRef(scope)]);
+  const syllabusKeys = new Set(syllabus.map(normalize));
   const candidates: Candidate[] = [];
   for (const s of signatures) {
+    const chapter = s.signature?.curriculum?.chapter?.trim();
+    if (chapter && syllabusKeys.has(normalize(chapter))) continue;
     const ref = refKey(s.run_id, s.question_id);
     const text = textByRef.get(ref);
     if (text) candidates.push({ ref, runId: s.run_id, questionId: s.question_id, text });
@@ -126,7 +149,8 @@ export type OffScopeScanPreview = { candidateQuestions: number };
 
 // Counts only -- no LLM call, no writes.
 export async function previewOffScopeContentScan(scope: Scope): Promise<OffScopeScanPreview> {
-  const candidates = await loadCandidates(scope);
+  const syllabus = await loadAcceptableChapterValues(scope);
+  const candidates = await loadCandidates(scope, syllabus);
   return { candidateQuestions: candidates.length };
 }
 
@@ -370,7 +394,7 @@ async function runOffScopeContentScanOnePass(
   provider: LlmProvider
 ): Promise<{ questionsScanned: number; questionsFlagged: number }> {
   const supabase = getSupabaseClient();
-  const candidates = await loadCandidates(scope);
+  const candidates = await loadCandidates(scope, syllabus);
   if (candidates.length === 0) return { questionsScanned: 0, questionsFlagged: 0 };
 
   const batches: Candidate[][] = [];
