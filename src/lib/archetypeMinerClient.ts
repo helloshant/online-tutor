@@ -256,21 +256,24 @@ export async function startCrossRunMerge(
 
 export type CurriculumReconciliationScope = { boardName: string; gradeName: string; subjectName: string };
 export type CurriculumReconciliationPreview = {
-  unmatchedPairs: number;
+  unmatchedChapters: number;
   affectedQuestions: number;
-  syllabusPairsAvailable: number;
+  syllabusValuesAvailable: number;
   inProgress: boolean;
 };
 
 // See the service's own curriculumReconciliation.ts for what this fixes
-// and why -- already-mined questions whose curriculum.chapter/topic don't
+// and why -- already-mined questions whose curriculum.chapter doesn't
 // exactly match this app's own curated syllabus_topics wording, which
 // silently excludes them from every exact-string match this app does
 // against a real syllabus topic (year-coverage, archetype-progress, the
-// pattern picker's own lookup). Same scoped, human-triggered,
-// preview-first shape as cross-run merge above, for the same reason -- a
-// wrong mapping is a real, silent data error, not just a missed
-// opportunity.
+// pattern picker's own lookup). curriculum.topic is deliberately left
+// alone (see that file's own comment on why reconciling the full
+// chapter+topic pair together doesn't work -- the two systems use
+// genuinely different granularities for "topic"). Same scoped,
+// human-triggered, preview-first shape as cross-run merge above, for the
+// same reason -- a wrong mapping is a real, silent data error, not just a
+// missed opportunity.
 export async function previewCurriculumReconciliation(scope: CurriculumReconciliationScope): Promise<CurriculumReconciliationPreview> {
   const params = new URLSearchParams(scope);
   const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/preview?${params}`;
@@ -284,20 +287,24 @@ export async function previewCurriculumReconciliation(scope: CurriculumReconcili
   if (!res.ok) {
     throw new Error(body?.error ?? `Curriculum reconciliation preview failed with status ${res.status}`);
   }
-  if (typeof body?.unmatchedPairs !== "number" || typeof body?.affectedQuestions !== "number" || typeof body?.syllabusPairsAvailable !== "number") {
+  if (
+    typeof body?.unmatchedChapters !== "number" ||
+    typeof body?.affectedQuestions !== "number" ||
+    typeof body?.syllabusValuesAvailable !== "number"
+  ) {
     throw new Error("Archetype-miner returned an unexpected response shape");
   }
   return {
-    unmatchedPairs: body.unmatchedPairs,
+    unmatchedChapters: body.unmatchedChapters,
     affectedQuestions: body.affectedQuestions,
-    syllabusPairsAvailable: body.syllabusPairsAvailable,
+    syllabusValuesAvailable: body.syllabusValuesAvailable,
     inProgress: Boolean(body.inProgress),
   };
 }
 
 export async function startCurriculumReconciliation(
   scope: CurriculumReconciliationScope
-): Promise<{ started: boolean; unmatchedPairs: number; affectedQuestions: number }> {
+): Promise<{ started: boolean; unmatchedChapters: number; affectedQuestions: number }> {
   const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/run`;
   const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
 
@@ -313,10 +320,10 @@ export async function startCurriculumReconciliation(
   if (!res.ok) {
     throw new Error(body?.error ?? `Curriculum reconciliation failed to start with status ${res.status}`);
   }
-  if (typeof body?.started !== "boolean" || typeof body?.unmatchedPairs !== "number" || typeof body?.affectedQuestions !== "number") {
+  if (typeof body?.started !== "boolean" || typeof body?.unmatchedChapters !== "number" || typeof body?.affectedQuestions !== "number") {
     throw new Error("Archetype-miner returned an unexpected response shape");
   }
-  return { started: body.started, unmatchedPairs: body.unmatchedPairs, affectedQuestions: body.affectedQuestions };
+  return { started: body.started, unmatchedChapters: body.unmatchedChapters, affectedQuestions: body.affectedQuestions };
 }
 
 export async function mineArchetypeFamilies(

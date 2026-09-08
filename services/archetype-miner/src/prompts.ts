@@ -853,47 +853,48 @@ batch -- the common case). No markdown, no explanatory prose.`;
 // excluding the archetype.
 export function buildCurriculumReconciliationPrompt(): string {
   return `ROLE
-You are aligning already-classified exam-question chapter/topic labels
-against this app's own curated syllabus catalogue, for one board/grade/
-subject scope.
+You are aligning already-classified exam-question CHAPTER labels against
+this app's own curated syllabus catalogue, for one board/grade/subject
+scope.
 
 INPUT
 Two lists, both scoped to the same one board/grade/subject:
-- "unmatched": distinct (chapter, topic) pairs already assigned to real
-  mined questions that do NOT exactly match any real syllabus entry
-  (paraphrased, differently punctuated, missing/extra words, or
-  genuinely wrong) -- each with "count", how many questions currently
-  carry it.
-- "syllabus": the complete, authoritative list of real (chapter, topic)
-  pairs for this exact scope, taken directly from this app's own
-  curriculum catalogue. This is the ONLY set of values a mapping's
-  to_chapter/to_topic may use -- copy them verbatim, character for
-  character, do not paraphrase or alter punctuation.
+- "unmatched": distinct chapter values already assigned to real mined
+  questions that do NOT exactly match any real syllabus value
+  (paraphrased, differently punctuated, misspelled, a stray
+  misclassification, or genuinely wrong) -- each with "count", how many
+  questions currently carry it.
+- "syllabus": the complete, authoritative list of real chapter/topic
+  values for this exact scope, taken directly from this app's own
+  curriculum catalogue -- either one is an equally valid, equally
+  "correct" target (this app treats them interchangeably for this
+  purpose). This is the ONLY set of values a mapping's to_chapter may
+  use -- copy the chosen one verbatim, character for character, do not
+  paraphrase or alter punctuation.
 
 TASK
 For each entry in "unmatched" that genuinely refers to the SAME real
-chapter/topic as one entry in "syllabus" -- just worded, punctuated, or
-scoped differently -- output a mapping from the unmatched pair onto that
-syllabus pair. Some "unmatched" entries may be genuinely different from
+chapter as one entry in "syllabus" -- just worded, punctuated, or spelled
+differently -- output a mapping from the unmatched value onto that
+syllabus value. Some "unmatched" entries may be genuinely different from
 anything in "syllabus" (e.g. a chapter since removed from the current
-syllabus, or a stray misclassification into the wrong grade entirely, or
-too vague/generic to confidently place) -- do NOT force a mapping for
-these; omit them.
+syllabus, a stray misclassification into the wrong grade/subject
+entirely, or too vague/generic to confidently place -- "General
+Instructions", "Writing Skills") -- do NOT force a mapping for these;
+omit them.
 
 BE CONSERVATIVE. A wrong mapping silently reassigns real, already-mined
-questions to the wrong topic -- worse than leaving a genuinely
-unresolved pair alone (it just keeps not matching anything, the same
-state it's already in). Only map a pair you are confident refers to the
-exact same real-world chapter/topic as a specific syllabus entry.
+questions to the wrong chapter -- worse than leaving a genuinely
+unresolved value alone (it just keeps not matching anything, the same
+state it's already in). Only map a value you are confident refers to the
+exact same real-world chapter as a specific syllabus entry.
 
 SCHEMA
 Return one entry per confident mapping -- omit anything you're not
 confident about:
 {
   "from_chapter": "<verbatim, copied EXACTLY from the unmatched list>",
-  "from_topic": "<verbatim, copied EXACTLY from the unmatched list>",
-  "to_chapter": "<verbatim, copied EXACTLY from one syllabus entry>",
-  "to_topic": "<verbatim, copied EXACTLY from the SAME syllabus entry>"
+  "to_chapter": "<verbatim, copied EXACTLY from one syllabus entry>"
 }
 
 OUTPUT

@@ -7,19 +7,24 @@ import { runCurriculumReconciliationAction } from "../actions";
 import { AutoSubmitSelect } from "../auto-submit-select";
 
 // See the service's own curriculumReconciliation.ts for what this catches:
-// already-mined questions whose curriculum.chapter/topic don't exactly
-// match this app's own curated syllabus_topics wording -- confirmed
-// directly in production, e.g. "Biotechnology Principles and Processes"
-// vs the syllabus's own "Biotechnology: Principles and Processes",
-// "Origin of Life and Evolution" vs "Evolution". A mismatch like this
-// doesn't error anywhere -- it just silently excludes that question's
-// archetype from ever surfacing under its real topic (year-coverage,
+// already-mined questions whose curriculum.chapter doesn't exactly match
+// this app's own curated syllabus_topics wording -- confirmed directly in
+// production, e.g. "Biotechnology Principles and Processes" vs the
+// syllabus's own "Biotechnology: Principles and Processes", "Origin of
+// Life and Evolution" vs "Evolution" (over 100 distinct chapter variants
+// against 13 real chapters, for just one real scope). curriculum.topic is
+// deliberately left alone -- see that file's own comment on why
+// reconciling the full chapter+topic pair together doesn't work; the two
+// systems use genuinely different granularities for "topic", and nothing
+// student-facing needs topic to match anyway. A chapter mismatch doesn't
+// error anywhere -- it just silently excludes that question's archetype
+// from ever surfacing under its real topic (year-coverage,
 // archetype-progress, the pattern picker's own lookup all require an
-// EXACT match). Always scoped to one explicit board/grade/subject (same
-// select-then-preview-then-run shape cross-run-merge/coverage already
-// use) -- a wrong mapping silently reassigns real questions to the wrong
-// topic, so this is a deliberate, human-triggered action per scope, never
-// a blind whole-catalogue sweep.
+// EXACT chapter match). Always scoped to one explicit board/grade/subject
+// (same select-then-preview-then-run shape cross-run-merge/coverage
+// already use) -- a wrong mapping silently reassigns real questions to
+// the wrong chapter, so this is a deliberate, human-triggered action per
+// scope, never a blind whole-catalogue sweep.
 export default async function CurriculumReconciliationPage({
   searchParams,
 }: {
@@ -48,17 +53,18 @@ export default async function CurriculumReconciliationPage({
         ← Archetype Miner
       </Link>
 
-      <h1 className="mt-4 text-xl font-semibold">Curriculum chapter/topic reconciliation</h1>
+      <h1 className="mt-4 text-xl font-semibold">Curriculum chapter reconciliation</h1>
       <p className="mt-1 max-w-3xl text-sm text-foreground/60">
-        Stage 1 classifies each question&apos;s chapter/topic from its own judgment whenever no
-        taxonomy document anchors it to this app&apos;s own curated syllabus wording -- producing
-        text that&apos;s topically right but doesn&apos;t exactly match it (a colon, an extra word, a
-        different phrasing). Every place that matches a mined archetype back to a real syllabus
-        topic requires an exact string match, so a mismatch like this silently excludes that
-        question from ever showing up under its real topic. This finds every already-mined
-        chapter/topic pair that doesn&apos;t match the real syllabus for one board/grade/subject, and
+        Stage 1 classifies each question&apos;s chapter from its own judgment whenever no taxonomy
+        document anchors it to this app&apos;s own curated syllabus wording -- producing text
+        that&apos;s topically right but doesn&apos;t exactly match it (a colon, an extra word, a
+        typo, a different phrasing). Every place that matches a mined archetype back to a real
+        syllabus topic requires an exact chapter match, so a mismatch like this silently excludes
+        that question from ever showing up under its real topic. This finds every already-mined
+        chapter value that doesn&apos;t match the real syllabus for one board/grade/subject, and
         uses real semantic judgment (an LLM call) to remap it onto the correct syllabus entry -- or
-        leaves it alone when there&apos;s no confident match.
+        leaves it alone when there&apos;s no confident match. Only curriculum.chapter is touched;
+        the finer-grained curriculum.topic each question already carries is left exactly as mined.
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
@@ -117,7 +123,7 @@ export default async function CurriculumReconciliationPage({
       {!scopeChosen && (
         <p className="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-2 text-sm text-yellow-800">
           Pick a board, grade, and subject above to see whether this scope has any unreconciled
-          chapter/topic pairs.
+          chapter values.
         </p>
       )}
 
@@ -127,21 +133,21 @@ export default async function CurriculumReconciliationPage({
         </p>
       )}
 
-      {scopeChosen && preview && preview.syllabusPairsAvailable === 0 && (
+      {scopeChosen && preview && preview.syllabusValuesAvailable === 0 && (
         <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
           No syllabus_topics rows exist for this exact board/grade/subject scope -- there&apos;s
           nothing real to reconcile against here.
         </p>
       )}
 
-      {scopeChosen && preview && preview.syllabusPairsAvailable > 0 && preview.unmatchedPairs === 0 && (
+      {scopeChosen && preview && preview.syllabusValuesAvailable > 0 && preview.unmatchedChapters === 0 && (
         <p className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
-          Every mined chapter/topic pair in this scope already matches the real syllabus -- nothing
-          to reconcile here.
+          Every mined chapter value in this scope already matches the real syllabus -- nothing to
+          reconcile here.
         </p>
       )}
 
-      {scopeChosen && preview && preview.syllabusPairsAvailable > 0 && preview.unmatchedPairs > 0 && (
+      {scopeChosen && preview && preview.syllabusValuesAvailable > 0 && preview.unmatchedChapters > 0 && (
         <form
           action={runCurriculumReconciliationAction}
           className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm text-purple-800"
@@ -150,7 +156,7 @@ export default async function CurriculumReconciliationPage({
           <input type="hidden" name="gradeName" value={grade} />
           <input type="hidden" name="subjectName" value={subject} />
           <p>
-            {preview.unmatchedPairs} chapter/topic pair(s) ({preview.affectedQuestions} question(s) total) in this
+            {preview.unmatchedChapters} chapter value(s) ({preview.affectedQuestions} question(s) total) in this
             scope don&apos;t exactly match the real syllabus -- worth checking for a fixable mismatch.
             {preview.inProgress && (
               <span className="ml-1 font-medium">

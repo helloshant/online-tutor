@@ -579,7 +579,7 @@ app.post("/v1/curriculum-reconciliation/run", requireSharedSecret, async (req: R
     res.status(502).json({ error: "Failed to preview curriculum reconciliation" });
     return;
   }
-  if (preview.unmatchedPairs === 0) {
+  if (preview.unmatchedChapters === 0) {
     res.json({ started: false, ...preview });
     return;
   }
