@@ -121,8 +121,12 @@ async function resolveSyllabusScopeIds(
 // The union of every real syllabus_topics.chapter AND .topic value for
 // this scope -- either field satisfies the app's own EITHER-field match
 // (see archetypeCoverage.ts), so both are valid targets for a mined
-// chapter to be remapped onto.
-async function loadAcceptableChapterValues(params: { boardName: string; gradeName: string; subjectName: string }): Promise<string[]> {
+// chapter to be remapped onto. Exported for offScopeContentScan.ts's own
+// use too (see that file's own comment on why it needs this same list) --
+// both files live in this one service, so this is a normal shared
+// internal import, not the cross-service duplication this repo's own
+// convention otherwise accepts for small helpers.
+export async function loadAcceptableChapterValues(params: { boardName: string; gradeName: string; subjectName: string }): Promise<string[]> {
   const supabase = getSupabaseClient();
   const ids = await resolveSyllabusScopeIds(supabase, params);
   if (!ids) return [];

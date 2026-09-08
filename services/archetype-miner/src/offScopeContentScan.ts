@@ -3,6 +3,7 @@ import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildOffScopeContentScanPrompt } from "./prompts.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import { OFF_SCOPE_CONTENT_FLAG, type Archetype } from "./types.js";
+import { loadAcceptableChapterValues } from "./curriculumReconciliation.js";
 
 // A retroactive sweep for the SAME thing pipelineRunner.ts's own
 // OFF_SCOPE_CONTENT_FLAG check now catches going forward at mining time
@@ -20,6 +21,20 @@ import { OFF_SCOPE_CONTENT_FLAG, type Archetype } from "./types.js";
 // false positive here would wrongly discard real content and remove a
 // legitimate archetype, so this is a deliberate, human-triggered sweep,
 // never a blind whole-catalogue pass.
+//
+// Confirmed live in production, twice, before this got the fix it needed:
+// without real ground truth to check against, the model's own vague
+// notion of "general [subject]" is not reliable -- it repeatedly flagged
+// genuine chapters of the declared subject (Biotechnology, Evolution,
+// Ecology, drug-abuse content under Human Health and Disease, all real
+// Grade 12 CBSE Biology) as if they belonged to some OTHER subject
+// entirely, reasoning things like "Biotechnology, not general Biology"
+// or "Anthropology, not core Biology." One run alone wrongly auto-removed
+// 5 real, live archetypes this way. The fix: reuse curriculumReconciliation.ts's
+// own loadAcceptableChapterValues() to hand the model the REAL syllabus
+// chapter list for this scope as authoritative ground truth (see the
+// prompt's own comment on this), instead of trusting its own guess at
+// what the subject "generally" covers.
 const PAGE_SIZE = 1000;
 // Kept short deliberately -- a subject/grade sanity check needs only the
 // GIST of a question, not its full derivation/case-study text, and a
@@ -116,13 +131,19 @@ type Flagged = { ref: string; reason: string };
 // Below this, a failing batch is skipped rather than bisected further.
 const MIN_BISECTION_SIZE = 5;
 
-async function requestFlagsOnce(batch: Candidate[], scope: Scope, provider: LlmProvider): Promise<Flagged[]> {
+async function requestFlagsOnce(batch: Candidate[], scope: Scope, syllabus: string[], provider: LlmProvider): Promise<Flagged[]> {
   const { data } = await getJsonCompletion({
     systemPrompt: buildOffScopeContentScanPrompt(),
     message: JSON.stringify({
       board: scope.boardName,
       grade: scope.gradeName,
       subject: scope.subjectName,
+      // The real, authoritative chapter/topic list for this scope -- see
+      // this file's own top comment and the prompt's own INPUT section
+      // for why this is the fix for the false positives already
+      // confirmed live. Omitted (empty array) falls back to the model's
+      // own subject-matter knowledge, same as when no taxonomy exists.
+      syllabus,
       questions: batch.map((c) => ({ ref: c.ref, text: c.text })),
     }),
     maxTokens: MAX_TOKENS,
@@ -154,9 +175,9 @@ async function requestFlagsOnce(batch: Candidate[], scope: Scope, provider: LlmP
 // already been confirmed, live, to trip Azure OpenAI's own content
 // filter. Losing a whole batch to one poison-pill question would
 // otherwise silently skip every OTHER question in it, indefinitely.
-async function requestFlagsResilient(batch: Candidate[], scope: Scope, provider: LlmProvider): Promise<Flagged[]> {
+async function requestFlagsResilient(batch: Candidate[], scope: Scope, syllabus: string[], provider: LlmProvider): Promise<Flagged[]> {
   try {
-    return await requestFlagsOnce(batch, scope, provider);
+    return await requestFlagsOnce(batch, scope, syllabus, provider);
   } catch (err) {
     if (batch.length <= MIN_BISECTION_SIZE) {
       console.warn(`Off-scope content scan: batch of ${batch.length} failed and is too small to bisect further -- skipping:`, err);
@@ -164,8 +185,8 @@ async function requestFlagsResilient(batch: Candidate[], scope: Scope, provider:
     }
     console.warn(`Off-scope content scan: batch of ${batch.length} failed -- bisecting to isolate the problem:`, err);
     const mid = Math.floor(batch.length / 2);
-    const left = await requestFlagsResilient(batch.slice(0, mid), scope, provider);
-    const right = await requestFlagsResilient(batch.slice(mid), scope, provider);
+    const left = await requestFlagsResilient(batch.slice(0, mid), scope, syllabus, provider);
+    const right = await requestFlagsResilient(batch.slice(mid), scope, syllabus, provider);
     return [...left, ...right];
   }
 }
@@ -262,7 +283,7 @@ async function applyFlag(supabase: ReturnType<typeof getSupabaseClient>, flagged
   }
 }
 
-export type OffScopeScanResult = { questionsScanned: number; questionsFlagged: number };
+export type OffScopeScanResult = { iterationsRun: number; questionsScanned: number; questionsFlagged: number };
 
 let scanInProgress = false;
 
@@ -270,49 +291,95 @@ export function isOffScopeContentScanInProgress(): boolean {
   return scanInProgress;
 }
 
-// Long-running (one LLM call per batch of up to 40 questions, across the
-// whole scope) -- callers should fire this in the background, same
-// posture as every other admin-triggered pass in this file's siblings.
+// A "not yet flagged" candidate that genuinely IS off-scope but the model
+// happens to miss on one pass stays a candidate forever otherwise -- there's
+// no persisted "checked and confirmed clean" marker, only "flagged" or
+// "not yet flagged." Repeating the full sweep, same self-converging
+// outer-loop shape as cross-run merge and curriculum reconciliation, means
+// an admin doesn't have to keep clicking "Scan now" by hand to get the
+// same effect. Capped low (unlike those siblings' own higher caps) since
+// EVERY iteration here re-scans the WHOLE remaining candidate pool from
+// scratch (tens of batches for a large scope), not just one small group --
+// a real per-click cost, so this stops as soon as a pass finds nothing new
+// rather than chasing a vanishingly rare last catch indefinitely.
+const MAX_ITERATIONS = 3;
+
+// Long-running (one LLM call per batch of up to 40 questions, per
+// iteration, across the whole remaining candidate pool) -- callers should
+// fire this in the background, same posture as every other admin-
+// triggered pass in this file's siblings.
 export async function runOffScopeContentScan(scope: Scope): Promise<OffScopeScanResult> {
   if (scanInProgress) {
     throw new Error("An off-scope content scan is already in progress -- wait for it to finish before starting another.");
   }
   scanInProgress = true;
   try {
-    const supabase = getSupabaseClient();
-    const candidates = await loadCandidates(scope);
-
+    // Fetched once for the whole scan, not per iteration or per batch --
+    // the real syllabus for this scope doesn't change mid-run. Empty when
+    // this app has no syllabus_topics catalogue for this exact scope; the
+    // prompt itself falls back to the model's own subject knowledge then,
+    // same posture curriculum reconciliation already accepts.
+    const syllabus = await loadAcceptableChapterValues(scope);
     console.log(
-      `Off-scope content scan: checking ${candidates.length} question(s) for ${scope.subjectName} (${scope.boardName}, grade ${scope.gradeName})...`
+      `Off-scope content scan: grounding against ${syllabus.length} real syllabus chapter/topic value(s) for ${scope.subjectName} ` +
+        `(${scope.boardName}, grade ${scope.gradeName})` +
+        (syllabus.length === 0 ? " -- none found, falling back to the model's own subject knowledge." : ".")
     );
-
-    if (candidates.length === 0) {
-      return { questionsScanned: 0, questionsFlagged: 0 };
-    }
 
     const provider = getActiveLlmProvider();
-    const batches: Candidate[][] = [];
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) batches.push(candidates.slice(i, i + BATCH_SIZE));
+    const total: OffScopeScanResult = { iterationsRun: 0, questionsScanned: 0, questionsFlagged: 0 };
 
-    let questionsFlagged = 0;
-    for (const batch of batches) {
-      const flagged = await requestFlagsResilient(batch, scope, provider);
-      const byRef = new Map(batch.map((c) => [c.ref, c]));
-      for (const f of flagged) {
-        const candidate = byRef.get(f.ref);
-        if (!candidate) continue; // a ref the model invented -- nothing safe to act on
-        await applyFlag(supabase, f, candidate.runId, candidate.questionId);
-        questionsFlagged++;
-      }
+    for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+      const pass = await runOffScopeContentScanOnePass(scope, syllabus, provider);
+      total.iterationsRun = iteration;
+      total.questionsScanned += pass.questionsScanned;
+      total.questionsFlagged += pass.questionsFlagged;
+
+      console.log(
+        `Off-scope content scan: iteration ${iteration}/${MAX_ITERATIONS} for ${scope.subjectName} (${scope.boardName}, ` +
+          `grade ${scope.gradeName}) -- ${pass.questionsScanned} scanned, ${pass.questionsFlagged} flagged this pass.`
+      );
+
+      // Converged -- a clean pass with nothing new to flag. Stop rather
+      // than spending the rest of the iteration budget re-scanning the
+      // same now-confirmed-clean pool.
+      if (pass.questionsFlagged === 0) break;
     }
 
     console.log(
-      `Off-scope content scan: done -- ${candidates.length} question(s) scanned, ${questionsFlagged} flagged as off-scope ` +
-        "(see the review queue for each one's own reason)."
+      `Off-scope content scan: done -- ${total.iterationsRun} iteration(s), ${total.questionsFlagged} total question(s) flagged as ` +
+        "off-scope (see the review queue for each one's own reason)."
     );
 
-    return { questionsScanned: candidates.length, questionsFlagged };
+    return total;
   } finally {
     scanInProgress = false;
   }
+}
+
+async function runOffScopeContentScanOnePass(
+  scope: Scope,
+  syllabus: string[],
+  provider: LlmProvider
+): Promise<{ questionsScanned: number; questionsFlagged: number }> {
+  const supabase = getSupabaseClient();
+  const candidates = await loadCandidates(scope);
+  if (candidates.length === 0) return { questionsScanned: 0, questionsFlagged: 0 };
+
+  const batches: Candidate[][] = [];
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) batches.push(candidates.slice(i, i + BATCH_SIZE));
+
+  let questionsFlagged = 0;
+  for (const batch of batches) {
+    const flagged = await requestFlagsResilient(batch, scope, syllabus, provider);
+    const byRef = new Map(batch.map((c) => [c.ref, c]));
+    for (const f of flagged) {
+      const candidate = byRef.get(f.ref);
+      if (!candidate) continue; // a ref the model invented -- nothing safe to act on
+      await applyFlag(supabase, f, candidate.runId, candidate.questionId);
+      questionsFlagged++;
+    }
+  }
+
+  return { questionsScanned: candidates.length, questionsFlagged };
 }
