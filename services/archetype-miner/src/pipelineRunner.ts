@@ -22,6 +22,7 @@ import type {
   RawPaperInput,
   SegmentedQuestion,
 } from "./types.js";
+import { OFF_SCOPE_CONTENT_FLAG } from "./types.js";
 
 // Runs entirely in-process, fire-and-forget from the API handler
 // (server.ts) -- no queue/worker infra (matches every other service in
@@ -569,7 +570,22 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       }
 
       signatures.push(result.signature);
-      if (result.signature.confidence.overall < threshold) {
+      if (result.signature.flags.includes(OFF_SCOPE_CONTENT_FLAG)) {
+        // Distinct from (and checked before) the low-confidence case
+        // below -- this isn't "the model isn't sure which chapter," it's
+        // "the model is confident this content doesn't belong to this
+        // subject/grade at all" (see OFF_SCOPE_CONTENT_FLAG's own
+        // comment). Still stored in archetype_question_signatures like
+        // any other signature (nothing here skips that insert below) --
+        // only excluded from clusterSignatures() further down, so it can
+        // never become a mined archetype's own supporting evidence.
+        stage1ReviewCandidates.push({
+          source: "stage1_off_scope_content",
+          reference_id: result.signature.question_id,
+          reason: "Stage 1 (Analyzer) flagged this question's actual content as not belonging to its declared subject/grade.",
+          confidence: result.signature.confidence.overall,
+        });
+      } else if (result.signature.confidence.overall < threshold) {
         stage1ReviewCandidates.push({
           source: "stage1_low_confidence",
           reference_id: result.signature.question_id,
@@ -591,14 +607,26 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       );
       if (error) console.error(`Failed to insert question signatures for run ${runId}:`, error);
     }
-    await queueForReview(runId, stage1ReviewCandidates);
-    await mergeStats(runId, { analyzed: signatures.length, stems_excluded: stemsExcluded });
+    // Excluded from clustering/mining -- see OFF_SCOPE_CONTENT_FLAG's own
+    // comment. Still fully present in `signatures` (and therefore in the
+    // archetype_question_signatures insert above, and in the embedding
+    // lookup below) -- only kept out of the set clusterSignatures()
+    // actually receives, so this content is stored and reviewable but can
+    // never become a mined archetype's own supporting evidence.
+    const clusterableSignatures = signatures.filter((s) => !s.flags.includes(OFF_SCOPE_CONTENT_FLAG));
+    const offScopeCount = signatures.length - clusterableSignatures.length;
 
-    if (signatures.length === 0) {
+    await queueForReview(runId, stage1ReviewCandidates);
+    await mergeStats(runId, { analyzed: signatures.length, stems_excluded: stemsExcluded, off_scope_flagged: offScopeCount });
+
+    if (clusterableSignatures.length === 0) {
       await updateRun(runId, {
         status: "completed",
         completed_at: new Date().toISOString(),
-        error: "No signatures were produced -- nothing to cluster.",
+        error:
+          signatures.length === 0
+            ? "No signatures were produced -- nothing to cluster."
+            : "Every signature produced was flagged as off-scope content -- nothing left to cluster (see the review queue).",
       });
       return;
     }
@@ -610,7 +638,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
     // ---------------------------------------------------------------
     await updateRun(runId, { status: "clustering" });
 
-    const { clusters, embeddingsByQuestionId, unembeddedQuestionIds } = await clusterSignatures(signatures);
+    const { clusters, embeddingsByQuestionId, unembeddedQuestionIds } = await clusterSignatures(clusterableSignatures);
 
     if (embeddingsByQuestionId.size > 0) {
       const embeddingRows = Array.from(embeddingsByQuestionId.entries()).map(([questionId, vector]) => {
