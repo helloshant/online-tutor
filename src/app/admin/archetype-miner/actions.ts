@@ -13,6 +13,7 @@ import {
   startStudentExplanationBackfill,
   startCrossRunMerge,
   startCurriculumReconciliation,
+  startOffScopeContentScan,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
 import { buildTaxonomyTextFromSyllabus } from "@/lib/syllabusTaxonomyText";
@@ -458,6 +459,35 @@ export async function runCurriculumReconciliationAction(formData: FormData): Pro
     console.error("Failed to start curriculum reconciliation:", err);
   }
   revalidatePath("/admin/archetype-miner/curriculum-reconciliation");
+}
+
+// See the service's own offScopeContentScan.ts for what this catches --
+// content that reached the catalogue before mining-time detection existed:
+// a question that's actually a different subject entirely, or actually a
+// different grade's own syllabus content. Same scope shape as
+// readCurriculumReconciliationFormScope above, for the same reason.
+function readOffScopeScanFormScope(formData: FormData): { boardName: string; gradeName: string; subjectName: string } {
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName) {
+    throw new Error("Board, grade, and subject are all required.");
+  }
+  return { boardName, gradeName, subjectName };
+}
+
+export async function runOffScopeContentScanAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const scope = readOffScopeScanFormScope(formData);
+  try {
+    await startOffScopeContentScan(scope);
+  } catch (err) {
+    // Same reasoning as runCrossRunMergeAction's own catch -- the button
+    // is disabled while a pass for this scope is running, so this should
+    // be rare.
+    console.error("Failed to start off-scope content scan:", err);
+  }
+  revalidatePath("/admin/archetype-miner/off-scope-content-scan");
 }
 
 // Curriculum taxonomy documents are plain admin CRUD against Supabase

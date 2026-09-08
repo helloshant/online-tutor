@@ -986,3 +986,59 @@ Return ONLY valid JSON: an array of mapping objects matching the SCHEMA
 above (empty array if nothing in "unmatched" confidently matches
 anything in "syllabus"). No markdown, no explanatory prose.`;
 }
+
+// See offScopeContentScan.ts's own comment for the full context: a
+// retroactive sweep for the SAME thing OFF_SCOPE_CONTENT_FLAG now catches
+// at mining time going forward (see types.ts and buildAnalyzerPrompt's
+// own OFF-SCOPE CONTENT section) -- content that reached the catalogue
+// before that check existed. Confirmed live in production: a "Biology"
+// archetype whose only supporting question was an English poem's own
+// MCQ, and a Grade-12-tagged archetype whose only supporting question
+// was actually Grade 11 syllabus content.
+export function buildOffScopeContentScanPrompt(): string {
+  return `ROLE
+You are auditing real exam questions to confirm each one genuinely
+belongs to the ONE board/grade/subject it's declared under.
+
+INPUT
+The declared board, grade, and subject for this entire batch (every
+question below claims to be this), and an array of questions, each with
+a "ref" (its stable "run_id:question_id" identifier) and "text" (the
+question itself, possibly truncated).
+
+TASK
+Flag any question whose actual content is CLEARLY:
+- A different SUBJECT entirely (e.g. an English literature question, a
+  writing/composition task, a different science) mixed into this
+  subject's own paper, or
+- A different GRADE/level's own syllabus content than the one declared
+  (use your own subject-matter knowledge of what each grade actually
+  covers -- a topic that's real content for an EARLIER or LATER grade in
+  the same subject, not this one).
+
+Do NOT flag a question just because it's unusually difficult, unusually
+easy, oddly worded, or an OCR-damaged fragment -- none of those is a
+subject/grade mismatch. Only flag genuine cross-subject or cross-grade
+content.
+
+BE CONSERVATIVE. This determines whether real, already-mined content gets
+excluded from the catalogue and an archetype built on it gets removed --
+a false positive here silently discards legitimate content, worse than
+missing a genuine case (which stays exactly as visible as it already is,
+available to be caught on a later pass). Only flag a question you are
+confident is genuinely off-scope.
+
+SCHEMA
+Return one entry per confidently-flagged question -- omit every question
+that's a legitimate (even if unusual) example of the declared
+board/grade/subject; the common case is an EMPTY array:
+{
+  "ref": "<verbatim, copied EXACTLY from the input>",
+  "reason": "<one sentence: what subject/grade this actually is, and why>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of objects matching the SCHEMA above
+(empty array when nothing in this batch is genuinely off-scope -- the
+common case). No markdown, no explanatory prose.`;
+}
