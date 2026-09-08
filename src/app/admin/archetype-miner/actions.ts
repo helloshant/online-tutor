@@ -13,6 +13,8 @@ import {
   startStudentExplanationBackfill,
   startCrossRunMerge,
   startCurriculumReconciliation,
+  attachChapterMapping,
+  ignoreUnmatchedChapter,
   startOffScopeContentScan,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
@@ -459,6 +461,45 @@ export async function runCurriculumReconciliationAction(formData: FormData): Pro
     console.error("Failed to start curriculum reconciliation:", err);
   }
   revalidatePath("/admin/archetype-miner/curriculum-reconciliation");
+}
+
+// The human-in-the-loop counterpart to runCurriculumReconciliationAction
+// above -- see the service's own curriculumReconciliation.ts "Cross-scope
+// manual review" section. Unlike that action, this is a foreground
+// mutation with an immediate, single-row result (not a fire-and-forget
+// background pass), so a failure is thrown rather than swallowed-and-
+// logged -- same posture saveTaxonomyAction below already takes for its
+// own foreground writes. The service itself still re-verifies toChapter is
+// a real syllabus value before writing anything.
+export async function attachChapterMappingAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  const fromChapter = ((formData.get("fromChapter") as string | null) ?? "").trim();
+  const toChapter = ((formData.get("toChapter") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName || !fromChapter || !toChapter) {
+    throw new Error("Board, grade, subject, the mined chapter, and the syllabus chapter to attach to are all required.");
+  }
+  await attachChapterMapping({ boardName, gradeName, subjectName, fromChapter, toChapter });
+  revalidatePath("/admin/archetype-miner/unmatched-chapters");
+}
+
+// See CHAPTER_UNMATCHED_IGNORED_FLAG's own comment for what "ignore" means
+// here -- a reviewed, deliberate "no real syllabus match exists," not a
+// silent skip. Same foreground-throws-on-failure posture as
+// attachChapterMappingAction above.
+export async function ignoreUnmatchedChapterAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  const chapter = ((formData.get("chapter") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName || !chapter) {
+    throw new Error("Board, grade, subject, and the chapter to ignore are all required.");
+  }
+  await ignoreUnmatchedChapter({ boardName, gradeName, subjectName, chapter });
+  revalidatePath("/admin/archetype-miner/unmatched-chapters");
 }
 
 // See the service's own offScopeContentScan.ts for what this catches --

@@ -2,6 +2,7 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildCurriculumReconciliationPrompt } from "./prompts.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
+import { CHAPTER_UNMATCHED_IGNORED_FLAG, type EducationContext } from "./types.js";
 
 // Stage 1 classifies curriculum.chapter/topic from its own judgment
 // whenever no taxonomy document was supplied for that run's curriculum
@@ -65,7 +66,7 @@ const PAGE_SIZE = 1000;
 type SignatureRow = {
   run_id: string;
   question_id: string;
-  signature: { curriculum?: { chapter?: string } };
+  signature: { flags?: string[]; curriculum?: { chapter?: string } };
 };
 
 function normalize(s: string): string {
@@ -171,6 +172,11 @@ async function computeUnmatched(params: {
 
   const counts = new Map<string, UnmatchedChapter>();
   for (const row of signatureRows) {
+    // An admin already looked at this exact chapter value with real sample
+    // question text (see attachChapterMapping's own sibling
+    // ignoreUnmatchedChapter) and decided it genuinely has no syllabus
+    // match -- never resurface it here, and never spend an LLM call on it.
+    if ((row.signature?.flags ?? []).includes(CHAPTER_UNMATCHED_IGNORED_FLAG)) continue;
     const chapter = row.signature?.curriculum?.chapter?.trim();
     if (!chapter) continue;
     const key = normalize(chapter);
@@ -374,4 +380,241 @@ export async function runCurriculumReconciliation(params: {
   } finally {
     reconciliationInProgress = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-scope manual review -- everything below this line supports the
+// admin UI (unmatched-chapters/page.tsx) where a human looks at an
+// unmatched chapter value WITH real sample question text (not just the
+// label a scoped pass would send an LLM) and decides, for THAT scope,
+// either to attach it to a real syllabus entry or mark it genuinely
+// unmatched. The automatic pass above is scoped to one board/grade/
+// subject at a time and only ever sees the bare chapter string; this is
+// the human-in-the-loop complement, deliberately unscoped (every board/
+// grade/subject at once) so nothing needs reviewing scope-by-scope by
+// hand, and deliberately grounded in the same real question text a human
+// would otherwise have to pull via a one-off SQL query to judge safely --
+// confirmed directly, more than once this session, that a label alone
+// ("Geometrical Optics", "Simple Interest") is not enough to tell a
+// genuine mis-classification (the real chapter IS in the syllabus, Stage
+// 1 just described it oddly) from truly off-syllabus content.
+// ---------------------------------------------------------------------------
+
+type Scope = { boardName: string; gradeName: string; subjectName: string };
+
+type GlobalSignatureRow = {
+  run_id: string;
+  question_id: string;
+  education_context: EducationContext;
+  signature: { flags?: string[]; curriculum?: { chapter?: string } };
+};
+
+// Every scope in the catalogue at once -- unlike loadMinedChapters above,
+// this has no .eq() scope filter at all, so it's the one query in this
+// file that reads the WHOLE archetype_question_signatures table. Fine for
+// an admin-triggered review page (not hit by student traffic), same
+// "long-running is acceptable here" posture offScopeContentScan.ts's own
+// runOffScopeContentScan already documents.
+async function loadAllMinedChapterRowsGlobal(): Promise<GlobalSignatureRow[]> {
+  const supabase = getSupabaseClient();
+  const rows: GlobalSignatureRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("archetype_question_signatures")
+      .select("run_id, question_id, education_context, signature")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      console.error("Curriculum reconciliation: failed to load question signatures (all scopes):", error);
+      break;
+    }
+    const page = (data ?? []) as GlobalSignatureRow[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return rows;
+}
+
+// Kept short for the same reason offScopeContentScan.ts's own
+// TEXT_TRUNCATE_LENGTH is -- an admin judging "what is this question
+// actually about" needs the gist, not the full derivation, and this is
+// read for EVERY mined question in the catalogue at once here.
+const SAMPLE_TEXT_TRUNCATE_LENGTH = 300;
+
+function refKey(runId: string, questionId: string): string {
+  return `${runId}:${questionId}`;
+}
+
+async function loadAllQuestionTextGlobal(): Promise<Map<string, string>> {
+  const supabase = getSupabaseClient();
+  const textByRef = new Map<string, string>();
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("archetype_segmented_questions")
+      .select("run_id, question_id, question")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      console.error("Curriculum reconciliation: failed to load segmented questions (all scopes):", error);
+      break;
+    }
+    const page = (data ?? []) as { run_id: string; question_id: string; question: { raw_text?: string; cleaned_text?: string } }[];
+    for (const row of page) {
+      const text = (row.question?.cleaned_text || row.question?.raw_text || "").trim();
+      if (text) textByRef.set(refKey(row.run_id, row.question_id), text.slice(0, SAMPLE_TEXT_TRUNCATE_LENGTH));
+    }
+    if (page.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return textByRef;
+}
+
+// A scope's own three identifying strings, stable and unique enough to use
+// as a Map key -- JSON.stringify rather than a naive join, same reasoning
+// the web app's own syllabusTaxonomyText.ts already documents (a joined
+// string can't be split back apart safely when the values themselves might
+// contain the join character).
+function scopeKey(scope: Scope): string {
+  return JSON.stringify([scope.boardName, scope.gradeName, scope.subjectName]);
+}
+
+const MAX_SAMPLE_QUESTIONS = 3;
+
+export type UnmatchedChapterEntry = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  questionCount: number;
+  sampleQuestions: { ref: string; text: string }[];
+  // This scope's own real syllabus values -- included per-entry (rather
+  // than making the UI fetch it separately per row) so the "attach to..."
+  // dropdown next to each row can be populated straight from the initial
+  // page load.
+  acceptableValues: string[];
+};
+
+// The whole-catalogue counterpart to computeUnmatched above -- same
+// exact-match logic (normalize, compare against the union of that scope's
+// own syllabus_topics chapter+topic values), just run once per DISTINCT
+// scope found in the catalogue instead of one scope a caller already
+// picked. Long-running (a full-table read plus one syllabus lookup per
+// distinct scope) -- see this section's own top comment for why that's an
+// accepted trade-off here.
+export async function computeUnmatchedAcrossAllScopes(): Promise<UnmatchedChapterEntry[]> {
+  const [signatureRows, textByRef] = await Promise.all([loadAllMinedChapterRowsGlobal(), loadAllQuestionTextGlobal()]);
+
+  type Bucket = { scope: Scope; chapter: string; count: number; refs: string[] };
+  const buckets = new Map<string, Bucket>();
+  const scopesSeen = new Map<string, Scope>();
+
+  for (const row of signatureRows) {
+    if ((row.signature?.flags ?? []).includes(CHAPTER_UNMATCHED_IGNORED_FLAG)) continue;
+    const chapter = row.signature?.curriculum?.chapter?.trim();
+    if (!chapter) continue;
+    const boardName = row.education_context?.curriculum_source?.name;
+    const gradeName = row.education_context?.grade_or_year;
+    const subjectName = row.education_context?.subject_or_course;
+    if (!boardName || !gradeName || !subjectName) continue;
+    const scope: Scope = { boardName, gradeName, subjectName };
+    const sKey = scopeKey(scope);
+    scopesSeen.set(sKey, scope);
+
+    const bucketKey = `${sKey}::${normalize(chapter)}`;
+    let bucket = buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = { scope, chapter, count: 0, refs: [] };
+      buckets.set(bucketKey, bucket);
+    }
+    bucket.count++;
+    if (bucket.refs.length < MAX_SAMPLE_QUESTIONS) bucket.refs.push(refKey(row.run_id, row.question_id));
+  }
+
+  // One syllabus lookup per distinct scope, not per bucket -- a scope with
+  // 100 distinct unmatched chapters still only costs one syllabus_topics
+  // query, not 100.
+  const scopeList = Array.from(scopesSeen.values());
+  const acceptableByScope = new Map<string, string[]>();
+  await Promise.all(
+    scopeList.map(async (scope) => {
+      acceptableByScope.set(scopeKey(scope), await loadAcceptableChapterValues(scope));
+    })
+  );
+
+  const entries: UnmatchedChapterEntry[] = [];
+  for (const bucket of buckets.values()) {
+    const acceptableValues = acceptableByScope.get(scopeKey(bucket.scope)) ?? [];
+    const acceptableKeys = new Set(acceptableValues.map(normalize));
+    if (acceptableKeys.has(normalize(bucket.chapter))) continue; // matched via a syllabus update since this row was mined
+    entries.push({
+      ...bucket.scope,
+      chapter: bucket.chapter,
+      questionCount: bucket.count,
+      sampleQuestions: bucket.refs.map((ref) => ({ ref, text: textByRef.get(ref) ?? "" })).filter((s) => s.text),
+      acceptableValues,
+    });
+  }
+
+  // Biggest-impact rows first within each scope, scopes grouped together --
+  // an admin working through this page should see the highest-volume,
+  // most-worth-fixing chapters up top rather than alphabetical noise.
+  entries.sort((a, b) => {
+    const scopeCompare =
+      a.boardName.localeCompare(b.boardName) || a.gradeName.localeCompare(b.gradeName) || a.subjectName.localeCompare(b.subjectName);
+    if (scopeCompare !== 0) return scopeCompare;
+    return b.questionCount - a.questionCount;
+  });
+  return entries;
+}
+
+// The human-chosen counterpart to requestMappings' LLM-chosen one --
+// same trust rule (the target MUST be a real, verbatim syllabus value for
+// this exact scope) applies regardless of who picked it, so a typo'd or
+// freeform target can't sneak a brand-new mismatch in through this path.
+// Reuses applyMapping itself -- same fan-out, same one-row-at-a-time write.
+export async function attachChapterMapping(params: Scope & { fromChapter: string; toChapter: string }): Promise<{ questionsUpdated: number }> {
+  const acceptableValues = await loadAcceptableChapterValues(params);
+  const acceptableKeys = new Set(acceptableValues.map(normalize));
+  if (!acceptableKeys.has(normalize(params.toChapter))) {
+    throw new Error(`"${params.toChapter}" is not a real syllabus value for this board/grade/subject.`);
+  }
+  const supabase = getSupabaseClient();
+  const questionsUpdated = await applyMapping(supabase, params, { fromChapter: params.fromChapter, toChapter: params.toChapter });
+  return { questionsUpdated };
+}
+
+// Marks every signature in this scope carrying this exact chapter value
+// with CHAPTER_UNMATCHED_IGNORED_FLAG -- see that flag's own comment.
+// Mirrors applyMapping's own fetch-then-update-one-row-at-a-time shape,
+// just writing a flag onto the signature instead of rewriting its chapter.
+export async function ignoreUnmatchedChapter(params: Scope & { chapter: string }): Promise<{ questionsMarked: number }> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("archetype_question_signatures")
+    .select("run_id, question_id, signature")
+    .eq("education_context->curriculum_source->>name", params.boardName)
+    .eq("education_context->>grade_or_year", params.gradeName)
+    .eq("education_context->>subject_or_course", params.subjectName)
+    .eq("signature->curriculum->>chapter", params.chapter);
+  if (error) {
+    console.error(`Curriculum reconciliation: failed to load rows for "${params.chapter}" to ignore:`, error);
+    return { questionsMarked: 0 };
+  }
+
+  let marked = 0;
+  for (const row of (data ?? []) as SignatureRow[]) {
+    const nextFlags = Array.from(new Set([...(row.signature.flags ?? []), CHAPTER_UNMATCHED_IGNORED_FLAG]));
+    const { error: updateError } = await supabase
+      .from("archetype_question_signatures")
+      .update({ signature: { ...row.signature, flags: nextFlags } })
+      .eq("run_id", row.run_id)
+      .eq("question_id", row.question_id);
+    if (updateError) {
+      console.error(`Curriculum reconciliation: failed to mark ${row.run_id}:${row.question_id} ignored:`, updateError);
+      continue;
+    }
+    marked++;
+  }
+  return { questionsMarked: marked };
 }

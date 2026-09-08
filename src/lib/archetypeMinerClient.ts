@@ -326,6 +326,112 @@ export async function startCurriculumReconciliation(
   return { started: body.started, unmatchedChapters: body.unmatchedChapters, affectedQuestions: body.affectedQuestions };
 }
 
+export type UnmatchedChapterEntry = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  questionCount: number;
+  sampleQuestions: { ref: string; text: string }[];
+  acceptableValues: string[];
+};
+
+function isUnmatchedChapterEntry(value: unknown): value is UnmatchedChapterEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.boardName === "string" &&
+    typeof v.gradeName === "string" &&
+    typeof v.subjectName === "string" &&
+    typeof v.chapter === "string" &&
+    typeof v.questionCount === "number" &&
+    Array.isArray(v.sampleQuestions) &&
+    Array.isArray(v.acceptableValues)
+  );
+}
+
+// The human-in-the-loop counterpart to previewCurriculumReconciliation
+// above -- see the service's own curriculumReconciliation.ts "Cross-scope
+// manual review" section for the full reasoning. Unscoped deliberately:
+// every board/grade/subject at once, each row carrying its own real sample
+// question text and its own scope's real syllabus values, so an admin can
+// browse and act on the whole catalogue's unmatched chapters from one
+// page. Long-running (a full-table read service-side) -- this is a review
+// page an admin visits deliberately, not something rendered on every
+// request.
+export async function listUnmatchedChapters(): Promise<UnmatchedChapterEntry[]> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/unmatched-all`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Listing unmatched chapters failed with status ${res.status}`);
+  }
+  if (!Array.isArray(body?.entries) || !body.entries.every(isUnmatchedChapterEntry)) {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return body.entries;
+}
+
+// Attaches one unmatched chapter value, for one scope, onto a real
+// syllabus value an admin picked by hand -- the service itself still
+// verifies toChapter is a real, verbatim syllabus value for that scope
+// before writing anything (never trust the client alone for this).
+export async function attachChapterMapping(
+  params: CurriculumReconciliationScope & { fromChapter: string; toChapter: string }
+): Promise<{ questionsUpdated: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/attach`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Attaching chapter mapping failed with status ${res.status}`);
+  }
+  if (typeof body?.questionsUpdated !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { questionsUpdated: body.questionsUpdated };
+}
+
+// Marks one unmatched chapter value, for one scope, as reviewed and
+// genuinely unmappable -- see CHAPTER_UNMATCHED_IGNORED_FLAG's own
+// comment for what this means and why it's tracked at all.
+export async function ignoreUnmatchedChapter(
+  params: CurriculumReconciliationScope & { chapter: string }
+): Promise<{ questionsMarked: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/curriculum-reconciliation/ignore`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Ignoring unmatched chapter failed with status ${res.status}`);
+  }
+  if (typeof body?.questionsMarked !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { questionsMarked: body.questionsMarked };
+}
+
 export type OffScopeScanScope = { boardName: string; gradeName: string; subjectName: string };
 // flaggedQuestions: how many questions in this scope are SITTING, right
 // now, with a pending "off-scope" review-queue item -- distinct from
