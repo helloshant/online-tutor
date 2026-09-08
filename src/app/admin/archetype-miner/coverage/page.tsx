@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getArchetypeFilterOptions, getArchetypesWithChapterTopic, type ArchetypeWithChapterTopic } from "@/lib/archetypeCoverage";
+import { AutoSubmitSelect } from "../auto-submit-select";
 
 export default async function ArchetypeCoveragePage({
   searchParams,
@@ -58,9 +59,10 @@ export default async function ArchetypeCoveragePage({
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Board
-          <select
+          <AutoSubmitSelect
             name="board"
             defaultValue={board ?? ""}
+            clearFieldNames={["grade", "subject"]}
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
           >
             <option value="">All boards</option>
@@ -69,13 +71,14 @@ export default async function ArchetypeCoveragePage({
                 {b}
               </option>
             ))}
-          </select>
+          </AutoSubmitSelect>
         </label>
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Grade / year
-          <select
+          <AutoSubmitSelect
             name="grade"
             defaultValue={grade ?? ""}
+            clearFieldNames={["subject"]}
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
           >
             <option value="">All grades</option>
@@ -84,7 +87,7 @@ export default async function ArchetypeCoveragePage({
                 {g}
               </option>
             ))}
-          </select>
+          </AutoSubmitSelect>
         </label>
         <label className="flex flex-col gap-1 text-xs text-foreground/60">
           Subject
