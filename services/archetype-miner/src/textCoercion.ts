@@ -47,6 +47,21 @@ export function coerceStudentExplanation(value: unknown): unknown {
   return value;
 }
 
+// A model occasionally emits a year as a numeric STRING ("2025") instead of
+// a number, inconsistently -- confirmed live in production: several
+// archetypes.archetype->stats->years_observed arrays held a mix of both
+// for the exact same year (e.g. [2025, "2025"]), which silently defeated
+// every downstream `new Set(years_observed)` dedup (2025 !== "2025" in
+// JS), showing the same year twice in student-facing UI (the "Past
+// Years" pill row) and skewing numeric sorts that assume every element is
+// actually a number. Coerces one value to a proper integer year, or null
+// if it isn't a year at all -- used for both the years_observed array
+// elements and the first/last_observed_year scalars below.
+export function toYear(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) ? n : null;
+}
+
 type ArchetypeStats = {
   question_count: number;
   years_observed: number[];
@@ -74,9 +89,11 @@ export function normalizeStats(raw: unknown, fallbackQuestionCount: number): Arc
   const s = (typeof raw === "object" && raw !== null ? raw : {}) as Partial<ArchetypeStats>;
   return {
     question_count: typeof s.question_count === "number" ? s.question_count : fallbackQuestionCount,
-    years_observed: Array.isArray(s.years_observed) ? s.years_observed : [],
-    first_observed_year: typeof s.first_observed_year === "number" ? s.first_observed_year : null,
-    last_observed_year: typeof s.last_observed_year === "number" ? s.last_observed_year : null,
+    years_observed: Array.isArray(s.years_observed)
+      ? Array.from(new Set(s.years_observed.map(toYear).filter((y): y is number => y !== null))).sort((a, b) => a - b)
+      : [],
+    first_observed_year: toYear(s.first_observed_year),
+    last_observed_year: toYear(s.last_observed_year),
     marks_distribution: typeof s.marks_distribution === "object" && s.marks_distribution !== null ? s.marks_distribution : {},
     formats: typeof s.formats === "object" && s.formats !== null ? s.formats : {},
     difficulty_distribution: {
