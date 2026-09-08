@@ -158,48 +158,98 @@ type Cluster = { memberRefs: string[]; rationale: string };
 // processChapterGroup below, the only caller) -- the length check here is
 // a defensive invariant guard, not the primary "too big" handling path
 // anymore (that's now real reduction, not a skip).
-async function detectDuplicateClusters(group: AcceptedRow[], provider: LlmProvider): Promise<Cluster[]> {
+// The raw single API call -- throws on any failure (a malformed response,
+// a transient API error surviving getJsonCompletion's own internal
+// retries, or a content-filter rejection), never swallows one itself.
+// Only ever called by detectDuplicateClustersResilient below, which is
+// what every other caller in this file actually uses.
+async function detectDuplicateClustersOnce(group: AcceptedRow[], provider: LlmProvider): Promise<Cluster[]> {
   if (group.length > MAX_GROUP_SIZE) {
-    console.warn(`Cross-run merge: internal invariant violated -- a batch of ${group.length} reached detectDuplicateClusters (cap ${MAX_GROUP_SIZE}).`);
+    console.warn(`Cross-run merge: internal invariant violated -- a batch of ${group.length} reached detectDuplicateClustersOnce (cap ${MAX_GROUP_SIZE}).`);
     return [];
   }
 
-  try {
-    const { data } = await getJsonCompletion({
-      systemPrompt: buildCrossRunMergePrompt(),
-      message: JSON.stringify(
-        group.map((r) => ({
-          ref: `${r.run_id}:${r.archetype_id}`,
-          name: r.archetype.name,
-          concept: r.archetype.concept,
-          learning_objective: r.archetype.learning_objective,
-          invariant_reasoning_structure: r.archetype.invariant_reasoning_structure,
-        }))
-      ),
-      maxTokens: MAX_TOKENS,
-      provider,
-    });
+  const { data } = await getJsonCompletion({
+    systemPrompt: buildCrossRunMergePrompt(),
+    message: JSON.stringify(
+      group.map((r) => ({
+        ref: `${r.run_id}:${r.archetype_id}`,
+        name: r.archetype.name,
+        concept: r.archetype.concept,
+        learning_objective: r.archetype.learning_objective,
+        invariant_reasoning_structure: r.archetype.invariant_reasoning_structure,
+      }))
+    ),
+    maxTokens: MAX_TOKENS,
+    provider,
+  });
 
-    if (!Array.isArray(data)) {
-      console.warn(`Cross-run merge: response was not a JSON array for a group of ${group.length} archetype(s).`);
+  if (!Array.isArray(data)) {
+    console.warn(`Cross-run merge: response was not a JSON array for a group of ${group.length} archetype(s).`);
+    return [];
+  }
+
+  const clusters: Cluster[] = [];
+  for (const item of data) {
+    if (typeof item !== "object" || item === null) continue;
+    const c = item as Record<string, unknown>;
+    if (Array.isArray(c.member_refs) && c.member_refs.length >= 2 && c.member_refs.every((r) => typeof r === "string")) {
+      clusters.push({
+        memberRefs: c.member_refs as string[],
+        rationale: typeof c.rationale === "string" && c.rationale.trim() ? c.rationale : "Cross-run duplicate of the same reasoning pattern.",
+      });
+    }
+  }
+  return clusters;
+}
+
+// Below this, a failing batch is skipped rather than bisected further --
+// two archetypes is as small as a "duplicate cluster" can meaningfully
+// get, so there's nothing smaller worth isolating down to.
+const MIN_BISECTION_SIZE = 4;
+
+// Confirmed directly in production: a real batch (73 CBSE Chemistry
+// archetypes -- syllabus content on drugs/toxic compounds/hazardous
+// reactions routinely trips this even though it's entirely legitimate
+// textbook material) failed with Azure OpenAI's content_filter rejection.
+// The old behavior (catch, log, return []) skipped the WHOLE batch --
+// safe (fails open, no crash), but silent and, worse, potentially
+// PERMANENT: nothing about a content-filter-triggering archetype's own
+// text changes between passes, so the same batch would very likely trip
+// the same filter on every future iteration too, meaning that batch's
+// real duplicates might never get checked at all, indefinitely, with no
+// visible sign anything was ever missed.
+//
+// Bisects on any failure instead: split the batch in half and retry each
+// half independently, recursing down until either a half succeeds (most
+// of a large batch usually isn't what tripped the filter -- often just
+// one or two archetypes' own wording are the actual cause) or it's too
+// small to usefully split further (MIN_BISECTION_SIZE), at which point
+// that specific small remainder is skipped and logged by name so an
+// admin can see exactly what was excluded, rather than an opaque "batch
+// of 73 failed." Trade-off accepted: a genuine duplicate pair that
+// happens to straddle a bisection split won't be caught in THIS call --
+// same trade-off the reduction rounds' own reshuffling already accepts,
+// and for the same reason it's fine here too: a later top-level iteration
+// (different shuffling) gets another chance at it.
+async function detectDuplicateClustersResilient(batch: AcceptedRow[], provider: LlmProvider): Promise<Cluster[]> {
+  try {
+    return await detectDuplicateClustersOnce(batch, provider);
+  } catch (err) {
+    if (batch.length <= MIN_BISECTION_SIZE) {
+      console.warn(
+        `Cross-run merge: batch of ${batch.length} archetype(s) failed and is too small to bisect further -- ` +
+          `skipping (likely source: ${batch.map((r) => `"${r.archetype.name}"`).join(", ")}):`,
+        err
+      );
       return [];
     }
 
-    const clusters: Cluster[] = [];
-    for (const item of data) {
-      if (typeof item !== "object" || item === null) continue;
-      const c = item as Record<string, unknown>;
-      if (Array.isArray(c.member_refs) && c.member_refs.length >= 2 && c.member_refs.every((r) => typeof r === "string")) {
-        clusters.push({
-          memberRefs: c.member_refs as string[],
-          rationale: typeof c.rationale === "string" && c.rationale.trim() ? c.rationale : "Cross-run duplicate of the same reasoning pattern.",
-        });
-      }
-    }
-    return clusters;
-  } catch (err) {
-    console.warn(`Cross-run merge: batch of ${group.length} archetype(s) failed:`, err);
-    return [];
+    console.warn(`Cross-run merge: batch of ${batch.length} archetype(s) failed -- bisecting to isolate the problem:`, err);
+    const mid = Math.floor(batch.length / 2);
+    const left = await detectDuplicateClustersResilient(batch.slice(0, mid), provider);
+    const right = await detectDuplicateClustersResilient(batch.slice(mid), provider);
+    return [...left, ...right];
   }
 }
 
@@ -337,7 +387,7 @@ async function processBatch(
   const byRef = new Map<string, AcceptedRow>();
   for (const row of batch) byRef.set(`${row.run_id}:${row.archetype_id}`, row);
 
-  const clusters = await detectDuplicateClusters(batch, provider);
+  const clusters = await detectDuplicateClustersResilient(batch, provider);
   const absorbedRefs = new Set<string>();
   let clustersFound = 0;
   let archetypesMerged = 0;
