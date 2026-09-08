@@ -160,6 +160,17 @@ export const OFF_SCOPE_CONTENT_FLAG = "off_scope_content";
 // candidate for the next pass rather than being silently treated as clean.
 export const OFF_SCOPE_CHECKED_FLAG = "off_scope_checked";
 
+// Set by curriculumReconciliation.ts's own manual-review UI when an admin
+// looks at an unmatched curriculum.chapter value (with real sample
+// question text, not just the label) and decides it genuinely has no
+// syllabus match -- exam boilerplate mis-extracted as a question, wrong-
+// grade content, or a chapter since removed from the syllabus. Excludes
+// the signature from every future unmatched-chapter listing (both the
+// scoped LLM reconciliation pass and the cross-scope review UI) without
+// forcing a fake chapter onto it, same "checked, no forced answer" spirit
+// as OFF_SCOPE_CHECKED_FLAG above.
+export const CHAPTER_UNMATCHED_IGNORED_FLAG = "chapter_unmatched_ignored";
+
 export type QuestionSignature = {
   question_id: string;
   education_context: EducationContext;

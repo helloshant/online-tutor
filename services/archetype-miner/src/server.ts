@@ -20,6 +20,9 @@ import {
   previewCurriculumReconciliation,
   runCurriculumReconciliation,
   isCurriculumReconciliationInProgress,
+  computeUnmatchedAcrossAllScopes,
+  attachChapterMapping,
+  ignoreUnmatchedChapter,
   type CurriculumReconciliationPreview,
 } from "./curriculumReconciliation.js";
 import {
@@ -593,6 +596,59 @@ app.post("/v1/curriculum-reconciliation/run", requireSharedSecret, async (req: R
     console.error("Unhandled error in curriculum reconciliation:", err);
   });
   res.status(202).json({ started: true, ...preview });
+});
+
+// See curriculumReconciliation.ts's own "Cross-scope manual review"
+// section for what this is: the human-in-the-loop complement to the
+// scoped, LLM-driven pass above, covering every board/grade/subject at
+// once with real sample question text per row (not just the bare chapter
+// label). Read-only and unscoped deliberately -- no board/grade/subject
+// query params here, unlike every other route in this file, since the
+// whole point is a single admin can review the whole catalogue's
+// unmatched chapters without picking a scope first.
+app.get("/v1/curriculum-reconciliation/unmatched-all", requireSharedSecret, async (_req: Request, res: Response) => {
+  try {
+    const entries = await computeUnmatchedAcrossAllScopes();
+    res.json({ entries });
+  } catch (err) {
+    console.error("Failed to compute unmatched chapters across all scopes:", err);
+    res.status(502).json({ error: "Failed to compute unmatched chapters across all scopes" });
+  }
+});
+
+app.post("/v1/curriculum-reconciliation/attach", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  const body = req.body as Record<string, unknown>;
+  const fromChapter = typeof body.fromChapter === "string" ? body.fromChapter.trim() : "";
+  const toChapter = typeof body.toChapter === "string" ? body.toChapter.trim() : "";
+  if (!scope || !fromChapter || !toChapter) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, fromChapter, and toChapter are all required" });
+    return;
+  }
+  try {
+    const result = await attachChapterMapping({ ...scope, fromChapter, toChapter });
+    res.json(result);
+  } catch (err) {
+    console.error(`Failed to attach chapter mapping "${fromChapter}" -> "${toChapter}":`, err);
+    res.status(400).json({ error: err instanceof Error ? err.message : "Failed to attach chapter mapping" });
+  }
+});
+
+app.post("/v1/curriculum-reconciliation/ignore", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  const body = req.body as Record<string, unknown>;
+  const chapter = typeof body.chapter === "string" ? body.chapter.trim() : "";
+  if (!scope || !chapter) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, and chapter are all required" });
+    return;
+  }
+  try {
+    const result = await ignoreUnmatchedChapter({ ...scope, chapter });
+    res.json(result);
+  } catch (err) {
+    console.error(`Failed to mark chapter "${chapter}" as ignored:`, err);
+    res.status(502).json({ error: "Failed to mark chapter as ignored" });
+  }
 });
 
 // See offScopeContentScan.ts's own comment for what this catches -- a
