@@ -2,7 +2,7 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildOffScopeContentScanPrompt } from "./prompts.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
-import { OFF_SCOPE_CONTENT_FLAG, type Archetype } from "./types.js";
+import { OFF_SCOPE_CONTENT_FLAG, OFF_SCOPE_CHECKED_FLAG, type Archetype } from "./types.js";
 import { loadAcceptableChapterValues } from "./curriculumReconciliation.js";
 
 // A retroactive sweep for the SAME thing pipelineRunner.ts's own
@@ -82,8 +82,13 @@ async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
   }
   // Already-flagged rows were either caught by a previous scan or by
   // Stage 1 itself at mining time -- never re-flag/re-queue the same
-  // question twice.
-  return rows.filter((r) => !(r.signature?.flags ?? []).includes(OFF_SCOPE_CONTENT_FLAG));
+  // question twice. Already-checked-and-clean rows (OFF_SCOPE_CHECKED_FLAG)
+  // got a genuine LLM verdict on a previous pass and it was "not off-scope"
+  // -- see that flag's own comment for why this is tracked at all.
+  return rows.filter((r) => {
+    const flags = r.signature?.flags ?? [];
+    return !flags.includes(OFF_SCOPE_CONTENT_FLAG) && !flags.includes(OFF_SCOPE_CHECKED_FLAG);
+  });
 }
 
 async function loadTextByRef(scope: Scope): Promise<Map<string, string>> {
@@ -113,7 +118,7 @@ async function loadTextByRef(scope: Scope): Promise<Map<string, string>> {
   return textByRef;
 }
 
-type Candidate = { ref: string; runId: string; questionId: string; text: string };
+type Candidate = { ref: string; runId: string; questionId: string; text: string; signature: SignatureRow["signature"] };
 
 // The single biggest source of every false positive found so far: asking
 // an LLM to re-derive "does this content match the subject" from raw
@@ -140,7 +145,7 @@ async function loadCandidates(scope: Scope, syllabus: string[]): Promise<Candida
     if (chapter && syllabusKeys.has(normalize(chapter))) continue;
     const ref = refKey(s.run_id, s.question_id);
     const text = textByRef.get(ref);
-    if (text) candidates.push({ ref, runId: s.run_id, questionId: s.question_id, text });
+    if (text) candidates.push({ ref, runId: s.run_id, questionId: s.question_id, text, signature: s.signature });
   }
   return candidates;
 }
@@ -203,19 +208,32 @@ async function requestFlagsOnce(batch: Candidate[], scope: Scope, syllabus: stri
 // already been confirmed, live, to trip Azure OpenAI's own content
 // filter. Losing a whole batch to one poison-pill question would
 // otherwise silently skip every OTHER question in it, indefinitely.
-async function requestFlagsResilient(batch: Candidate[], scope: Scope, syllabus: string[], provider: LlmProvider): Promise<Flagged[]> {
+//
+// Reports `evaluated` (the candidates that actually got a real verdict)
+// separately from `flagged`, because those are NOT the same set: a
+// candidate that's evaluated and not flagged is confirmed clean and safe
+// to mark with OFF_SCOPE_CHECKED_FLAG, but a candidate a poison-pill batch
+// gave up on was never evaluated at all -- marking THAT clean would hide
+// it from every future pass despite nobody ever having actually looked.
+async function requestFlagsResilient(
+  batch: Candidate[],
+  scope: Scope,
+  syllabus: string[],
+  provider: LlmProvider
+): Promise<{ flagged: Flagged[]; evaluated: Candidate[] }> {
   try {
-    return await requestFlagsOnce(batch, scope, syllabus, provider);
+    const flagged = await requestFlagsOnce(batch, scope, syllabus, provider);
+    return { flagged, evaluated: batch };
   } catch (err) {
     if (batch.length <= MIN_BISECTION_SIZE) {
       console.warn(`Off-scope content scan: batch of ${batch.length} failed and is too small to bisect further -- skipping:`, err);
-      return [];
+      return { flagged: [], evaluated: [] };
     }
     console.warn(`Off-scope content scan: batch of ${batch.length} failed -- bisecting to isolate the problem:`, err);
     const mid = Math.floor(batch.length / 2);
     const left = await requestFlagsResilient(batch.slice(0, mid), scope, syllabus, provider);
     const right = await requestFlagsResilient(batch.slice(mid), scope, syllabus, provider);
-    return [...left, ...right];
+    return { flagged: [...left.flagged, ...right.flagged], evaluated: [...left.evaluated, ...right.evaluated] };
   }
 }
 
@@ -242,6 +260,26 @@ type ArchetypeRow = { run_id: string; archetype_id: string; archetype: Archetype
 // trust for automatic, irreversible action -- it remains useful for
 // SURFACING candidates a human can quickly confirm or reject, which is
 // exactly what still happens here.
+// Records "an LLM actually looked at this and it's fine" so this same
+// question doesn't keep costing a fresh LLM call, and doesn't keep
+// inflating the "questions left to check" count, on every future pass or
+// preview over this scope -- see OFF_SCOPE_CHECKED_FLAG's own comment.
+// Uses the signature already loaded for this candidate (moments ago, by
+// the same scan run) rather than re-fetching it per question -- the same
+// no-concurrent-writer assumption the rest of this scan already relies on,
+// and the only way to avoid turning a large scope's clean pass into
+// thousands of extra round trips just to confirm nothing changed.
+async function markChecked(supabase: ReturnType<typeof getSupabaseClient>, candidate: Candidate): Promise<void> {
+  const signature = candidate.signature as { flags?: string[] };
+  const nextFlags = Array.from(new Set([...(signature.flags ?? []), OFF_SCOPE_CHECKED_FLAG]));
+  const { error } = await supabase
+    .from("archetype_question_signatures")
+    .update({ signature: { ...signature, flags: nextFlags } })
+    .eq("run_id", candidate.runId)
+    .eq("question_id", candidate.questionId);
+  if (error) console.error(`Off-scope content scan: failed to mark ${candidate.ref} as checked:`, error);
+}
+
 const OFF_SCOPE_ARCHETYPE_REVIEW_SOURCE = "stage3_review_flag";
 async function applyFlag(supabase: ReturnType<typeof getSupabaseClient>, flagged: Flagged, runId: string, questionId: string): Promise<void> {
   const { data: sigRow, error: sigError } = await supabase
@@ -322,17 +360,23 @@ export function isOffScopeContentScanInProgress(): boolean {
   return scanInProgress;
 }
 
-// A "not yet flagged" candidate that genuinely IS off-scope but the model
-// happens to miss on one pass stays a candidate forever otherwise -- there's
-// no persisted "checked and confirmed clean" marker, only "flagged" or
-// "not yet flagged." Repeating the full sweep, same self-converging
-// outer-loop shape as cross-run merge and curriculum reconciliation, means
-// an admin doesn't have to keep clicking "Scan now" by hand to get the
-// same effect. Capped low (unlike those siblings' own higher caps) since
-// EVERY iteration here re-scans the WHOLE remaining candidate pool from
-// scratch (tens of batches for a large scope), not just one small group --
-// a real per-click cost, so this stops as soon as a pass finds nothing new
-// rather than chasing a vanishingly rare last catch indefinitely.
+// Every candidate a pass actually evaluates gets marked -- flagged
+// (OFF_SCOPE_CONTENT_FLAG) or confirmed clean (OFF_SCOPE_CHECKED_FLAG) --
+// so a later iteration's own re-scan of "the remaining pool" only ever
+// picks up candidates NO pass has looked at yet: newly-mined questions
+// added mid-scan, or ones a poison-pill bisection had to give up on
+// without a verdict (see requestFlagsResilient's own comment). In
+// practice that means most single-click runs settle in one real iteration
+// with the rest finding nothing left to do -- which is the point: this
+// used to re-examine the SAME already-confirmed-clean content on every
+// iteration (and again on every future "Scan now" click) hoping a retry
+// might catch something the model missed, but that's exactly the
+// unreliable judgment this file's other comments already document at
+// length; a plain "was this ever actually checked" marker is what makes
+// repeat scans over the same scope cheap and their own preview counts
+// honest. Capped low (unlike cross-run merge/curriculum reconciliation's
+// own higher caps) since a real iteration here is a full LLM pass over
+// tens of batches, not a cheap one.
 const MAX_ITERATIONS = 3;
 
 // Long-running (one LLM call per batch of up to 40 questions, per
@@ -401,16 +445,27 @@ async function runOffScopeContentScanOnePass(
   for (let i = 0; i < candidates.length; i += BATCH_SIZE) batches.push(candidates.slice(i, i + BATCH_SIZE));
 
   let questionsFlagged = 0;
+  let questionsScanned = 0;
   for (const batch of batches) {
-    const flagged = await requestFlagsResilient(batch, scope, syllabus, provider);
+    const { flagged, evaluated } = await requestFlagsResilient(batch, scope, syllabus, provider);
+    questionsScanned += evaluated.length;
     const byRef = new Map(batch.map((c) => [c.ref, c]));
+    const flaggedRefs = new Set<string>();
     for (const f of flagged) {
       const candidate = byRef.get(f.ref);
       if (!candidate) continue; // a ref the model invented -- nothing safe to act on
       await applyFlag(supabase, f, candidate.runId, candidate.questionId);
+      flaggedRefs.add(f.ref);
       questionsFlagged++;
     }
+    // Everything the model actually evaluated and did NOT flag is
+    // confirmed clean -- mark it so it never comes back as a candidate.
+    // Anything bisection gave up on (not in `evaluated`) is deliberately
+    // left unmarked -- see requestFlagsResilient's own comment.
+    await Promise.all(
+      evaluated.filter((c) => !flaggedRefs.has(c.ref)).map((c) => markChecked(supabase, c))
+    );
   }
 
-  return { questionsScanned: candidates.length, questionsFlagged };
+  return { questionsScanned, questionsFlagged };
 }
