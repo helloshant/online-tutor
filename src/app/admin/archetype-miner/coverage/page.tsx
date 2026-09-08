@@ -23,7 +23,7 @@ export default async function ArchetypeCoveragePage({
   // instantly by default instead of stalling on a bulk fetch nobody asked
   // for.
   const [{ boards, grades, subjects }, rows] = await Promise.all([
-    getArchetypeFilterOptions(admin),
+    getArchetypeFilterOptions(admin, { board, grade }),
     scopeChosen ? getArchetypesWithChapterTopic(admin, { board, grade, subject, showAll }) : Promise.resolve([]),
   ]);
 
