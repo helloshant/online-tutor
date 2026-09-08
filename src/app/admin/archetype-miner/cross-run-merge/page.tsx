@@ -25,7 +25,7 @@ export default async function CrossRunMergePage({
   const scopeChosen = Boolean(board && grade && subject);
 
   const [{ boards, grades, subjects }, preview] = await Promise.all([
-    getArchetypeFilterOptions(admin),
+    getArchetypeFilterOptions(admin, { board, grade }),
     // Best-effort, same "never break the page over this" posture every
     // other archetype-miner-service preview already uses -- a failure
     // just hides the count/button below rather than a broken page.

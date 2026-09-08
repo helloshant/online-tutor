@@ -92,21 +92,33 @@ export async function getArchetypesWithChapterTopic(
 }
 
 // Distinct board/grade/subject values within the eligible set, for filter
-// dropdowns -- a separate, unfiltered fetch since narrowing by one of
-// these shouldn't shrink the OTHER dropdowns' own option lists.
-export async function getArchetypeFilterOptions(admin: SupabaseClient): Promise<{ boards: string[]; grades: string[]; subjects: string[] }> {
+// dropdowns. Cascading: boards are always the full unfiltered list (top of
+// the hierarchy), grades narrow to whatever the chosen board actually has,
+// and subjects narrow to whatever the chosen board+grade actually has --
+// e.g. Grade 10 CBSE never offers a Grade-12-only subject. Previously this
+// returned all three lists fully independent of each other, which is how
+// e.g. "hindi"/"2026" (real data typos, since fixed) surfaced next to
+// subjects from completely unrelated grades on the cross-run-merge page.
+export async function getArchetypeFilterOptions(
+  admin: SupabaseClient,
+  scope: { board?: string; grade?: string } = {}
+): Promise<{ boards: string[]; grades: string[]; subjects: string[] }> {
   const { data } = await admin
     .from("archetypes")
     .select("education_context")
     .in("status", ACCEPTED_STATUSES)
     .in("critic_decision", ACCEPTED_DECISIONS);
 
-  const distinct = (pick: (ctx: EducationContext) => string) =>
-    Array.from(new Set((data ?? []).map((r) => pick(r.education_context as EducationContext)))).sort();
+  const contexts = (data ?? []).map((r) => r.education_context as EducationContext);
+  const distinct = (values: string[]) => Array.from(new Set(values)).sort();
 
-  return {
-    boards: distinct((c) => c.curriculum_source.name),
-    grades: distinct((c) => c.grade_or_year),
-    subjects: distinct((c) => c.subject_or_course),
-  };
+  const boards = distinct(contexts.map((c) => c.curriculum_source.name));
+
+  const gradeScoped = contexts.filter((c) => !scope.board || c.curriculum_source.name === scope.board);
+  const grades = distinct(gradeScoped.map((c) => c.grade_or_year));
+
+  const subjectScoped = gradeScoped.filter((c) => !scope.grade || c.grade_or_year === scope.grade);
+  const subjects = distinct(subjectScoped.map((c) => c.subject_or_course));
+
+  return { boards, grades, subjects };
 }
