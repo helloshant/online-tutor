@@ -22,19 +22,23 @@ import { loadAcceptableChapterValues } from "./curriculumReconciliation.js";
 // legitimate archetype, so this is a deliberate, human-triggered sweep,
 // never a blind whole-catalogue pass.
 //
-// Confirmed live in production, twice, before this got the fix it needed:
-// without real ground truth to check against, the model's own vague
-// notion of "general [subject]" is not reliable -- it repeatedly flagged
-// genuine chapters of the declared subject (Biotechnology, Evolution,
-// Ecology, drug-abuse content under Human Health and Disease, all real
-// Grade 12 CBSE Biology) as if they belonged to some OTHER subject
-// entirely, reasoning things like "Biotechnology, not general Biology"
-// or "Anthropology, not core Biology." One run alone wrongly auto-removed
-// 5 real, live archetypes this way. The fix: reuse curriculumReconciliation.ts's
-// own loadAcceptableChapterValues() to hand the model the REAL syllabus
-// chapter list for this scope as authoritative ground truth (see the
-// prompt's own comment on this), instead of trusting its own guess at
-// what the subject "generally" covers.
+// Confirmed live in production, repeatedly, before this settled into its
+// current, deliberately more conservative shape: without real ground
+// truth to check against, the model's own vague notion of "general
+// [subject]" is not reliable -- it repeatedly flagged genuine chapters of
+// the declared subject (Biotechnology, Evolution, Ecology, drug-abuse
+// content under Human Health and Disease, all real Grade 12 CBSE
+// Biology) as if they belonged to some OTHER subject entirely, reasoning
+// things like "Biotechnology, not general Biology" or "Anthropology, not
+// core Biology." Feeding it the real syllabus chapter list as ground
+// truth (reusing curriculumReconciliation.ts's own
+// loadAcceptableChapterValues()) cut the false-positive rate drastically,
+// but even after that fix, across two more scan runs, EVERY flag was
+// still a false positive on real CBSE case-study content -- the same
+// archetype had to be restored by hand three separate times. Flagging a
+// SIGNATURE stays useful (it's a cheap, reversible, human-reviewable
+// signal); acting on that flag by auto-removing an archetype does not --
+// see applyFlag's own comment for why that path was removed entirely.
 const PAGE_SIZE = 1000;
 // Kept short deliberately -- a subject/grade sanity check needs only the
 // GIST of a question, not its full derivation/case-study text, and a
@@ -195,14 +199,26 @@ type ArchetypeRow = { run_id: string; archetype_id: string; archetype: Archetype
 
 // Reacts to one newly-flagged question within its own run: marks the
 // signature, queues it for review, and looks at any currently-accepted
-// archetype built on it. An archetype whose ENTIRE evidence is this one
-// question is unambiguously invalid -- removed outright, same as the two
-// confirmed cases already corrected manually. An archetype with OTHER,
-// unflagged supporting questions too is NOT auto-removed (most of its
-// evidence may still be perfectly legitimate) -- it's queued into the
-// review queue instead (source: stage3_review_flag, the existing
-// "archetype needs a human look" bucket) so a person decides whether to
-// revise, remove, or leave it.
+// archetype built on it.
+//
+// Every affected archetype is queued for a HUMAN decision now -- never
+// auto-removed, regardless of whether the flagged question is its only
+// supporting evidence. This was NOT the original design: an archetype
+// whose entire evidence was one flagged question used to be removed
+// automatically. That auto-remove path is exactly what caused real
+// damage, confirmed live, repeatedly: across four consecutive scan runs
+// after the syllabus-grounding fix landed, every single flag in the last
+// two runs was a false positive on real, already-correctly-classified
+// CBSE case-study content (Human Health and Disease / Drug and Alcohol
+// Abuse content framed around real-world scenarios the model kept
+// mistaking for a different field), and the SAME archetype
+// ("explain-impact-agricultural-practice-ecosystem") got wrongly
+// auto-removed three separate times, having to be restored by hand each
+// time. The flagging judgment itself has not proven reliable enough to
+// trust for automatic, irreversible action -- it remains useful for
+// SURFACING candidates a human can quickly confirm or reject, which is
+// exactly what still happens here.
+const OFF_SCOPE_ARCHETYPE_REVIEW_SOURCE = "stage3_review_flag";
 async function applyFlag(supabase: ReturnType<typeof getSupabaseClient>, flagged: Flagged, runId: string, questionId: string): Promise<void> {
   const { data: sigRow, error: sigError } = await supabase
     .from("archetype_question_signatures")
@@ -251,35 +267,26 @@ async function applyFlag(supabase: ReturnType<typeof getSupabaseClient>, flagged
     const supportingIds = row.archetype.supporting_question_ids ?? [];
     if (!supportingIds.includes(questionId)) continue;
 
-    if (supportingIds.length === 1) {
-      const { error } = await supabase
-        .from("archetypes")
-        .update({
-          critic_decision: "REMOVE",
-          archetype: {
-            ...row.archetype,
-            critic_decision: "REMOVE",
-            critic_rationale: `Off-scope content scan: its only supporting question was flagged off-scope (${flagged.reason})`,
-          },
-          updated_at: new Date().toISOString(),
-        })
-        .eq("run_id", row.run_id)
-        .eq("archetype_id", row.archetype_id);
-      if (error) console.error(`Off-scope content scan: failed to remove archetype ${row.run_id}:${row.archetype_id}:`, error);
-      else console.log(`Off-scope content scan: removed archetype "${row.archetype_id}" (${row.run_id}) -- its only evidence was off-scope.`);
-    } else {
-      const { error } = await supabase.from("archetype_review_queue").insert({
-        run_id: row.run_id,
-        source: "stage3_review_flag",
-        reference_id: row.archetype_id,
-        reason:
-          `Off-scope content scan: 1 of ${supportingIds.length} supporting question(s) was flagged off-scope (${flagged.reason}) -- ` +
-          "the rest may still be legitimate; needs a human decision on whether to keep, revise, or remove this archetype.",
-        confidence: null,
-        status: "pending",
-      });
-      if (error) console.error(`Off-scope content scan: failed to queue archetype ${row.run_id}:${row.archetype_id} for review:`, error);
-    }
+    // Always queued for a human, never auto-removed -- see this
+    // function's own top comment for why. The message still distinguishes
+    // "this is its only evidence" from "N of M" so a reviewer can
+    // prioritize the sole-evidence cases (the ones that would previously
+    // have vanished silently) without this code guessing on their behalf.
+    const evidenceNote =
+      supportingIds.length === 1
+        ? "this is its ONLY supporting question"
+        : `1 of ${supportingIds.length} supporting question(s)`;
+    const { error } = await supabase.from("archetype_review_queue").insert({
+      run_id: row.run_id,
+      source: OFF_SCOPE_ARCHETYPE_REVIEW_SOURCE,
+      reference_id: row.archetype_id,
+      reason:
+        `Off-scope content scan: ${evidenceNote} was flagged off-scope (${flagged.reason}) -- needs a human decision on whether to ` +
+        "keep, revise, or remove this archetype (not auto-removed; this scan's flagging has produced confirmed false positives on real content).",
+      confidence: null,
+      status: "pending",
+    });
+    if (error) console.error(`Off-scope content scan: failed to queue archetype ${row.run_id}:${row.archetype_id} for review:`, error);
   }
 }
 
