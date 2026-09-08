@@ -59,6 +59,30 @@ function refKey(runId: string, questionId: string): string {
   return `${runId}:${questionId}`;
 }
 
+// Confirmed live in production: a single run against English (CBSE, grade
+// 10) flagged 50 of ~800 questions (~6%) as off-scope; every one checked
+// by hand was a false positive, in one of two shapes -- (a) a genuine
+// unseen reading-comprehension passage on a real-world topic (electric
+// vehicles, artificial intelligence, deforestation, waste management,
+// marketing, all confirmed live), which EVERY board deliberately draws
+// from arbitrary subject matter to test reading skill, not subject
+// knowledge; or (b) a genuine prescribed literary text ("The Necklace",
+// "Amanda") absent from syllabus_topics, whose entries for a language
+// subject are necessarily far sparser than the dozens of individual
+// story/poem titles an actual English syllabus contains. Neither is a
+// probabilistic miss the way the earlier vocabulary-override bugs were
+// (see this file's own top comment) -- "does this content's topic belong
+// to this subject" is a category error for a language-arts subject, no
+// matter how the prompt is worded, because the topic of a comprehension
+// passage was never supposed to be in the syllabus in the first place.
+// These subjects are structurally exempt from this scan rather than yet
+// another prompt patch chasing a question that doesn't make sense to ask.
+const LANGUAGE_ARTS_SUBJECTS = new Set(["english", "hindi", "bengali"]);
+
+function isLanguageArtsSubject(subjectName: string): boolean {
+  return LANGUAGE_ARTS_SUBJECTS.has(subjectName.trim().toLowerCase());
+}
+
 async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
   const supabase = getSupabaseClient();
   const rows: SignatureRow[] = [];
@@ -137,6 +161,10 @@ type Candidate = { ref: string; runId: string; questionId: string; text: string;
 // curriculum reconciliation hasn't normalized yet) is genuinely
 // ambiguous enough to need the LLM's judgment.
 async function loadCandidates(scope: Scope, syllabus: string[]): Promise<Candidate[]> {
+  // See isLanguageArtsSubject's own comment -- this whole scan asks a
+  // question that doesn't make sense for these subjects, so it never even
+  // loads candidates for them.
+  if (isLanguageArtsSubject(scope.subjectName)) return [];
   const [signatures, textByRef] = await Promise.all([loadSignaturesInScope(scope), loadTextByRef(scope)]);
   const syllabusKeys = new Set(syllabus.map(normalize));
   const candidates: Candidate[] = [];
@@ -154,6 +182,9 @@ export type OffScopeScanPreview = { candidateQuestions: number };
 
 // Counts only -- no LLM call, no writes.
 export async function previewOffScopeContentScan(scope: Scope): Promise<OffScopeScanPreview> {
+  // See isLanguageArtsSubject's own comment -- skip the syllabus lookup
+  // too, since loadCandidates would return [] for it anyway.
+  if (isLanguageArtsSubject(scope.subjectName)) return { candidateQuestions: 0 };
   const syllabus = await loadAcceptableChapterValues(scope);
   const candidates = await loadCandidates(scope, syllabus);
   return { candidateQuestions: candidates.length };
@@ -389,6 +420,16 @@ export async function runOffScopeContentScan(scope: Scope): Promise<OffScopeScan
   }
   scanInProgress = true;
   try {
+    // See isLanguageArtsSubject's own comment -- confirmed live, this scan
+    // has no reliable way to check these subjects and shouldn't try.
+    if (isLanguageArtsSubject(scope.subjectName)) {
+      console.log(
+        `Off-scope content scan: skipping ${scope.subjectName} (${scope.boardName}, grade ${scope.gradeName}) -- ` +
+          "language-arts subjects are structurally exempt from this check (see isLanguageArtsSubject's own comment)."
+      );
+      return { iterationsRun: 0, questionsScanned: 0, questionsFlagged: 0 };
+    }
+
     // Fetched once for the whole scan, not per iteration or per batch --
     // the real syllabus for this scope doesn't change mid-run. Empty when
     // this app has no syllabus_topics catalogue for this exact scope; the
