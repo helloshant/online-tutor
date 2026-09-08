@@ -293,6 +293,45 @@ export function isCurriculumReconciliationInProgress(): boolean {
   return reconciliationInProgress;
 }
 
+// A single call over a scope this size (100+ distinct chapter variants
+// confirmed live for one real scope) doesn't reliably map every genuine
+// case in one shot, the same ordinary model-non-determinism-on-a-large-
+// batch behavior cross-run merge's own MAX_ITERATIONS comment documents --
+// confirmed directly: a first pass against Grade 12 CBSE Biology mapped
+// 26 of 100, but a follow-up investigation of the 74 leftover values found
+// most of them ARE real, confidently-mappable Grade 12 chapters just
+// described more specifically than the syllabus's own short name
+// ("Reproduction in Organisms", "Human Genome Project", "Human Immune
+// System" -> real chapters the first pass simply didn't happen to catch).
+// Repeating the pass, same as cross-run merge's own outer loop, gives a
+// fresh model sample another chance at exactly these -- an admin
+// shouldn't have to manually re-click "Reconcile now" to get the same
+// effect by hand.
+const MAX_ITERATIONS = 5;
+
+async function runCurriculumReconciliationOnePass(params: {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+}): Promise<CurriculumReconciliationResult> {
+  const supabase = getSupabaseClient();
+  const { unmatched, acceptableValues } = await computeUnmatched(params);
+
+  if (unmatched.length === 0 || acceptableValues.length === 0) {
+    return { mappingsApplied: 0, questionsUpdated: 0, unmatchedRemaining: unmatched.length };
+  }
+
+  const provider = getActiveLlmProvider();
+  const mappings = await requestMappings(unmatched, acceptableValues, provider);
+
+  let questionsUpdated = 0;
+  for (const mapping of mappings) {
+    questionsUpdated += await applyMapping(supabase, params, mapping);
+  }
+
+  return { mappingsApplied: mappings.length, questionsUpdated, unmatchedRemaining: unmatched.length - mappings.length };
+}
+
 export async function runCurriculumReconciliation(params: {
   boardName: string;
   gradeName: string;
@@ -303,33 +342,31 @@ export async function runCurriculumReconciliation(params: {
   }
   reconciliationInProgress = true;
   try {
-    const supabase = getSupabaseClient();
-    const { unmatched, acceptableValues } = await computeUnmatched(params);
+    const total: CurriculumReconciliationResult = { mappingsApplied: 0, questionsUpdated: 0, unmatchedRemaining: 0 };
+    for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+      const pass = await runCurriculumReconciliationOnePass(params);
+      total.mappingsApplied += pass.mappingsApplied;
+      total.questionsUpdated += pass.questionsUpdated;
+      total.unmatchedRemaining = pass.unmatchedRemaining;
 
-    console.log(
-      `Curriculum reconciliation: ${unmatched.length} unmatched chapter value(s) (${unmatched.reduce((s, u) => s + u.count, 0)} ` +
-        `question(s)) against ${acceptableValues.length} real syllabus value(s) for ${params.subjectName} (${params.boardName}, grade ${params.gradeName})...`
-    );
+      console.log(
+        `Curriculum reconciliation: iteration ${iteration}/${MAX_ITERATIONS} for ${params.subjectName} (${params.boardName}, ` +
+          `grade ${params.gradeName}) -- ${pass.mappingsApplied} mapping(s) applied, ${pass.questionsUpdated} question(s) updated, ` +
+          `${pass.unmatchedRemaining} chapter value(s) still unmatched.`
+      );
 
-    if (unmatched.length === 0 || acceptableValues.length === 0) {
-      return { mappingsApplied: 0, questionsUpdated: 0, unmatchedRemaining: unmatched.length };
+      // Converged -- nothing new to find, no point spending the rest of
+      // the iteration budget re-asking the same unanswerable question.
+      if (pass.mappingsApplied === 0) break;
     }
 
-    const provider = getActiveLlmProvider();
-    const mappings = await requestMappings(unmatched, acceptableValues, provider);
-
-    let questionsUpdated = 0;
-    for (const mapping of mappings) {
-      questionsUpdated += await applyMapping(supabase, params, mapping);
-    }
-
-    const unmatchedRemaining = unmatched.length - mappings.length;
     console.log(
-      `Curriculum reconciliation: done -- ${mappings.length} mapping(s) applied, ${questionsUpdated} question(s) updated, ` +
-        `${unmatchedRemaining} chapter value(s) left unmatched (genuinely no confident syllabus match, or the model chose not to map them).`
+      `Curriculum reconciliation: done -- ${total.mappingsApplied} total mapping(s) applied, ${total.questionsUpdated} total ` +
+        `question(s) updated, ${total.unmatchedRemaining} chapter value(s) left unmatched (genuinely no confident syllabus match -- ` +
+        "wrong subject/grade content, a chapter since removed from the syllabus, or too ambiguous to place safely)."
     );
 
-    return { mappingsApplied: mappings.length, questionsUpdated, unmatchedRemaining };
+    return total;
   } finally {
     reconciliationInProgress = false;
   }
