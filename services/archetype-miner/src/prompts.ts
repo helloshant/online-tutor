@@ -1061,6 +1061,27 @@ to this question's actual theme, and explain concretely why that specific
 entry does NOT cover it -- not just assert that the theme "sounds like"
 another field.
 
+CONFIRMED AS A REAL, REPEATED MISTAKE even AFTER correctly identifying the
+matching chapter: real Grade 12 CBSE Chemistry content -- osmotic
+pressure illustrated with a biological example (an unripe mango
+shriveling in salt solution, standard textbook content for the
+"Solutions and Colligative Properties" chapter), and vitamin/hormone
+classification (standard content of the "Biomolecules" chapter) -- were
+STILL flagged after the model correctly named "Solutions and Colligative
+Properties" / "Biomolecules" as the closest entry, only to then overrule
+its own correct identification because the question's own words
+("cell," "osmosis," "hormone," "vitamin," "blood glucose") sound
+biological. A syllabus chapter's own real content routinely uses
+cross-disciplinary VOCABULARY and real-world CONTEXT as its subject
+matter -- a chemistry chapter can legitimately be illustrated with a
+biological example, a biology chapter with a chemical one, and so on.
+Once you have identified that a question's content genuinely matches one
+"syllabus" entry's real coverage, THAT IS THE END OF THE CHECK -- do not
+then re-examine the question's individual words for a DIFFERENT field's
+vocabulary and flag it anyway. Matching vocabulary to a field name is not
+a reason; matching real content to a syllabus entry is the only test that
+counts, and once it passes, it passes.
+
 Similarly, do NOT flag a question just because it covers a different
 chapter/topic than most of the OTHER questions in this same batch. A
 batch is an arbitrary slice of a scope's own questions, not one paper or
