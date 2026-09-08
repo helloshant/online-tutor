@@ -133,6 +133,21 @@ export type ReasoningDirection = "forward" | "reverse" | "mixed";
 export type Difficulty = "Easy" | "Medium" | "Hard";
 export type TaxonomyMatch = "matched" | "no_match";
 
+// A specific, well-known QuestionSignature.flags value (not just free
+// text like the rest of that array) -- Stage 1 sets this when a
+// question's actual content clearly doesn't belong to its declared
+// education_context.subject_or_course or grade_or_year at all, e.g. an
+// English literature question segmented out of a paper submitted as
+// "Biology," or a question that's genuinely a different grade's own
+// syllabus content. Confirmed live in production: exactly this slipped
+// through undetected and got mined into a real "Biology" archetype whose
+// only supporting question was an English poem's own MCQ (see
+// pipelineRunner.ts's own comment on why signatures carrying this flag
+// are still stored but never clustered/mined). A shared constant, not an
+// inline string literal, so prompts.ts (what asks the model to set it)
+// and pipelineRunner.ts (what filters on it) can't silently drift apart.
+export const OFF_SCOPE_CONTENT_FLAG = "off_scope_content";
+
 export type QuestionSignature = {
   question_id: string;
   education_context: EducationContext;
@@ -309,7 +324,7 @@ export type ArchetypeFamily = {
 // critic_decision:'REVIEW') so REVIEW is never a dead end.
 // ---------------------------------------------------------------------------
 
-export type ReviewQueueSource = "stage1_low_confidence" | "stage2_ambiguous_cluster" | "stage3_review_flag";
+export type ReviewQueueSource = "stage1_low_confidence" | "stage1_off_scope_content" | "stage2_ambiguous_cluster" | "stage3_review_flag";
 export type ReviewQueueStatus = "pending" | "resolved";
 
 export type ReviewQueueItem = {
@@ -360,6 +375,13 @@ export type PipelineRunStats = {
   // see pipelineRunner.ts's excludeStemOnlyParents. Not a failure; a
   // record here was never expected to become its own signature/archetype.
   stems_excluded?: number;
+  // Signatures Stage 1 flagged with OFF_SCOPE_CONTENT_FLAG -- still
+  // stored in archetype_question_signatures and queued for review (source
+  // "stage1_off_scope_content"), but excluded from clustering/mining
+  // entirely so they can never become a mined archetype's own supporting
+  // evidence. See OFF_SCOPE_CONTENT_FLAG's own comment for what this
+  // catches.
+  off_scope_flagged?: number;
   clusters?: number;
   mined?: number;
   reviewed?: number;

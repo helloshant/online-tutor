@@ -2,7 +2,11 @@
 // multi-level v2 delta folded in at the point each delta section says to
 // add it), not a paraphrase -- design principle #1 ("schema-first," see
 // types.ts) extends to the prompts themselves: they're a fixed contract,
-// not something to freely rephrase per call site.
+// not something to freely rephrase per call site. The OFF-SCOPE CONTENT
+// section in buildAnalyzerPrompt below is the one deliberate addition
+// beyond that base spec (see its own comment for why).
+
+import { OFF_SCOPE_CONTENT_FLAG } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Stage 0 -- Segmenter
@@ -64,6 +68,19 @@ DO NOT:
 - Infer marks for sub-parts if the paper only gives a total; if marks
   cannot be confidently split, set marks to the total on the parent and
   null on children, and add an extraction_note explaining this.
+- Turn a paper's own non-question material into a fake SegmentedQuestion
+  record: cover pages, general/exam-wide instructions ("General
+  Instructions" / "सामान्य निर्देश," section-structure notes like "Section
+  A contains 16 MCQs of 1 mark each"), section headers, blank marking-
+  scheme space, or a source/case-study STEM that has no sub-question
+  attached to it at all. None of these is an independently-gradable
+  reasoning unit -- skip them entirely, the same as you'd skip whitespace
+  between questions. Confirmed live in production: a paper's own general-
+  instructions block, in Hindi, was segmented as if it were a real
+  question and reached later stages as one. This is never in tension with
+  the COMPLETENESS rule below -- a paper's own stated question COUNT
+  refers to its actual gradable questions, never its instructions pages,
+  so correctly skipping non-question material is not "stopping early."
 
 OCR / EXTRACTION QUALITY
 If extraction_method is "ocr", set extraction_confidence conservatively.
@@ -194,6 +211,48 @@ DIMENSIONS TO ANALYZE
 Curriculum
 ${taxonomySection}
 
+OFF-SCOPE CONTENT (check this BEFORE curriculum classification)
+Every question you're given was already stamped with a fixed
+education_context (subject_or_course, grade_or_year) by the caller --
+Stage 0 (Segmentation) copies it onto every record from the paper
+unchanged, without checking it, so a paper submitted under the wrong
+subject/grade, or one that happens to bundle a DIFFERENT subject's
+content on the same pages (e.g. an English composition/writing section
+printed in the same document as a Biology paper), reaches you carrying
+that same wrong label with nothing upstream having caught it yet. You are
+the first stage that actually reads the content for what it is, so this
+is your check to make.
+Confirmed live in production: exactly this slipped all the way through
+and got mined into a real, student-facing archetype -- a "Biology"
+question that was actually an English poem's own multiple-choice
+question about symbolism, and separately, real Biology content that was
+actually a DIFFERENT grade's own syllabus chapter, not this grade's.
+If this question's actual subject matter clearly does NOT belong to the
+declared subject_or_course (a different subject's content entirely -- a
+poem, an essay-writing prompt, a different science), OR clearly belongs
+to a different grade/level's own syllabus than the declared grade_or_year
+(you may need your own subject-matter knowledge of what each grade
+actually covers to recognize this, not just the taxonomy document if one
+was supplied):
+- Set curriculum.taxonomy_match to "no_match" and cap curriculum
+  confidence at 0.2 or below.
+- Add the EXACT flag string "${OFF_SCOPE_CONTENT_FLAG}" to the flags
+  array (this exact string, not a paraphrase -- it's checked
+  programmatically downstream to keep this question out of clustering
+  and mining entirely, so it never becomes a mined archetype's own
+  supporting evidence).
+- Still fill in curriculum/learning_objective/etc as best you can from
+  the actual content -- do not leave other fields empty or refuse to
+  produce a signature; this flag is what routes the question to human
+  review, not an excuse to skip analyzing it.
+Do NOT flag a question just because it's an unusually-phrased or
+borderline-difficult example of the declared subject/grade, and do NOT
+flag it merely because its exact chapter/topic wording doesn't match a
+supplied taxonomy document -- that's ordinary taxonomy_match: "no_match"
+territory, not this flag. This flag is specifically for content that
+plainly belongs to a DIFFERENT subject or a DIFFERENT grade's own
+syllabus, not merely unfamiliar or hard to classify.
+
 Learning objective
 State what the student must demonstrate, as an observable action.
 Good: "Determine the nature of roots using the discriminant."
@@ -279,8 +338,9 @@ diagrams/data were flagged missing upstream.
 
 Flags
 Populate the flags array with any of: ocr_uncertain,
-diagram_required_but_missing, ambiguous_interpretation, or a free-text
-flag if none of these fit.
+diagram_required_but_missing, ambiguous_interpretation, "${OFF_SCOPE_CONTENT_FLAG}"
+(see the OFF-SCOPE CONTENT section above -- use this EXACT string, never
+a paraphrase, when it applies), or a free-text flag if none of these fit.
 
 SCHEMA
 Return EXACTLY these fields, no others:
@@ -306,7 +366,7 @@ Return EXACTLY these fields, no others:
   "difficulty_rationale": "<1-2 sentences citing the factors that drove the rating>",
   "difficulty_reference_frame": "<what level this rating is relative to, see the Difficulty section above>",
   "confidence": { "curriculum": <0-1>, "reasoning_pattern": <0-1>, "overall": <0-1> },
-  "flags": ["<zero or more of: ocr_uncertain, diagram_required_but_missing, ambiguous_interpretation, or free text>"]
+  "flags": ["<zero or more of: ocr_uncertain, diagram_required_but_missing, ambiguous_interpretation, ${OFF_SCOPE_CONTENT_FLAG}, or free text>"]
 }
 Do NOT include education_context on your output -- it is stamped on by the
 caller after your response, so there is nothing to gain by adding it and

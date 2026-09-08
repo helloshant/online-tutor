@@ -76,7 +76,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
 
         {runRow.error && <p className="mt-3 text-sm text-red-600">{runRow.error}</p>}
 
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-7">
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-8">
           <div>
             <dt className="text-foreground/50">Segmented</dt>
             <dd className="font-medium">{runRow.stats.segmented ?? "—"}</dd>
@@ -98,6 +98,17 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
               Stems excluded
             </dt>
             <dd className="font-medium">{runRow.stats.stems_excluded ?? "—"}</dd>
+          </div>
+          <div>
+            <dt
+              className="text-foreground/50"
+              title="Content Stage 1 determined doesn't belong to this run's own declared subject/grade at all -- excluded from clustering/mining, queued for review."
+            >
+              Off-scope flagged
+            </dt>
+            <dd className={`font-medium ${(runRow.stats.off_scope_flagged ?? 0) > 0 ? "text-red-600" : ""}`}>
+              {runRow.stats.off_scope_flagged ?? "—"}
+            </dd>
           </div>
           <div>
             <dt className="text-foreground/50">Clusters</dt>

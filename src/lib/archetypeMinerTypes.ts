@@ -103,6 +103,9 @@ export type PipelineRunStats = {
   // gradable unit of their own -- not a failure, see pipelineRunner.ts's
   // own comment (excludeStemOnlyParents) in the service.
   stems_excluded?: number;
+  // Signatures flagged as not belonging to their declared subject/grade
+  // at all -- stored and queued for review, but never clustered/mined.
+  off_scope_flagged?: number;
   clusters?: number;
   mined?: number;
   reviewed?: number;
@@ -127,7 +130,7 @@ export type PipelineRunRow = {
   completed_at: string | null;
 };
 
-export type ReviewQueueSource = "stage1_low_confidence" | "stage2_ambiguous_cluster" | "stage3_review_flag";
+export type ReviewQueueSource = "stage1_low_confidence" | "stage1_off_scope_content" | "stage2_ambiguous_cluster" | "stage3_review_flag";
 export type ReviewQueueStatus = "pending" | "resolved";
 
 export type ReviewQueueRow = {
