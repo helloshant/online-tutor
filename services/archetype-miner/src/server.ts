@@ -22,6 +22,12 @@ import {
   isCurriculumReconciliationInProgress,
   type CurriculumReconciliationPreview,
 } from "./curriculumReconciliation.js";
+import {
+  previewOffScopeContentScan,
+  runOffScopeContentScan,
+  isOffScopeContentScanInProgress,
+  type OffScopeScanPreview,
+} from "./offScopeContentScan.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -585,6 +591,57 @@ app.post("/v1/curriculum-reconciliation/run", requireSharedSecret, async (req: R
   }
   void runCurriculumReconciliation(scope).catch((err) => {
     console.error("Unhandled error in curriculum reconciliation:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
+});
+
+// See offScopeContentScan.ts's own comment for what this catches -- a
+// retroactive sweep for content that reached the catalogue before
+// pipelineRunner.ts started checking for it at mining time. Same scope
+// shape (readCrossRunMergeScope validates the same three fields
+// regardless of which tool is calling it), same preview-first/fire-and-
+// forget/in-memory-concurrency-guard shape as every other admin-triggered
+// pass in this file.
+app.get("/v1/off-scope-content-scan/preview", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.query as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  try {
+    const preview = await previewOffScopeContentScan(scope);
+    res.json({ ...preview, inProgress: isOffScopeContentScanInProgress() });
+  } catch (err) {
+    console.error("Failed to preview off-scope content scan:", err);
+    res.status(502).json({ error: "Failed to preview off-scope content scan" });
+  }
+});
+
+app.post("/v1/off-scope-content-scan/run", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  if (isOffScopeContentScanInProgress()) {
+    res.status(409).json({ error: "An off-scope content scan is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: OffScopeScanPreview;
+  try {
+    preview = await previewOffScopeContentScan(scope);
+  } catch (err) {
+    console.error("Failed to preview off-scope content scan before starting it:", err);
+    res.status(502).json({ error: "Failed to preview off-scope content scan" });
+    return;
+  }
+  if (preview.candidateQuestions === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runOffScopeContentScan(scope).catch((err) => {
+    console.error("Unhandled error in off-scope content scan:", err);
   });
   res.status(202).json({ started: true, ...preview });
 });

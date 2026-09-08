@@ -326,6 +326,58 @@ export async function startCurriculumReconciliation(
   return { started: body.started, unmatchedChapters: body.unmatchedChapters, affectedQuestions: body.affectedQuestions };
 }
 
+export type OffScopeScanScope = { boardName: string; gradeName: string; subjectName: string };
+export type OffScopeScanPreview = { candidateQuestions: number; inProgress: boolean };
+
+// See the service's own offScopeContentScan.ts for what this catches --
+// content that reached the catalogue before pipelineRunner.ts started
+// checking for it at mining time: a question that's actually a different
+// subject entirely, or actually a different grade's own syllabus content.
+// Same scoped, human-triggered, preview-first shape as cross-run merge
+// and curriculum reconciliation above, for the same reason -- a false
+// positive here silently discards real content and removes a legitimate
+// archetype.
+export async function previewOffScopeContentScan(scope: OffScopeScanScope): Promise<OffScopeScanPreview> {
+  const params = new URLSearchParams(scope);
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/off-scope-content-scan/preview?${params}`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Off-scope content scan preview failed with status ${res.status}`);
+  }
+  if (typeof body?.candidateQuestions !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { candidateQuestions: body.candidateQuestions, inProgress: Boolean(body.inProgress) };
+}
+
+export async function startOffScopeContentScan(scope: OffScopeScanScope): Promise<{ started: boolean; candidateQuestions: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/off-scope-content-scan/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(scope),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Off-scope content scan failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.candidateQuestions !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, candidateQuestions: body.candidateQuestions };
+}
+
 export async function mineArchetypeFamilies(
   subjectOrCourse: string,
   llmProvider?: ArchetypeMinerLlmProvider
