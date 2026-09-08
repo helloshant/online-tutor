@@ -148,6 +148,18 @@ export type TaxonomyMatch = "matched" | "no_match";
 // and pipelineRunner.ts (what filters on it) can't silently drift apart.
 export const OFF_SCOPE_CONTENT_FLAG = "off_scope_content";
 
+// Set by offScopeContentScan.ts (the RETROACTIVE sweep, not Stage 1 --
+// that pipeline never sets this) on a signature it evaluated with an LLM
+// call and did NOT flag as off-scope. Its only job is to make "checked,
+// found clean" distinguishable from "never checked at all" so a signature
+// already confirmed clean doesn't get re-sent to the LLM, and doesn't keep
+// inflating that scan's own "questions left to check" count, on every
+// future pass over the same scope. A signature the scan skipped outright
+// (bisection gave up on a poison-pill batch) is deliberately left WITHOUT
+// this flag -- it was never actually evaluated, so it must stay a
+// candidate for the next pass rather than being silently treated as clean.
+export const OFF_SCOPE_CHECKED_FLAG = "off_scope_checked";
+
 export type QuestionSignature = {
   question_id: string;
   education_context: EducationContext;
