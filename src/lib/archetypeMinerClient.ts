@@ -327,7 +327,13 @@ export async function startCurriculumReconciliation(
 }
 
 export type OffScopeScanScope = { boardName: string; gradeName: string; subjectName: string };
-export type OffScopeScanPreview = { candidateQuestions: number; inProgress: boolean };
+// flaggedQuestions: how many questions in this scope are SITTING, right
+// now, with a pending "off-scope" review-queue item -- distinct from
+// candidateQuestions (how many still need a look). A scope can show 0
+// candidates and still have real, unresolved flags waiting on a human;
+// see offScopeContentScan.ts's own countPendingFlaggedInScope for why
+// this can't be collapsed into a single "nothing left to scan" number.
+export type OffScopeScanPreview = { candidateQuestions: number; flaggedQuestions: number; inProgress: boolean };
 
 // See the service's own offScopeContentScan.ts for what this catches --
 // content that reached the catalogue before pipelineRunner.ts started
@@ -350,10 +356,10 @@ export async function previewOffScopeContentScan(scope: OffScopeScanScope): Prom
   if (!res.ok) {
     throw new Error(body?.error ?? `Off-scope content scan preview failed with status ${res.status}`);
   }
-  if (typeof body?.candidateQuestions !== "number") {
+  if (typeof body?.candidateQuestions !== "number" || typeof body?.flaggedQuestions !== "number") {
     throw new Error("Archetype-miner returned an unexpected response shape");
   }
-  return { candidateQuestions: body.candidateQuestions, inProgress: Boolean(body.inProgress) };
+  return { candidateQuestions: body.candidateQuestions, flaggedQuestions: body.flaggedQuestions, inProgress: Boolean(body.inProgress) };
 }
 
 export async function startOffScopeContentScan(scope: OffScopeScanScope): Promise<{ started: boolean; candidateQuestions: number }> {

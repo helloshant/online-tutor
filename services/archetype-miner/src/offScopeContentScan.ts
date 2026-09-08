@@ -83,7 +83,7 @@ function isLanguageArtsSubject(subjectName: string): boolean {
   return LANGUAGE_ARTS_SUBJECTS.has(subjectName.trim().toLowerCase());
 }
 
-async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
+async function loadAllSignatureRowsInScope(scope: Scope): Promise<SignatureRow[]> {
   const supabase = getSupabaseClient();
   const rows: SignatureRow[] = [];
   let offset = 0;
@@ -104,6 +104,11 @@ async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
     if (page.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
   }
+  return rows;
+}
+
+async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
+  const rows = await loadAllSignatureRowsInScope(scope);
   // Already-flagged rows were either caught by a previous scan or by
   // Stage 1 itself at mining time -- never re-flag/re-queue the same
   // question twice. Already-checked-and-clean rows (OFF_SCOPE_CHECKED_FLAG)
@@ -113,6 +118,40 @@ async function loadSignaturesInScope(scope: Scope): Promise<SignatureRow[]> {
     const flags = r.signature?.flags ?? [];
     return !flags.includes(OFF_SCOPE_CONTENT_FLAG) && !flags.includes(OFF_SCOPE_CHECKED_FLAG);
   });
+}
+
+// Confirmed live in production: a scope where every candidate has already
+// been checked or flagged shows the SAME "nothing left to scan" message
+// regardless of which -- so a scope sitting on real, still-pending flagged
+// questions (queued for a human, per applyFlag's own comment) looked
+// identical to a scope that came back completely clean. This count lets
+// the caller tell those two states apart instead of collapsing them.
+//
+// Counts by the review queue's own "pending" status, NOT by whether the
+// signature still carries OFF_SCOPE_CONTENT_FLAG -- resolveReviewItemAction
+// (the admin page's normal "resolve" button) only ever updates
+// archetype_review_queue, it never touches the signature's flags, so a
+// flag-based count would keep counting an item as pending forever after a
+// human already resolved it. The review queue's own status is genuinely
+// live. Scoped via the same run_ids this scope's own signatures already
+// belong to, rather than a second board/grade/subject join, since
+// loadAllSignatureRowsInScope already produced exactly that set.
+async function countPendingFlaggedInScope(scope: Scope): Promise<number> {
+  const supabase = getSupabaseClient();
+  const rows = await loadAllSignatureRowsInScope(scope);
+  const runIds = Array.from(new Set(rows.map((r) => r.run_id)));
+  if (runIds.length === 0) return 0;
+  const { count, error } = await supabase
+    .from("archetype_review_queue")
+    .select("queue_item_id", { count: "exact", head: true })
+    .eq("source", "stage1_off_scope_content")
+    .eq("status", "pending")
+    .in("run_id", runIds);
+  if (error) {
+    console.error("Off-scope content scan: failed to count pending flagged questions:", error);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 async function loadTextByRef(scope: Scope): Promise<Map<string, string>> {
@@ -178,16 +217,22 @@ async function loadCandidates(scope: Scope, syllabus: string[]): Promise<Candida
   return candidates;
 }
 
-export type OffScopeScanPreview = { candidateQuestions: number };
+export type OffScopeScanPreview = { candidateQuestions: number; flaggedQuestions: number };
 
-// Counts only -- no LLM call, no writes.
+// Counts only -- no LLM call, no writes. flaggedQuestions is computed
+// regardless of subject -- Stage 1's OWN mining-time OFF_SCOPE_CONTENT_FLAG
+// check (pipelineRunner.ts, a different mechanism entirely from this
+// file's LLM call) still runs for language-arts subjects, so a language
+// subject can genuinely have pending flags even though this file's own
+// scan never runs for it.
 export async function previewOffScopeContentScan(scope: Scope): Promise<OffScopeScanPreview> {
+  const flaggedQuestions = await countPendingFlaggedInScope(scope);
   // See isLanguageArtsSubject's own comment -- skip the syllabus lookup
   // too, since loadCandidates would return [] for it anyway.
-  if (isLanguageArtsSubject(scope.subjectName)) return { candidateQuestions: 0 };
+  if (isLanguageArtsSubject(scope.subjectName)) return { candidateQuestions: 0, flaggedQuestions };
   const syllabus = await loadAcceptableChapterValues(scope);
   const candidates = await loadCandidates(scope, syllabus);
-  return { candidateQuestions: candidates.length };
+  return { candidateQuestions: candidates.length, flaggedQuestions };
 }
 
 type Flagged = { ref: string; reason: string };
