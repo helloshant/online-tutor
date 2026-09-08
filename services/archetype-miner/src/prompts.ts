@@ -1045,6 +1045,22 @@ prompt: never invent a narrower definition of the subject than what
 "syllabus" actually lists, and never treat a specialized or technical-
 sounding chapter as if it must belong to some OTHER field.
 
+Naming an external-sounding field ("Environmental Science," "Geography,"
+"Anthropology," "Health Education," "Psychology," "Economics," etc.) is
+NEVER by itself a valid reason to flag a question -- it's the exact wrong
+shortcut this check keeps taking instead of doing the real comparison.
+Real-world/interdisciplinary-SOUNDING themes are core content of specific
+Biology chapters: deforestation, habitat loss, species extinction, and
+human environmental impact belong to Ecosystem/Biodiversity and
+Conservation/Organisms and Populations; disease, addiction, and public-
+health topics belong to Human Health and Disease; population/inheritance
+patterns belong to Evolution/Principles of Inheritance and Variation.
+Before writing a "reason" that cites an external field name, you must
+first identify the SPECIFIC syllabus entry whose real coverage is closest
+to this question's actual theme, and explain concretely why that specific
+entry does NOT cover it -- not just assert that the theme "sounds like"
+another field.
+
 Similarly, do NOT flag a question just because it covers a different
 chapter/topic than most of the OTHER questions in this same batch. A
 batch is an arbitrary slice of a scope's own questions, not one paper or
@@ -1072,7 +1088,7 @@ that's a legitimate (even if unusual or highly specific) example of the
 declared board/grade/subject; the common case is an EMPTY array:
 {
   "ref": "<verbatim, copied EXACTLY from the input>",
-  "reason": "<one sentence: what subject/grade this actually is, and why -- and confirm it matches none of the \"syllabus\" entries>"
+  "reason": "<name the CLOSEST syllabus entry to this question's actual theme and explain concretely why it doesn't cover this question, then state what subject/grade this actually is instead -- never just an external field name with no syllabus entry named and ruled out>"
 }
 
 OUTPUT
