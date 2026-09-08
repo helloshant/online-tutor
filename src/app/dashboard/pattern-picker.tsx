@@ -10,22 +10,20 @@ type DifficultyLevel = "Easy" | "Medium" | "Hard";
 
 // A curated, real exam pattern mined for a topic -- see the endpoint's own
 // comment (/api/topics/[id]/exercises/patterns) for the full shape.
-// difficultyDistribution is the pattern's own real historical spread,
-// shown as a hint next to the Easy/Medium/Hard buttons so a student can
-// see up front how (un)common the level they're about to pick actually is
-// for this pattern, rather than it silently being calibrated (or not)
-// only after they've already asked.
+// difficultyDistribution is the pattern's own real historical spread, used
+// both to pick a sensible default difficulty on first click (see
+// topDifficulty) and, once shown, as context next to the repeat/difficulty
+// controls -- a student can see how (un)common the level they're on
+// actually is for this pattern.
 type Pattern = {
   runId: string;
   archetypeId: string;
   name: string;
-  // Plain-language explanation of the underlying concept -- shown once
-  // this pattern is selected, ABOVE the Easy/Medium/Hard row, so a
-  // student gets a short refresher on the concept itself before
-  // attempting a question of this type, not just the pattern's own
-  // (often terse) name. null for an archetype that predates this field
-  // or hasn't been backfilled yet -- the difficulty row just shows with
-  // no paragraph above it then, same as the flow before this existed.
+  // Plain-language explanation of the underlying concept -- shown in the
+  // panel below once this pattern has generated at least one question, so
+  // a student gets a short refresher on the concept itself while
+  // practicing it, not just the pattern's own (often terse) name. null for
+  // an archetype that predates this field or hasn't been backfilled yet.
   studentExplanation: string | null;
   difficultyDistribution: Record<DifficultyLevel, number> | null;
   // Sorted ascending, e.g. [2025, 2026] -- suffixed onto the button label
@@ -42,6 +40,18 @@ type Pattern = {
 // distinct from any real archetypeId.
 const GENERATING_RANDOM = "__random__";
 const DIFFICULTY_LEVELS: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
+
+// The single most-observed level for this pattern's real mined questions,
+// used to pick a sensible default the FIRST time a student clicks it --
+// no reason to make them choose a difficulty before they've even seen one
+// question of this pattern. null (no data, or nothing classified) falls
+// back to requesting no particular difficulty at all, same as "Any".
+function topDifficulty(dist: Record<DifficultyLevel, number> | null): DifficultyLevel | undefined {
+  if (!dist) return undefined;
+  const total = dist.Easy + dist.Medium + dist.Hard;
+  if (total === 0) return undefined;
+  return DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0][0];
+}
 
 // "Usually Hard (7 of 10 mined)" -- raw counts, not a percentage, so this
 // stays honest about how little data some patterns have (a percentage of
@@ -70,18 +80,35 @@ function describeYearsSuffix(years: number[], countByYear: Record<string, number
   return ` (${parts.join(", ")})`;
 }
 
+// Which pattern (or, with pattern: null, the random "Generate another")
+// most recently generated a question, and at which difficulty -- drives
+// the repeat panel below the pill row. Distinct from `generating` (which
+// tracks an in-flight request): this stays set across requests so
+// "Try another like this" always knows what to repeat.
+type ActiveSelection = { pattern: Pattern | null; difficulty: DifficultyLevel | undefined };
+
 // Curated "practice a specific mined pattern" picker (Tier C/D) --
 // self-contained: fetches its own pattern list for `topicId` on mount
 // (and again on any topicId/preferEnglish change) and manages its own
-// generate/difficulty-selection state, so it can be dropped under any
-// surface that has resolved a real syllabus_topics id -- originally built
-// for (and still used by) TopicSummaryMessage's "Relevant Exercises"
-// section, where topicId is known statically (the topic that was
-// clicked); also dropped directly under an ordinary chat reply
-// (MessageBubble in chat-panel.tsx), where topicId is instead resolved
-// server-side from the question itself (see /api/chat/route.ts's
-// matchedTopicId) -- same component either way, so a fix here never needs
-// making twice.
+// generate/selection state, so it can be dropped under any surface that
+// has resolved a real syllabus_topics id -- originally built for (and
+// still used by) TopicSummaryMessage's "Relevant Exercises" section,
+// where topicId is known statically (the topic that was clicked); also
+// dropped directly under an ordinary chat reply (MessageBubble in
+// chat-panel.tsx), where topicId is instead resolved server-side from the
+// question itself (see /api/chat/route.ts's matchedTopicId) -- same
+// component either way, so a fix here never needs making twice.
+//
+// One click, one question, immediately -- no difficulty gate in front of
+// the first question of a pattern. Confirmed directly: the earlier
+// two-step "click a pattern -> pick Easy/Medium/Hard/Any before anything
+// happens" shape forced every student through a calibration decision even
+// when they didn't care, and then produced exactly one question with no
+// easy way to keep going -- "practice" in name, a dead end in practice.
+// Clicking a pattern now generates right away at that pattern's own most
+// historically common difficulty (topDifficulty); the difficulty row
+// becomes an OPTIONAL refinement shown only after the first question,
+// next to a one-click "Try another like this" repeat.
 //
 // Renders nothing at all once loaded with an empty pattern list (the
 // common case for most topics right now, or any question the server
@@ -101,11 +128,7 @@ export function PatternPicker({
 }) {
   const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [loaded, setLoaded] = useState(false);
-  // Which pattern (or, with pattern: null, "Generate another") the
-  // student has clicked but not yet chosen a difficulty for -- clicking a
-  // pattern name doesn't generate immediately, it opens the
-  // Easy/Medium/Hard/Any row below it first.
-  const [pendingSelection, setPendingSelection] = useState<{ pattern: Pattern | null } | null>(null);
+  const [active, setActive] = useState<ActiveSelection | null>(null);
   // Holds the archetypeId of whichever button was clicked (or
   // GENERATING_RANDOM for "Generate another"), so only THAT button shows
   // a busy state -- not a single shared boolean that would grey out every
@@ -113,13 +136,15 @@ export function PatternPicker({
   const [generating, setGenerating] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  // No manual reset of loaded/patterns/pendingSelection/generateError here
-  // on a topicId/preferEnglish change -- callers key this component on
-  // both (see TopicPractice), so a change remounts it fresh with already-
+  // No manual reset of loaded/patterns/active/generateError here on a
+  // topicId/preferEnglish change -- callers key this component on both
+  // (see TopicPractice), so a change remounts it fresh with already-
   // correct initial state instead of this effect reaching back to reset
   // state React's own docs call out as the anti-pattern this replaces
   // (https://react.dev/learn/you-might-not-need-an-effect#resetting-all-
-  // state-when-a-prop-changes).
+  // state-when-a-prop-changes). Fetching itself is exactly what useEffect
+  // IS for (unlike a plain state adjustment) -- this is the one place in
+  // this component that still needs one.
   useEffect(() => {
     let cancelled = false;
 
@@ -143,18 +168,19 @@ export function PatternPicker({
     };
   }, [topicId, preferEnglish]);
 
-  async function handleGeneratePattern(pattern?: Pattern, requestedDifficulty?: DifficultyLevel) {
+  async function handleGenerate(selection: ActiveSelection) {
     if (generating !== null) return;
-    setGenerating(pattern?.archetypeId ?? GENERATING_RANDOM);
+    const key = selection.pattern?.archetypeId ?? GENERATING_RANDOM;
+    setGenerating(key);
     setGenerateError(null);
-    setPendingSelection(null);
+    setActive(selection);
     try {
       const res = await fetch(`/api/topics/${topicId}/exercises/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(pattern ? { archetypeId: pattern.archetypeId, archetypeRunId: pattern.runId } : {}),
-          ...(requestedDifficulty ? { requestedDifficulty } : {}),
+          ...(selection.pattern ? { archetypeId: selection.pattern.archetypeId, archetypeRunId: selection.pattern.runId } : {}),
+          ...(selection.difficulty ? { requestedDifficulty: selection.difficulty } : {}),
           preferEnglish,
         }),
       });
@@ -183,15 +209,15 @@ export function PatternPicker({
       {generateError && <p className="mb-2 text-xs text-red-600">{generateError}</p>}
       <div className="flex flex-wrap gap-1.5">
         {patterns.map((p) => {
-          const isSelected = pendingSelection?.pattern?.archetypeId === p.archetypeId;
+          const isActive = active?.pattern?.archetypeId === p.archetypeId;
           return (
             <button
               key={`${p.runId}:${p.archetypeId}`}
               type="button"
-              onClick={() => setPendingSelection(isSelected ? null : { pattern: p })}
+              onClick={() => void handleGenerate({ pattern: p, difficulty: topDifficulty(p.difficultyDistribution) })}
               disabled={generating !== null}
               className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-                isSelected ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
+                isActive ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
               }`}
             >
               {generating === p.archetypeId ? "Generating…" : `${p.name}${describeYearsSuffix(p.yearsObserved, p.questionCountByYear)}`}
@@ -200,60 +226,68 @@ export function PatternPicker({
         })}
         <button
           type="button"
-          onClick={() => setPendingSelection(pendingSelection && !pendingSelection.pattern ? null : { pattern: null })}
+          onClick={() => void handleGenerate({ pattern: null, difficulty: undefined })}
           disabled={generating !== null}
           className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-            pendingSelection && !pendingSelection.pattern
-              ? "bg-foreground/70 text-white"
-              : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+            active && !active.pattern ? "bg-foreground/70 text-white" : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
           }`}
         >
           {generating === GENERATING_RANDOM ? "Generating…" : "Generate another"}
         </button>
       </div>
 
-      {/* Picking a pattern (or "Generate another") doesn't fire the
-          request immediately -- it opens this panel first: a short
-          concept refresher (when this pattern has one -- see
-          studentExplanation's own comment) above the difficulty row, so a
-          student sees what the underlying idea actually IS before being
-          asked to reason through it, not just the pattern's own (often
-          terse) name; then the difficulty row itself, so they can also
-          see the pattern's real historical spread before deciding, rather
-          than only finding out afterward that (say) "Easy" almost never
-          appears in real exams for it. */}
-      {pendingSelection && (
+      {/* Only appears once at least one question has actually been
+          generated this session -- a place to keep going with the same
+          pattern (one click, no re-deciding anything) and, optionally,
+          nudge the difficulty for the NEXT one. Never blocks the first
+          question the way the old pre-generation gate did. */}
+      {active && (
         <div className="mt-2 rounded-lg bg-background p-2">
-          {pendingSelection.pattern?.studentExplanation && (
-            <p className="mb-2 text-xs text-foreground/70">{pendingSelection.pattern.studentExplanation}</p>
-          )}
+          {active.pattern?.studentExplanation && <p className="mb-2 text-xs text-foreground/70">{active.pattern.studentExplanation}</p>}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-foreground/50">
-              {pendingSelection.pattern
-                ? (describeDifficultyHint(pendingSelection.pattern.difficultyDistribution) ?? "No difficulty data yet —")
-                : "Difficulty:"}
-            </span>
-            {DIFFICULTY_LEVELS.map((level) => (
-              <button
-                key={level}
-                type="button"
-                onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined, level)}
-                disabled={generating !== null}
-                className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand hover:bg-brand/20 disabled:opacity-60"
-              >
-                {level}
-              </button>
-            ))}
             <button
               type="button"
-              onClick={() => handleGeneratePattern(pendingSelection.pattern ?? undefined)}
+              onClick={() => void handleGenerate(active)}
               disabled={generating !== null}
-              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-60"
+              className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
-              Any
+              {generating !== null ? "Generating…" : active.pattern ? "Try another like this" : "Another random one"}
             </button>
-            <button type="button" onClick={() => setPendingSelection(null)} className="ml-auto text-xs text-foreground/40 hover:underline">
-              Cancel
+            {active.pattern && (
+              <>
+                <span className="text-xs text-foreground/40">
+                  {describeDifficultyHint(active.pattern.difficultyDistribution) ?? "No difficulty data yet"}
+                  {active.difficulty ? ` — now on ${active.difficulty}` : ""}
+                </span>
+                {DIFFICULTY_LEVELS.map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => void handleGenerate({ pattern: active.pattern, difficulty: level })}
+                    disabled={generating !== null || active.difficulty === level}
+                    title={`Generate another, ${level}`}
+                    className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                  >
+                    {level}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => void handleGenerate({ pattern: active.pattern, difficulty: undefined })}
+                  disabled={generating !== null || active.difficulty === undefined}
+                  title="Generate another, unconstrained difficulty"
+                  className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                >
+                  Any
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setActive(null)}
+              className="ml-auto text-xs text-foreground/40 hover:underline"
+            >
+              Hide
             </button>
           </div>
         </div>
