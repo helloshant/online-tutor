@@ -66,6 +66,38 @@ function stripLabelPrefix(heading: string): string | null {
   return stripped !== heading && stripped.trim() ? stripped.trim() : null;
 }
 
+// Confirmed live, same underlying problem as LABEL_PREFIX but in Bengali:
+// a table of contents listing entries as "দ্বিতীয় পাঠ [title]" ("Second
+// Lesson [title]") made the model prefix every proposed heading with that
+// same ordinal-word label, even though the chapter's own body just starts
+// with the bare title -- LABEL_PREFIX doesn't catch this because it only
+// recognizes English label WORDS ("Lesson", "Chapter", ...) followed by an
+// Arabic numeral, not an ordinal spelled out as a word in another script
+// (Bengali "দ্বিতীয়", Hindi "दूसरा"/"द्वितीय", and whatever else this app
+// might eventually need to support). Enumerating every language's own
+// ordinal words is a losing game; stripping the heading's own leading
+// words one at a time, most conservative first, generalizes to ANY label
+// convention without knowing what language or word it's written in --
+// added to resolveBoundaries's own variant pool (see that function's own
+// comment on why POOLED, not tried only once everything else fails: the
+// label-heavy full heading here often matches ONLY in the table of
+// contents, never in the body at all, so stopping as soon as that one
+// (wrong) match is found would never even try the variant that finds the
+// real one).
+//
+// Capped both by how much is stripped and how much must remain: a short,
+// generic residual string is far more likely to match somewhere spurious
+// (a running header, an unrelated sentence) than a genuinely mismatched
+// label prefix is to need more than a few words stripped from it.
+const MAX_LEADING_WORDS_STRIPPED = 4;
+const MIN_REMAINING_WORDS = 3;
+
+function stripLeadingWords(heading: string, count: number): string | null {
+  const words = heading.split(/\s+/).filter(Boolean);
+  if (words.length - count < MIN_REMAINING_WORDS) return null;
+  return words.slice(count).join(" ");
+}
+
 // One case-insensitive, whitespace-tolerant regex for `candidate` --
 // strictly matches everything an exact, case-sensitive substring search
 // would too (a run of exactly the same whitespace the candidate has is
@@ -133,6 +165,31 @@ function findAllOccurrences(text: string, candidate: string): number[] {
 //     could in principle push this too far forward; accepted as a much
 //     smaller, much rarer risk than the table-of-contents case this
 //     fixes, and only this one boundary ever takes this branch.)
+//
+// Every reasonable excerpt to search for is POOLED into one combined set
+// of occurrences, not tried one at a time stopping at the first that
+// finds anything -- deliberately, even though stripLeadingWords's own
+// variants are individually less precise than the heading as given.
+// Confirmed live: a label-heavy heading (the full TOC-style excerpt, e.g.
+// "দ্বিতীয় পাঠ [title] [author]") often matches ONLY inside the table of
+// contents itself, never anywhere in the body -- stopping as soon as that
+// one (wrong) match was found would never even try the stripped variant
+// that finds the real, later occurrence, defeating the very "last
+// occurrence wins" logic below that this whole file exists to get right.
+// Pooling lets every variant's matches compete on equal footing; the
+// position-selection rules already handle picking the right one out of
+// however many turn up.
+function candidateVariants(heading: string): string[] {
+  const variants = [heading];
+  const withoutLabel = stripLabelPrefix(heading);
+  if (withoutLabel) variants.push(withoutLabel);
+  for (let strip = 1; strip <= MAX_LEADING_WORDS_STRIPPED; strip++) {
+    const stripped = stripLeadingWords(heading, strip);
+    if (stripped) variants.push(stripped);
+  }
+  return variants;
+}
+
 function resolveBoundaries(
   text: string,
   candidates: { chapterTitle: string; heading: string }[]
@@ -142,11 +199,7 @@ function resolveBoundaries(
   let searchFrom = 0;
 
   for (const candidate of candidates) {
-    const variants = [candidate.heading];
-    const withoutLabel = stripLabelPrefix(candidate.heading);
-    if (withoutLabel) variants.push(withoutLabel);
-
-    const occurrences = variants
+    const occurrences = candidateVariants(candidate.heading)
       .flatMap((variant) => findAllOccurrences(text, variant))
       .filter((index) => index >= searchFrom)
       .sort((a, b) => a - b);
