@@ -2,7 +2,7 @@
 
 import { requireAdminPage } from "@/lib/auth";
 import { runVisionOcr, type VisionOcrMimeType } from "@/lib/visionOcrClient";
-import { segmentBookIntoChapters, type BookChapterChunk } from "@/lib/archetypeMinerClient";
+import { segmentBookIntoChapters, type BookChapterChunk, type UnresolvedBookBoundary } from "@/lib/archetypeMinerClient";
 
 // A whole scanned BOOK, not just a paper -- raised from the 20MB single-
 // file cap this page started with (sized for a short exam paper) once "OCR
@@ -119,7 +119,7 @@ const MAX_BOOK_TEXT_CHARS = 2_000_000;
 
 export type SegmentBookState = {
   error?: string;
-  result?: { chunks: BookChapterChunk[]; unresolvedChapterTitles: string[] };
+  result?: { chunks: BookChapterChunk[]; unresolved: UnresolvedBookBoundary[] };
 };
 
 // The "feed this into Chapter Notes" step -- takes whatever text is
@@ -142,14 +142,14 @@ export async function segmentBookAction(_prevState: SegmentBookState, formData: 
   }
 
   try {
-    const { chunks, unresolvedChapterTitles } = await segmentBookIntoChapters(text);
+    const { chunks, unresolved } = await segmentBookIntoChapters(text);
     if (chunks.length === 0) {
       return {
         error:
           "Couldn't find any clear chapter boundaries in this text. Try reviewing/cleaning the extracted text above and retry, or use the plain text with the archetype-miner submit-run form instead.",
       };
     }
-    return { result: { chunks, unresolvedChapterTitles } };
+    return { result: { chunks, unresolved } };
   } catch (err) {
     console.error("Book chapter segmentation request failed:", err);
     return { error: "The archetype-miner service is temporarily unavailable. Please try again shortly." };

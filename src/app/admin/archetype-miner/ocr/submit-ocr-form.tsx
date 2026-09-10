@@ -177,13 +177,24 @@ export function SubmitOcrForm() {
                       Download book-chapters.json
                     </button>
                   </div>
-                  {segmentState.result.unresolvedChapterTitles.length > 0 && (
-                    <p className="text-xs text-amber-600">
-                      Couldn&apos;t place {segmentState.result.unresolvedChapterTitles.length} proposed chapter
-                      {segmentState.result.unresolvedChapterTitles.length === 1 ? "" : "s"} in the text (
-                      {segmentState.result.unresolvedChapterTitles.join(", ")}) -- they&apos;re not in the download;
-                      that content stayed folded into whichever chapter surrounds it.
-                    </p>
+                  {segmentState.result.unresolved.length > 0 && (
+                    <div className="space-y-1 text-xs text-amber-600">
+                      <p>
+                        Couldn&apos;t place {segmentState.result.unresolved.length} proposed chapter
+                        {segmentState.result.unresolved.length === 1 ? "" : "s"} in the text -- they&apos;re not in
+                        the download; that content stayed folded into whichever chapter surrounds it. The excerpt
+                        shown is exactly what was searched for (verbatim, case-insensitive) and not found -- compare
+                        it against the extracted text above to see why.
+                      </p>
+                      <ul className="space-y-0.5 pl-4">
+                        {segmentState.result.unresolved.map((u, i) => (
+                          <li key={i}>
+                            <span className="font-medium">{u.chapterTitle}</span> -- searched for:{" "}
+                            <span className="rounded bg-amber-500/10 px-1 py-0.5 font-mono">{u.heading}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   <ol className="space-y-1 text-xs text-foreground/60">
                     {segmentState.result.chunks.map((c) => (

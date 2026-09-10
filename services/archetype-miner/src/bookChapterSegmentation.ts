@@ -27,16 +27,21 @@ type RawBoundary = { chapter_title: string; heading: string };
 
 export type BookChapterChunk = { chapter_number: number; chapter_title: string; text: string };
 
+// A boundary the model proposed whose own "heading" excerpt couldn't
+// actually be found in the source text (a paraphrase slipped through
+// despite the prompt's own instruction, or a heading spanning an OCR
+// line-break oddly enough that even the tolerant search below still
+// misses it) -- surfaced rather than silently dropped, same "fail open
+// per unit, but tell the admin" convention as ocrPipeline.ts's own
+// per-page-range chunkErrors. Keeps the model's own attempted `heading`
+// text, not just the chapter_title -- without it, there's no way to tell
+// WHY a match failed (a real paraphrase vs. a matcher gap vs. something
+// else) short of re-deriving it blind.
+export type UnresolvedBoundary = { chapterTitle: string; heading: string };
+
 export type SegmentBookResult = {
   chunks: BookChapterChunk[];
-  // Chapter titles the model proposed but whose own "heading" excerpt
-  // couldn't actually be found in the source text (a paraphrase slipped
-  // through despite the prompt's own instruction, or a heading spanning
-  // an OCR line-break oddly enough that even the whitespace-tolerant
-  // search below still misses it) -- surfaced rather than silently
-  // dropped, same "fail open per unit, but tell the admin" convention as
-  // ocrPipeline.ts's own per-page-range chunkErrors.
-  unresolvedChapterTitles: string[];
+  unresolved: UnresolvedBoundary[];
 };
 
 function escapeRegExp(s: string): string {
@@ -94,11 +99,11 @@ export async function segmentBookIntoChapters(params: { text: string }): Promise
   });
 
   if (!Array.isArray(data)) {
-    return { chunks: [], unresolvedChapterTitles: [] };
+    return { chunks: [], unresolved: [] };
   }
 
   const resolved: { chapterTitle: string; index: number }[] = [];
-  const unresolvedChapterTitles: string[] = [];
+  const unresolved: UnresolvedBoundary[] = [];
 
   for (const item of data) {
     if (typeof item !== "object" || item === null) continue;
@@ -108,7 +113,7 @@ export async function segmentBookIntoChapters(params: { text: string }): Promise
 
     const index = findHeadingIndex(params.text, b.heading);
     if (index === -1) {
-      unresolvedChapterTitles.push(b.chapter_title.trim());
+      unresolved.push({ chapterTitle: b.chapter_title.trim(), heading: b.heading });
       continue;
     }
     resolved.push({ chapterTitle: b.chapter_title.trim(), index });
@@ -130,5 +135,5 @@ export async function segmentBookIntoChapters(params: { text: string }): Promise
     };
   });
 
-  return { chunks, unresolvedChapterTitles };
+  return { chunks, unresolved };
 }
