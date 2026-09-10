@@ -46,6 +46,26 @@ function getClient(): DocumentProcessorServiceClient {
 
 export type DocumentAiResult = { text: string } | { error: string };
 
+// Reported live: a Bengali-medium scanned book came back as pure gibberish
+// -- not ordinary OCR noise (misread individual characters within
+// otherwise-real Bengali words), but plausible-looking LATIN letters and
+// symbols throughout ("WAGOGIA DIÓS", "fayyada"), as if the page had been
+// read as English/Latin script from the start rather than Bengali at all.
+// Without an explicit hint, Document AI's own general "Document OCR"
+// processor auto-detects among its 200+ supported languages/scripts per
+// page -- evidently reliable enough for this app's own English and Hindi
+// papers so far (never reported before this), but not for Bengali, at
+// least not for a real scan/photo of average quality. `languageHints`
+// (BCP-47 codes) biases that auto-detection toward the scripts actually
+// expected here -- it does not RESTRICT recognition to only these, so an
+// English paper or a Hindi one is no worse off with all three listed than
+// with none at all. Every language this app's own three mediums cover, so
+// this never needs to change per-request (the OCR page itself has no
+// language selector of its own -- see its own page.tsx -- an admin uploads
+// whatever paper/book they have, in whichever of the three it's written
+// in).
+const LANGUAGE_HINTS = ["en", "hi", "bn"];
+
 // Reported directly: OCR for a real CBSE Grade 12 Mathematics paper
 // (65-7-1, diagram/graph-heavy -- typical of a Math paper, unlike a
 // mostly-text Hindi/English paper) failed with "GoogleError: Total
@@ -116,6 +136,9 @@ export async function runDocumentAiOcr(params: {
         // response.document.text, never the page images, so there's no
         // downside to always requesting the higher cap.
         imagelessMode: true,
+        // See LANGUAGE_HINTS's own comment -- fixes Bengali coming back as
+        // misread Latin gibberish.
+        processOptions: { ocrConfig: { hints: { languageHints: LANGUAGE_HINTS } } },
       },
       PROCESS_DOCUMENT_CALL_OPTIONS
     );
