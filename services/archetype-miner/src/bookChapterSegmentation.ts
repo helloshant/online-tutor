@@ -28,15 +28,15 @@ type RawBoundary = { chapter_title: string; heading: string };
 export type BookChapterChunk = { chapter_number: number; chapter_title: string; text: string };
 
 // A boundary the model proposed whose own "heading" excerpt couldn't
-// actually be found in the source text (a paraphrase slipped through
-// despite the prompt's own instruction, or a heading spanning an OCR
-// line-break oddly enough that even the tolerant search below still
-// misses it) -- surfaced rather than silently dropped, same "fail open
-// per unit, but tell the admin" convention as ocrPipeline.ts's own
-// per-page-range chunkErrors. Keeps the model's own attempted `heading`
-// text, not just the chapter_title -- without it, there's no way to tell
-// WHY a match failed (a real paraphrase vs. a matcher gap vs. something
-// else) short of re-deriving it blind.
+// actually be located (at all, or in the right place -- see
+// resolveBoundaries's own comment) in the source text -- surfaced rather
+// than silently dropped, same "fail open per unit, but tell the admin"
+// convention as ocrPipeline.ts's own per-page-range chunkErrors. Keeps the
+// model's own attempted `heading` text, not just the chapter_title --
+// without it, there's no way to tell WHY a match failed short of
+// re-deriving it blind (confirmed directly: this is exactly what let a
+// real table-of-contents mismatch get diagnosed at all, see
+// resolveBoundaries's own comment).
 export type UnresolvedBoundary = { chapterTitle: string; heading: string };
 
 export type SegmentBookResult = {
@@ -57,8 +57,8 @@ function escapeRegExp(s: string): string {
 // physically adjacent to it at that exact spot. A reasonable, very common
 // thing for a model to do (echoing the table of contents' own numbering
 // convention) that no amount of "copy it verbatim" prompt wording alone
-// reliably prevents, so this exists as a second real attempt rather than
-// trusting the prompt to be followed perfectly every time.
+// reliably prevents, so this exists as a second candidate excerpt to
+// search for, alongside the heading exactly as given.
 const LABEL_PREFIX = /^(lesson|chapter|unit|poem|story|part)\s*\d+\s*[:.)-]?\s+|^\(?\d+\)?\s*[:.)-]\s+/i;
 
 function stripLabelPrefix(heading: string): string | null {
@@ -66,51 +66,102 @@ function stripLabelPrefix(heading: string): string | null {
   return stripped !== heading && stripped.trim() ? stripped.trim() : null;
 }
 
-// Tries a plain indexOf first (the common case: the model copied it
-// verbatim, as instructed), then case-insensitive, then case-insensitive
-// AND whitespace-tolerant (runs of whitespace in `candidate` match ANY
-// run of whitespace in `text`, so an OCR line-wrap or a stray double space
-// doesn't defeat an otherwise-correct match). Returns -1, never throws,
-// when none of the three finds it.
-function tryFind(text: string, candidate: string): number {
-  const direct = text.indexOf(candidate);
-  if (direct !== -1) return direct;
-
-  const caseInsensitive = text.toLowerCase().indexOf(candidate.toLowerCase());
-  if (caseInsensitive !== -1) return caseInsensitive;
-
+// One case-insensitive, whitespace-tolerant regex for `candidate` --
+// strictly matches everything an exact, case-sensitive substring search
+// would too (a run of exactly the same whitespace the candidate has is
+// still a valid \s+ match), so one regex covers "copied verbatim" all the
+// way down to "same words, different case/line-wrap" in a single pass.
+// Runs of whitespace in `candidate` match ANY run of whitespace in the
+// text -- an OCR line-wrap or a stray double space between the same words
+// doesn't defeat an otherwise-correct match. Returns null for an
+// all-whitespace candidate (nothing meaningful to search for).
+function buildHeadingRegex(candidate: string): RegExp | null {
   const words = candidate.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return -1;
-  const pattern = words.map(escapeRegExp).join("\\s+");
-  const match = new RegExp(pattern, "i").exec(text);
-  return match ? match.index : -1;
+  if (words.length === 0) return null;
+  return new RegExp(words.map(escapeRegExp).join("\\s+"), "gi");
 }
 
-// Finds `heading`'s real position in `text`. Two independent sources of
-// drift between what the model returned and the literal source bytes are
-// tolerated, both confirmed directly against real live failures:
-//   - CASE/WHITESPACE (see tryFind's own comment) -- a printed book's own
-//     headings are often rendered in full caps, but the model's idea of a
-//     "clean" heading, even asked to copy verbatim, can still come back
-//     title-cased.
-//   - A LABEL PREFIX the model added that isn't physically adjacent to
-//     the title at its own body location (see stripLabelPrefix's own
-//     comment) -- tried only as a fallback, after the heading AS GIVEN
-//     fails every tryFind variant, so a heading that's already correct
-//     and happens to start with a number-like word isn't needlessly
-//     second-guessed.
-// Returns -1, never throws, when nothing matches even with every
-// tolerance -- the caller reports that boundary as unresolved rather than
-// guessing.
-function findHeadingIndex(text: string, heading: string): number {
-  const trimmed = heading.trim();
-  if (!trimmed) return -1;
+// Every position `candidate` matches in `text`, in order -- not just the
+// first. Needed because the SAME title can legitimately appear more than
+// once in a real book (most concretely: once in a table of contents near
+// the front, once again at the chapter's own real starting point) --
+// see resolveBoundaries's own comment for why which occurrence is chosen
+// matters.
+function findAllOccurrences(text: string, candidate: string): number[] {
+  const regex = buildHeadingRegex(candidate);
+  if (!regex) return [];
+  const indices: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text))) {
+    indices.push(match.index);
+    // Defensive only -- buildHeadingRegex never produces a pattern that
+    // can match an empty string (every candidate has at least one real
+    // word), so this never actually fires; it just guards against an
+    // infinite loop if that ever stopped being true.
+    if (match[0].length === 0) regex.lastIndex++;
+  }
+  return indices;
+}
 
-  const direct = tryFind(text, trimmed);
-  if (direct !== -1) return direct;
+// Resolves every proposed boundary to a real position in `text`, in the
+// SAME order the model returned them (the prompt asks for chapters "in
+// the order they appear in the text" -- trusted here specifically to
+// decide the ORDER boundaries are searched in, not blindly trusted for
+// their final position, which is still only ever the result of finding a
+// real occurrence).
+//
+// Reported live, confirmed directly: independently searching the WHOLE
+// text for each heading's FIRST occurrence (the original, simpler
+// approach) put 6 of 8 real chapters in the wrong place -- their titles
+// also appeared, all clustered together, in the book's own table of
+// contents near the front, and the first-occurrence search landed there
+// instead of at each chapter's real starting point. Fixed with a
+// sequential, cursor-based search instead:
+//   - Every boundary after the first successfully-resolved one is
+//     searched for starting AFTER the previous one's own resolved
+//     position (never earlier) -- a real chapter's content can't occur
+//     before the chapter before it, so this alone rules out matching
+//     anything in the table of contents (always earlier in the book) for
+//     every chapter except conceivably the very first.
+//   - The FIRST boundary that resolves at all has no earlier boundary to
+//     anchor past a table of contents with, so it instead takes the LAST
+//     matching occurrence in the text from that point on, not the first
+//     -- a table of contents mention is virtually always earlier than
+//     the real chapter start, so the latest occurrence is the safer
+//     choice specifically for this one boundary. (A recurring running
+//     header repeating the same title on every page of a LATER chapter
+//     could in principle push this too far forward; accepted as a much
+//     smaller, much rarer risk than the table-of-contents case this
+//     fixes, and only this one boundary ever takes this branch.)
+function resolveBoundaries(
+  text: string,
+  candidates: { chapterTitle: string; heading: string }[]
+): { resolved: { chapterTitle: string; index: number }[]; unresolved: UnresolvedBoundary[] } {
+  const resolved: { chapterTitle: string; index: number }[] = [];
+  const unresolved: UnresolvedBoundary[] = [];
+  let searchFrom = 0;
 
-  const withoutLabel = stripLabelPrefix(trimmed);
-  return withoutLabel ? tryFind(text, withoutLabel) : -1;
+  for (const candidate of candidates) {
+    const variants = [candidate.heading];
+    const withoutLabel = stripLabelPrefix(candidate.heading);
+    if (withoutLabel) variants.push(withoutLabel);
+
+    const occurrences = variants
+      .flatMap((variant) => findAllOccurrences(text, variant))
+      .filter((index) => index >= searchFrom)
+      .sort((a, b) => a - b);
+
+    if (occurrences.length === 0) {
+      unresolved.push({ chapterTitle: candidate.chapterTitle, heading: candidate.heading });
+      continue;
+    }
+
+    const index = resolved.length === 0 ? occurrences[occurrences.length - 1] : occurrences[0];
+    resolved.push({ chapterTitle: candidate.chapterTitle, index });
+    searchFrom = index + 1;
+  }
+
+  return { resolved, unresolved };
 }
 
 // The whole point of this file. `text` is the admin-reviewed raw OCR
@@ -132,28 +183,16 @@ export async function segmentBookIntoChapters(params: { text: string }): Promise
     return { chunks: [], unresolved: [] };
   }
 
-  const resolved: { chapterTitle: string; index: number }[] = [];
-  const unresolved: UnresolvedBoundary[] = [];
-
+  const candidates: { chapterTitle: string; heading: string }[] = [];
   for (const item of data) {
     if (typeof item !== "object" || item === null) continue;
     const b = item as Partial<RawBoundary>;
     if (typeof b.chapter_title !== "string" || !b.chapter_title.trim()) continue;
     if (typeof b.heading !== "string" || !b.heading.trim()) continue;
-
-    const index = findHeadingIndex(params.text, b.heading);
-    if (index === -1) {
-      unresolved.push({ chapterTitle: b.chapter_title.trim(), heading: b.heading });
-      continue;
-    }
-    resolved.push({ chapterTitle: b.chapter_title.trim(), index });
+    candidates.push({ chapterTitle: b.chapter_title.trim(), heading: b.heading.trim() });
   }
 
-  // Ordered by where each boundary ACTUALLY occurs in the source text --
-  // the model's own output order isn't trusted for this, only the
-  // verbatim match found above is (a model can list boundaries out of
-  // order without that being a sign anything else is wrong).
-  resolved.sort((a, b) => a.index - b.index);
+  const { resolved, unresolved } = resolveBoundaries(params.text, candidates);
 
   const chunks: BookChapterChunk[] = resolved.map((boundary, i) => {
     const start = boundary.index;

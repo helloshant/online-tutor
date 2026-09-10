@@ -1149,8 +1149,20 @@ Identify every point in the text where a NEW CHAPTER genuinely begins --
 the level a student would think of as "one chapter" of the book, matching
 how a table of contents would list it (a distinct lesson, story, poem, or
 unit), NOT a sub-heading, exercise section, footnote, or running header
-within one that's already in progress. For each real chapter found,
-report:
+within one that's already in progress.
+
+If the book's own actual table of contents appears in this text (a block
+listing every chapter's title, often with a number and/or page number,
+all close together near the front), that block itself is NEVER a chapter
+boundary -- it is a LIST of where the real chapters are, not one of them.
+A chapter's title commonly appears TWICE in a book for exactly this
+reason: once as a line in the table of contents, and again, later, where
+that chapter actually begins. Always point at the LATER, real occurrence
+-- the one with actual chapter content (a byline, an opening paragraph, a
+poem's own first lines) following it, not another chapter's title a line
+or two below it the way a table of contents entry would have.
+
+For each real chapter found, report:
 - chapter_title: the chapter's own title, as it actually appears --
   cleaned of obvious OCR garbling if you're confident what it actually
   says, otherwise left as printed.
