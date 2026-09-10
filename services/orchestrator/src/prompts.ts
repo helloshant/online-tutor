@@ -158,6 +158,58 @@ Write ONLY in ${responseLanguage}, regardless of what language this prompt is in
 ${TABLE_FORMAT_RULE}`;
 }
 
+// The grounded counterpart to buildTopicSummaryPrompt above, for the case
+// that prompt can't handle at all: a topic that DOES have real,
+// admin-authored chapter_documents content (see getStoredChapterSummary in
+// chapterDocuments.ts), but is being requested in a DIFFERENT language than
+// that content is actually written in.
+//
+// Reported live: server.ts's own topic-summary route used to treat
+// `medium` (the topic's COHORT tag -- see studentScope.ts's own top
+// comment in the web app on why that's a different question from "what
+// language is this text in") as if it were always the language the stored
+// content is written in, so any request whose responseLanguage differed
+// from `medium` skipped the real content entirely and fell back to
+// buildTopicSummaryPrompt -- the model inventing a summary from its own
+// general knowledge, completely ungrounded. That was harmless coincidence
+// for a single-cohort subject where medium and content-language genuinely
+// are the same thing (CBSE's own English, say) -- but for a subject like
+// West Bengal Board's own English-Second-Language course (medium=Bengali,
+// the COHORT it serves, but its actual chapter_documents text is authored
+// in English), toggling to ANY language other than the cohort tag lost
+// the real content every single time, including the common case of a
+// Bengali-medium student's own DEFAULT English view of it.
+//
+// This prompt is the fix: given the SAME real content, render it in a
+// different language instead of discarding it -- a translation/adaptation
+// task, not a fresh-knowledge one, so the model is explicitly told to stay
+// faithful to what's actually in sourceContent rather than draw on
+// whatever it happens to already know about the chapter/topic by name.
+export function buildTopicSummaryTranslationPrompt(params: {
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  responseLanguage: Medium;
+  chapter: string;
+  topic: string;
+  sourceContent: string;
+}): string {
+  const { subjectName, boardName, gradeName, responseLanguage, chapter, topic, sourceContent } = params;
+  return `You are adapting an existing study summary, written by this app's own subject-matter admins, into a different language for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
+
+Chapter: "${chapter}"
+Topic: "${topic}"
+
+SOURCE CONTENT (the real, already-authored material for this exact topic):
+"""
+${sourceContent}
+"""
+
+Render the SOURCE CONTENT above in ${responseLanguage}. This is a faithful translation/adaptation, NOT a fresh summary -- preserve every concept, formula, definition, and rule it actually states, in the same structure and level of detail, rather than writing what you already know about this chapter/topic from your own general knowledge. Do not add practice questions or exercises, and do not add facts the source content doesn't itself contain.
+
+${TABLE_FORMAT_RULE}`;
+}
+
 const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
 Q: <question>
 A: <complete worked solution, showing steps>

@@ -26,6 +26,7 @@ import {
   buildExerciseGenerationPrompt,
   buildStaffSystemPrompt,
   buildTopicSummaryPrompt,
+  buildTopicSummaryTranslationPrompt,
   buildTutorSystemPrompt,
 } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
@@ -596,13 +597,15 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
 // each a fallback for the one before it:
 //
 //   1. Chapter notes (RAG): admin-authored/imported content for this exact
-//      topic (chapter_documents, the same store chat grounding reads from)
-//      -- already curated by a human, so it's shown as-is with no review
-//      gate and without ever touching the LLM. This store has no language
-//      dimension of its own (an admin writes one document per topic, in
-//      that topic's real medium -- see chapterDocuments.ts), so it's only
-//      ever consulted when responseLanguage matches the topic's own medium;
-//      a native-language request skips straight to stage 2.
+//      topic (chapter_documents, the same store chat grounding reads from).
+//      When responseLanguage matches the topic's own medium exactly, this
+//      is shown as-is -- already curated by a human, no review gate,
+//      without ever touching the LLM. When it DOESN'T match, the same real
+//      content is still looked up (never skipped), but now goes through
+//      stage 4's LLM call as grounding to translate/adapt -- see that
+//      stage's own comment for why this changed. Only when NO
+//      chapter_documents content exists for this topic at all does this
+//      stage contribute nothing.
 //   2. Cache (Redis): a summary generated earlier for this exact
 //      (topicId, responseLanguage) pair and already admin-approved -- see
 //      stage 3's caching rule below for why a pending_review summary never
@@ -622,19 +625,34 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
 //      row is treated as a miss -- falls through to stage 4 -- so the topic
 //      self-heals on the next click rather than staying dead until someone
 //      notices and manually clears it.
-//   4. LLM: generates fresh, upserts into topic_summaries (keyed on this
+//   4. LLM: generates fresh (buildTopicSummaryPrompt, the model's own
+//      general knowledge of the chapter/topic by NAME only) when stage 1
+//      found nothing at all for this topic; otherwise TRANSLATES/adapts
+//      the real stage-1 content into responseLanguage
+//      (buildTopicSummaryTranslationPrompt) rather than inventing a fresh
+//      summary. Either way, upserts into topic_summaries (keyed on this
 //      responseLanguage) as 'pending_review' (never auto-approved, unlike
 //      answer-bank entries -- see 0026_topic_summary_review.sql), and is
 //      returned to this request but not cached, for the same reason as
 //      stage 3's pending case.
 //
-// Every language a topic is ever requested in -- its own real medium (the
-// common case for every subject except English, and for an English-medium
-// student) or a native-language translation of it (a Bengali-medium
-// student's default view of the English subject, see dashboard-shell.tsx's
-// syllabusMediumFor) -- gets the same full stage 2-4 treatment; only stage
-// 1's RAG lookup stays tied to the topic's own medium, since that's the one
-// store with nothing to key a second language off.
+// Reported live: `medium` here is a topic's COHORT tag (see the web app's
+// own studentScope.ts top comment on why that's a different question from
+// "what language is this text written in"), which this route used to
+// treat as if it always equalled the language chapter_documents content is
+// actually written in -- true for a single-cohort subject (CBSE English's
+// own content really is in English, matching medium=English), false the
+// moment cohort and content-language genuinely diverge (West Bengal
+// Board's own English-Second-Language course: medium=Bengali is the
+// COHORT it serves, but its real chapter_documents text was authored in
+// English). Under the old rule, ANY responseLanguage other than the exact
+// medium string skipped stage 1's real content entirely and fell straight
+// to a fully ungrounded stage 4 -- including a Bengali-medium student's
+// own DEFAULT (English) view of that exact content, which is the common
+// case for exactly the students this course exists for. Stage 1 is now
+// ALWAYS consulted regardless of responseLanguage; only whether its result
+// is returned as-is (native) or handed to the LLM to translate (not
+// native) depends on the match.
 app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Response) => {
   const startedAt = Date.now();
   const body = req.body as Partial<TopicSummaryRequest> | undefined;
@@ -678,12 +696,15 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     res.json(response);
   }
 
-  if (isNativeLanguage) {
-    const fromChapterNotes = await getStoredChapterSummary(body.topicId);
-    if (fromChapterNotes) {
-      respond(fromChapterNotes, "chapter_notes");
-      return;
-    }
+  // Always looked up now, regardless of isNativeLanguage -- see this
+  // route's own top comment for why. fromChapterNotes is real content
+  // ("what does this topic actually say") whenever it exists at all;
+  // isNativeLanguage only decides whether it's returned as-is (native) or
+  // handed to the LLM as grounding to translate (stage 4 below).
+  const fromChapterNotes = await getStoredChapterSummary(body.topicId);
+  if (fromChapterNotes && isNativeLanguage) {
+    respond(fromChapterNotes, "chapter_notes");
+    return;
   }
 
   const cached = await getCachedTopicSummary(body.topicId, responseLanguage);
@@ -704,15 +725,30 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
   }
 
   try {
-    const systemPrompt = buildTopicSummaryPrompt({
-      subjectName: body.subjectName,
-      boardName: body.boardName,
-      gradeName: body.gradeName,
-      medium,
-      responseLanguage,
-      chapter: body.chapter,
-      topic: body.topic,
-    });
+    // Grounded (real content, translated) whenever fromChapterNotes exists
+    // at all -- only when this topic has NO chapter_documents content of
+    // its own does this fall back to buildTopicSummaryPrompt's fully
+    // ungrounded "write from general knowledge" prompt. See this route's
+    // own top comment for the live report that motivated this branch.
+    const systemPrompt = fromChapterNotes
+      ? buildTopicSummaryTranslationPrompt({
+          subjectName: body.subjectName,
+          boardName: body.boardName,
+          gradeName: body.gradeName,
+          responseLanguage,
+          chapter: body.chapter,
+          topic: body.topic,
+          sourceContent: fromChapterNotes,
+        })
+      : buildTopicSummaryPrompt({
+          subjectName: body.subjectName,
+          boardName: body.boardName,
+          gradeName: body.gradeName,
+          medium,
+          responseLanguage,
+          chapter: body.chapter,
+          topic: body.topic,
+        });
     const { text, model, usage } = await getChatReply({
       systemPrompt,
       history: [],
