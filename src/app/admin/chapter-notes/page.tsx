@@ -1,5 +1,6 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { ChapterDocumentSourceType, Medium } from "@/lib/supabase/types";
 import { deleteChapterDocument } from "./actions";
 import { EditChapterDocumentForm } from "./edit-document-form";
 import { ImportChunksForm } from "./import-chunks-form";
@@ -17,8 +18,32 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   other: "Other source",
 };
 
-export default async function ChapterNotesPage() {
+const SOURCE_TYPES = Object.keys(SOURCE_TYPE_LABELS) as ChapterDocumentSourceType[];
+const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
+
+export default async function ChapterNotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    board?: string;
+    grade?: string;
+    subject?: string;
+    medium?: string;
+    sourceType?: string;
+    search?: string;
+  }>;
+}) {
   await requireAdminPage("chapter_notes");
+  const { board, grade, subject, medium, sourceType, search } = await searchParams;
+  const activeBoard = board || null;
+  const activeGrade = grade || null;
+  const activeSubject = subject || null;
+  const activeMedium = (medium as Medium | undefined) || null;
+  const activeSourceType = (sourceType as ChapterDocumentSourceType | undefined) || null;
+  const activeSearch = search?.trim() || null;
+  const hasActiveFilter = Boolean(
+    activeBoard || activeGrade || activeSubject || activeMedium || activeSourceType || activeSearch
+  );
 
   // chapter_documents has RLS enabled with zero client-facing policies
   // (see 0024_chapter_documents_rag.sql) -- same "backend-only table"
@@ -27,17 +52,30 @@ export default async function ChapterNotesPage() {
   // session-scoped client would silently see zero rows.
   const supabase = createAdminClient();
 
+  // topic_id is NOT NULL with ON DELETE CASCADE (see
+  // 0024_chapter_documents_rag.sql) -- a chapter_documents row can never
+  // outlive its topic, so the `!inner` join hint below (needed for
+  // PostgREST to actually apply .eq() filters on the embedded
+  // syllabus_topics columns) never excludes a row that would otherwise show.
+  let documentsQuery = supabase
+    .from("chapter_documents")
+    .select(
+      "*, syllabus_topics!inner(chapter, topic, board_id, grade_id, subject_id, medium, boards(name), grades(name), subjects(name))"
+    )
+    .order("created_at", { ascending: false });
+  if (activeBoard) documentsQuery = documentsQuery.eq("syllabus_topics.board_id", activeBoard);
+  if (activeGrade) documentsQuery = documentsQuery.eq("syllabus_topics.grade_id", activeGrade);
+  if (activeSubject) documentsQuery = documentsQuery.eq("syllabus_topics.subject_id", activeSubject);
+  if (activeMedium) documentsQuery = documentsQuery.eq("syllabus_topics.medium", activeMedium);
+  if (activeSourceType) documentsQuery = documentsQuery.eq("source_type", activeSourceType);
+  if (activeSearch) documentsQuery = documentsQuery.ilike("title", `%${activeSearch}%`);
+
   const [{ data: boards }, { data: grades }, { data: subjects }, { data: documents }, { data: allTopics }, { data: ingestedTopicRows }, { data: offeringRows }] =
     await Promise.all([
       supabase.from("boards").select("*").order("name"),
       supabase.from("grades").select("*").order("level"),
       supabase.from("subjects").select("*").order("name"),
-      supabase
-        .from("chapter_documents")
-        .select(
-          "*, syllabus_topics(chapter, topic, boards(name), grades(name), subjects(name), medium)"
-        )
-        .order("created_at", { ascending: false }),
+      documentsQuery,
       // Every topic in the catalog, for the coverage section below --
       // syllabus_topics is readable by any authenticated user under RLS
       // (used the same way by the student-facing syllabus panel), but this
@@ -177,9 +215,88 @@ export default async function ChapterNotesPage() {
       <NewChapterDocumentForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
       <ImportChunksForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
 
-      <div className="mt-6 space-y-3">
+      <form method="get" className="mt-6 flex flex-wrap items-center gap-2 text-sm">
+        <input
+          name="search"
+          defaultValue={activeSearch ?? ""}
+          placeholder="Search by title"
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        />
+        <select
+          name="board"
+          defaultValue={activeBoard ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any board</option>
+          {(boards ?? []).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="grade"
+          defaultValue={activeGrade ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any grade</option>
+          {(grades ?? []).map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="subject"
+          defaultValue={activeSubject ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any subject</option>
+          {(subjects ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="medium"
+          defaultValue={activeMedium ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any medium</option>
+          {MEDIUMS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <select
+          name="sourceType"
+          defaultValue={activeSourceType ?? ""}
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Any source</option>
+          {SOURCE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {SOURCE_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+        <button className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-brand/5">
+          Filter
+        </button>
+        {hasActiveFilter && (
+          <a href="/admin/chapter-notes" className="text-xs text-foreground/50 hover:underline">
+            Clear filters
+          </a>
+        )}
+      </form>
+
+      <div className="mt-4 space-y-3">
         {(documents ?? []).length === 0 && (
-          <p className="text-sm text-foreground/50">No chapter documents yet.</p>
+          <p className="text-sm text-foreground/50">
+            {hasActiveFilter ? "No chapter documents match this filter." : "No chapter documents yet."}
+          </p>
         )}
         {(documents ?? []).map((doc) => {
           // Typed loosely rather than threading a full embedded-query type
