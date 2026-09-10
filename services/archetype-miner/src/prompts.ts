@@ -1163,6 +1163,18 @@ report:
   an exact copy is USELESS even if it's a perfectly reasonable
   paraphrase -- copy, never rephrase or correct.
 
+  Copy this from the chapter's OWN body text, at the exact spot it
+  actually begins -- NEVER from a table of contents entry, even if one
+  exists earlier in the input. A table of contents commonly numbers its
+  entries ("Lesson 6 Sea Fever", "Chapter 12: The Cat"), but the chapter
+  itself, where it actually starts in the body, often has no such number
+  immediately next to its title -- just "Sea Fever" on its own. If you
+  copy the table-of-contents PHRASING instead of what's physically
+  written at the real starting point, the excerpt won't be found in the
+  text and this chapter will be silently lost. When genuinely unsure
+  whether a number/label is physically part of the heading at its real
+  location, leave it out.
+
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
 chapter (one entry covering what should have been two) is a far smaller

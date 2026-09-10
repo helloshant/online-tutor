@@ -48,39 +48,69 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Finds `heading`'s real position in `text` -- a plain indexOf first (the
-// common case: the model copied it verbatim, as instructed), falling back
-// to case-insensitive and whitespace-tolerant variants (in that order) for
-// two real, confirmed-live sources of drift between what the model
-// returned and the literal source bytes:
-//   - CASE: a printed book's own chapter/poem headings are very often
-//     rendered in full caps ("SEA FEVER"), but the model's own idea of a
-//     "clean" heading -- even asked to copy verbatim -- can still come
-//     back title-cased ("Sea Fever"). Confirmed directly: three real
-//     poem titles in a live book (Sea Fever, The Cat, The Snail) went
-//     unresolved and silently folded into a neighboring chapter's text
-//     purely because of this, before case-insensitive matching existed.
-//   - WHITESPACE: an OCR line-wrap or a stray double space between the
-//     same words (runs of whitespace in `heading` match ANY run of
-//     whitespace in `text`).
-// Returns -1, never throws, when nothing matches even with both
-// tolerances -- the caller reports that boundary as unresolved rather
-// than guessing.
-function findHeadingIndex(text: string, heading: string): number {
-  const trimmed = heading.trim();
-  if (!trimmed) return -1;
+// Strips a leading "Lesson 6", "Chapter 12:", "Unit 3 -", "6.", "(6)" style
+// label from a candidate heading, or returns null if there isn't one.
+// Confirmed live: given a book whose table of contents lists entries as
+// "Lesson 6 Sea Fever", the model prefixed EVERY proposed heading with
+// that same "Lesson N" label -- even though the chapter's own body text
+// just starts with the bare title ("Sea Fever"), with no such label
+// physically adjacent to it at that exact spot. A reasonable, very common
+// thing for a model to do (echoing the table of contents' own numbering
+// convention) that no amount of "copy it verbatim" prompt wording alone
+// reliably prevents, so this exists as a second real attempt rather than
+// trusting the prompt to be followed perfectly every time.
+const LABEL_PREFIX = /^(lesson|chapter|unit|poem|story|part)\s*\d+\s*[:.)-]?\s+|^\(?\d+\)?\s*[:.)-]\s+/i;
 
-  const direct = text.indexOf(trimmed);
+function stripLabelPrefix(heading: string): string | null {
+  const stripped = heading.replace(LABEL_PREFIX, "");
+  return stripped !== heading && stripped.trim() ? stripped.trim() : null;
+}
+
+// Tries a plain indexOf first (the common case: the model copied it
+// verbatim, as instructed), then case-insensitive, then case-insensitive
+// AND whitespace-tolerant (runs of whitespace in `candidate` match ANY
+// run of whitespace in `text`, so an OCR line-wrap or a stray double space
+// doesn't defeat an otherwise-correct match). Returns -1, never throws,
+// when none of the three finds it.
+function tryFind(text: string, candidate: string): number {
+  const direct = text.indexOf(candidate);
   if (direct !== -1) return direct;
 
-  const caseInsensitive = text.toLowerCase().indexOf(trimmed.toLowerCase());
+  const caseInsensitive = text.toLowerCase().indexOf(candidate.toLowerCase());
   if (caseInsensitive !== -1) return caseInsensitive;
 
-  const words = trimmed.split(/\s+/).filter(Boolean);
+  const words = candidate.split(/\s+/).filter(Boolean);
   if (words.length === 0) return -1;
   const pattern = words.map(escapeRegExp).join("\\s+");
   const match = new RegExp(pattern, "i").exec(text);
   return match ? match.index : -1;
+}
+
+// Finds `heading`'s real position in `text`. Two independent sources of
+// drift between what the model returned and the literal source bytes are
+// tolerated, both confirmed directly against real live failures:
+//   - CASE/WHITESPACE (see tryFind's own comment) -- a printed book's own
+//     headings are often rendered in full caps, but the model's idea of a
+//     "clean" heading, even asked to copy verbatim, can still come back
+//     title-cased.
+//   - A LABEL PREFIX the model added that isn't physically adjacent to
+//     the title at its own body location (see stripLabelPrefix's own
+//     comment) -- tried only as a fallback, after the heading AS GIVEN
+//     fails every tryFind variant, so a heading that's already correct
+//     and happens to start with a number-like word isn't needlessly
+//     second-guessed.
+// Returns -1, never throws, when nothing matches even with every
+// tolerance -- the caller reports that boundary as unresolved rather than
+// guessing.
+function findHeadingIndex(text: string, heading: string): number {
+  const trimmed = heading.trim();
+  if (!trimmed) return -1;
+
+  const direct = tryFind(text, trimmed);
+  if (direct !== -1) return direct;
+
+  const withoutLabel = stripLabelPrefix(trimmed);
+  return withoutLabel ? tryFind(text, withoutLabel) : -1;
 }
 
 // The whole point of this file. `text` is the admin-reviewed raw OCR
