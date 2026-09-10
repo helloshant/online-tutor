@@ -17,28 +17,36 @@ interface SubjectSummary {
   code: string;
 }
 
-// The English subject teaches the English language itself, so its syllabus
-// (chapters, poems, prose) is inherently written in English regardless of
-// which medium the rest of a student's board/grade is taught in -- unlike
-// every other subject, where the syllabus is authored per-medium because
-// the *content itself* is translated (see "Medium-scoped syllabus storage"
-// in the README). A Bengali-medium student's English subject therefore
-// reads the same single English-medium syllabus an English-medium student
-// would, not a separate Bengali-tagged copy -- there is only ever one
-// canonical syllabus per board/grade for this one subject. Mirrors
-// ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts.
+// Mirrors ENGLISH_SUBJECT_CODE in src/lib/studentScope.ts, the actual
+// enforcement point -- that module is server-only and can't be imported
+// into this client component, so this copy exists for the same reason
+// chat-panel.tsx's own local copy does.
 const ENGLISH_SUBJECT_CODE = "ENG";
+
+// Mirrors SINGLE_COHORT_ENGLISH_BOARDS in src/lib/studentScope.ts --
+// boards where the English subject really is one course shared by every
+// student regardless of their own medium (CBSE's own prescribed reader,
+// read identically by every CBSE student). NOT universal: West Bengal
+// Board's own English subject genuinely has separate per-cohort courses
+// instead (reported live: a newly-ingested Bengali-medium "English Second
+// Language" reader was invisible to every student because this function
+// used to force "English" unconditionally for every board). See
+// studentScope.ts's own top comment for the full story -- this is the
+// exact same shape of mistake CBSE's own Hindi subject already needed
+// fixing for once, just for English instead of Hindi.
+const SINGLE_COHORT_ENGLISH_BOARDS = new Set(["CBSE", "ICSE"]);
 
 // The medium a subject's syllabus/topics should actually be fetched under
 // -- almost always the student's own subscribed medium (or, for staff, the
-// medium they're currently previewing), except for English (see the
-// constant above). `medium` can be null here (a real student always has
-// one, but staff outside of preview mode doesn't), but every call site
-// below only reaches this once `medium` is already known non-null (guarded
-// by `boardId && gradeId && medium` in JSX -- see hasSyllabusScope), so the
-// cast is safe in context, not a blind assertion.
-function syllabusMediumFor(subject: SubjectSummary, medium: Medium): Medium {
-  return subject.code === ENGLISH_SUBJECT_CODE ? "English" : medium;
+// medium they're currently previewing), except for English on a
+// single-cohort board (see the constants above). `medium` can be null here
+// (a real student always has one, but staff outside of preview mode
+// doesn't), but every call site below only reaches this once `medium` is
+// already known non-null (guarded by `boardId && gradeId && medium` in
+// JSX -- see hasSyllabusScope), so the cast is safe in context, not a
+// blind assertion.
+function syllabusMediumFor(subject: SubjectSummary, boardName: string, medium: Medium): Medium {
+  return subject.code === ENGLISH_SUBJECT_CODE && SINGLE_COHORT_ENGLISH_BOARDS.has(boardName) ? "English" : medium;
 }
 
 // "subjects" only exists as a destination below lg -- desktop switches
@@ -221,7 +229,7 @@ export function DashboardShell({
             boardId={boardId}
             gradeId={gradeId}
             subjectId={selectedSubject.id}
-            medium={syllabusMediumFor(selectedSubject, medium)}
+            medium={syllabusMediumFor(selectedSubject, boardName, medium)}
             selectedTopicId={topicClick?.topic.id ?? null}
             onSelectTopic={handleSelectTopic}
           />
@@ -297,7 +305,7 @@ export function DashboardShell({
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={syllabusMediumFor(selectedSubject, medium)}
+                    medium={syllabusMediumFor(selectedSubject, boardName, medium)}
                     selectedTopicId={topicClick?.topic.id ?? null}
                     onSelectTopic={handleSelectTopic}
                   />
@@ -309,7 +317,7 @@ export function DashboardShell({
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={syllabusMediumFor(selectedSubject, medium)}
+                    medium={syllabusMediumFor(selectedSubject, boardName, medium)}
                     onSelectTopic={handleSelectTopic}
                   />
                 </div>
