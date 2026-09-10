@@ -19,7 +19,14 @@ export type OcrFileInput = {
 };
 
 export type OcrFileResult =
-  | { fileName: string; ok: true; text: string }
+  // note is set on an otherwise-successful multi-page-range PDF where SOME
+  // (not all) page ranges failed -- see ocrPipeline.ts's own ocrOneFile.
+  // text already contains the same information inline (a trailing
+  // bracketed note), but surfacing it here too lets a caller show it in a
+  // per-file status list without needing to scroll/search through
+  // (possibly very long, for a whole book) extracted text to notice a
+  // partial failure happened at all.
+  | { fileName: string; ok: true; text: string; note?: string }
   | { fileName: string; ok: false; error: string };
 
 export type OcrBatchRequest = { files: OcrFileInput[] };

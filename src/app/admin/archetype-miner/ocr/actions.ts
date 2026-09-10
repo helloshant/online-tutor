@@ -85,7 +85,13 @@ export async function runOcrAction(_prevState: OcrState, formData: FormData): Pr
   const fileResults: OcrFileResult[] = ocrResults.map((r) => ({
     fileName: r.fileName,
     ok: r.ok,
-    note: r.ok ? undefined : r.error,
+    // A successful multi-page-range PDF (a book) can still have SOME page
+    // ranges fail underneath an overall ok:true -- see OcrFileResult's own
+    // comment in visionOcrClient.ts. Surfaced here too, not just inline in
+    // the extracted text itself, so a partial failure on a long book is
+    // visible in this short per-file list rather than only discoverable by
+    // scrolling/searching through possibly tens of thousands of words.
+    note: r.ok ? r.note : r.error,
   }));
 
   // Order matches the order files were selected in the picker -- the only

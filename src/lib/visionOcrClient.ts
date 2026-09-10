@@ -20,7 +20,13 @@ export type VisionOcrMimeType =
 export type VisionOcrFileInput = { fileName: string; mimeType: VisionOcrMimeType; base64: string };
 
 export type VisionOcrFileResult =
-  | { fileName: string; ok: true; text: string }
+  // note is set on an otherwise-successful multi-page-range PDF (a book,
+  // typically) where SOME but not all page ranges failed -- see the
+  // service's own ocrPipeline.ts/types.ts for the full comment. text
+  // already contains the same information inline; note lets a caller
+  // surface it separately (a per-file status list) without needing to
+  // scroll/search through possibly very long extracted text to notice.
+  | { fileName: string; ok: true; text: string; note?: string }
   | { fileName: string; ok: false; error: string };
 
 function getVisionOcrUrl(): string {
