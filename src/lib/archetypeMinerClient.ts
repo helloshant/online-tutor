@@ -523,6 +523,12 @@ export async function mineArchetypeFamilies(
 // page's own downloadable output needs no reshaping in between.
 export type BookChapterChunk = { chapter_number: number; chapter_title: string; text: string };
 
+// A proposed boundary the model's own "heading" excerpt couldn't be found
+// for -- keeps that attempted heading text (not just the chapter title),
+// which is the only way to tell WHY a match failed (a genuine paraphrase,
+// a matcher gap, OCR noise at that exact spot) instead of guessing blind.
+export type UnresolvedBookBoundary = { chapterTitle: string; heading: string };
+
 // See the archetype-miner service's own bookChapterSegmentation.ts for
 // what this does and why it never asks the model to reproduce chapter
 // text -- called by admin/archetype-miner/ocr/actions.ts once an admin has
@@ -530,7 +536,7 @@ export type BookChapterChunk = { chapter_number: number; chapter_title: string; 
 // chapters.
 export async function segmentBookIntoChapters(
   text: string
-): Promise<{ chunks: BookChapterChunk[]; unresolvedChapterTitles: string[] }> {
+): Promise<{ chunks: BookChapterChunk[]; unresolved: UnresolvedBookBoundary[] }> {
   const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/book-chapter-segmentation`;
   const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
 
@@ -546,8 +552,8 @@ export async function segmentBookIntoChapters(
   if (!res.ok) {
     throw new Error(body?.error ?? `Book chapter segmentation failed with status ${res.status}`);
   }
-  if (!body || !Array.isArray(body.chunks) || !Array.isArray(body.unresolvedChapterTitles)) {
+  if (!body || !Array.isArray(body.chunks) || !Array.isArray(body.unresolved)) {
     throw new Error("Archetype-miner returned an unexpected response shape");
   }
-  return { chunks: body.chunks, unresolvedChapterTitles: body.unresolvedChapterTitles };
+  return { chunks: body.chunks, unresolved: body.unresolved };
 }
