@@ -1117,3 +1117,69 @@ Return ONLY valid JSON: an array of objects matching the SCHEMA above
 (empty array when nothing in this batch is genuinely off-scope -- the
 common case). No markdown, no explanatory prose.`;
 }
+
+// See bookChapterSegmentation.ts's own top comment for the full context:
+// the web app's OCR page ("OCR a scanned paper or book") extracts a whole
+// scanned book's raw text via Document AI, then hands it here to be split
+// into per-chapter chunks ready for the Chapter Notes admin page's own
+// "Import chunks" JSON format. Deliberately asks for a verbatim MARKER for
+// each boundary rather than having the model reproduce chapter text back
+// out -- a whole book's worth of text echoed through a JSON response would
+// be both enormous (well past any sane output token budget) and a real
+// risk of the model silently paraphrasing/dropping content on the way
+// through. The caller finds each marker's real position in the original
+// text itself (see findHeadingIndex) and slices deterministically, so the
+// model's only job is spotting WHERE chapters start, never reproducing
+// what's actually in them.
+export function buildBookChapterSegmentationPrompt(): string {
+  return `ROLE
+You are finding chapter boundaries in the OCR'd text of a scanned school
+textbook or reader, so it can be split into one file per chapter.
+
+INPUT
+The full extracted text of a scanned book, in reading order. It may have
+been OCR'd from several separate page images or a multi-page PDF stitched
+back together, so expect real scanning/OCR noise throughout: broken line
+wraps, misread characters, stray running headers/footers, page numbers,
+and inconsistent spacing. Read past that noise to the real underlying
+structure rather than treating it as meaningful content of its own.
+
+TASK
+Identify every point in the text where a NEW CHAPTER genuinely begins --
+the level a student would think of as "one chapter" of the book, matching
+how a table of contents would list it (a distinct lesson, story, poem, or
+unit), NOT a sub-heading, exercise section, footnote, or running header
+within one that's already in progress. For each real chapter found,
+report:
+- chapter_title: the chapter's own title, as it actually appears --
+  cleaned of obvious OCR garbling if you're confident what it actually
+  says, otherwise left as printed.
+- heading: the EXACT text that marks where this chapter begins -- a
+  short excerpt (a heading line, or if there's no distinct heading, the
+  first several words of the chapter's own opening text) copied
+  VERBATIM, character-for-character, from the input -- same spelling,
+  same OCR artifacts, same punctuation. This is used to locate the split
+  point in the original text programmatically, so an excerpt that isn't
+  an exact copy is USELESS even if it's a perfectly reasonable
+  paraphrase -- copy, never rephrase or correct.
+
+When in doubt whether something is a new chapter or a sub-section of the
+one already in progress, treat it as the sub-section -- an under-split
+chapter (one entry covering what should have been two) is a far smaller
+problem than an over-split one (invented boundaries fragmenting a single
+real chapter into pieces that don't stand on their own).
+
+SCHEMA
+Return one entry per real chapter found, in the order they appear in the
+text:
+{
+  "chapter_title": "<cleaned, human-readable chapter title>",
+  "heading": "<verbatim excerpt marking where this chapter starts, copied EXACTLY from the input text>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of objects matching the SCHEMA above
+(empty array if the text has no real internal chapter structure to find --
+e.g. it's already just one short piece). No markdown, no explanatory
+prose.`;
+}

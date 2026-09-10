@@ -515,3 +515,39 @@ export async function mineArchetypeFamilies(
   }
   return { familyCount: body.families.length };
 }
+
+// One chapter of a book, already split out of the original OCR text --
+// matches RawImportChunk's own shape in admin/chapter-notes/actions.ts
+// exactly (chapter_number/chapter_title/text), the format the Chapter
+// Notes admin page's "Import chunks" upload already expects, so the OCR
+// page's own downloadable output needs no reshaping in between.
+export type BookChapterChunk = { chapter_number: number; chapter_title: string; text: string };
+
+// See the archetype-miner service's own bookChapterSegmentation.ts for
+// what this does and why it never asks the model to reproduce chapter
+// text -- called by admin/archetype-miner/ocr/actions.ts once an admin has
+// reviewed/edited the raw OCR output and asks for it to be split into
+// chapters.
+export async function segmentBookIntoChapters(
+  text: string
+): Promise<{ chunks: BookChapterChunk[]; unresolvedChapterTitles: string[] }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/book-chapter-segmentation`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify({ text }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Book chapter segmentation failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.chunks) || !Array.isArray(body.unresolvedChapterTitles)) {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { chunks: body.chunks, unresolvedChapterTitles: body.unresolvedChapterTitles };
+}

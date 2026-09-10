@@ -15,8 +15,12 @@ const nextConfig: NextConfig = {
       // (admin/archetype-miner/actions.ts, up to MAX_FILES files at
       // MAX_FILE_BYTES each) real headroom -- a realistic batch of several
       // DOCX/PDF papers together comfortably exceeds what a single upload
-      // ever needed.
-      bodySizeLimit: "40mb",
+      // ever needed. Raised again, 40mb -> 100mb, once the OCR page grew
+      // from "a scanned paper" (a handful of pages, comfortably under
+      // 40mb) to "a scanned paper or book" -- a real whole-book PDF scan
+      // (admin/archetype-miner/ocr/actions.ts's own MAX_FILE_BYTES) can
+      // itself run well past what a short paper ever needed.
+      bodySizeLimit: "100mb",
     },
     // A SEPARATE cap from serverActions.bodySizeLimit above, and easy to
     // miss: src/proxy.ts runs on almost every route (its own matcher only
@@ -33,7 +37,7 @@ const nextConfig: NextConfig = {
     // that fix, since the proxy layer runs first and truncated it at 10MB
     // regardless. Matches serverActions.bodySizeLimit's own value so
     // neither is the tighter constraint for the same request.
-    proxyClientMaxBodySize: "40mb",
+    proxyClientMaxBodySize: "100mb",
   },
 };
 

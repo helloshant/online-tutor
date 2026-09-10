@@ -31,6 +31,7 @@ import {
   isOffScopeContentScanInProgress,
   type OffScopeScanPreview,
 } from "./offScopeContentScan.js";
+import { segmentBookIntoChapters } from "./bookChapterSegmentation.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
 
@@ -700,6 +701,40 @@ app.post("/v1/off-scope-content-scan/run", requireSharedSecret, async (req: Requ
     console.error("Unhandled error in off-scope content scan:", err);
   });
   res.status(202).json({ started: true, ...preview });
+});
+
+// Generous relative to a real book's own plain-text size (a genuinely huge
+// ~1000-page book is still only a few MB of plain text) -- this guards
+// against a mistaken/pathological payload, not a real one; the express.json
+// body limit above (40mb) would catch anything this misses anyway.
+const MAX_BOOK_TEXT_CHARS = 2_000_000;
+
+// See bookChapterSegmentation.ts's own top comment for the full context:
+// one LLM call, synchronous (unlike the preview/run pairs above, this
+// isn't a long multi-iteration pass over a whole catalogue scope -- it's a
+// single request-sized job, same shape as curriculum reconciliation's own
+// requestMappings), turning a whole scanned book's OCR text into
+// per-chapter chunks ready for the Chapter Notes admin page's own "Import
+// chunks" JSON format.
+app.post("/v1/book-chapter-segmentation", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as { text?: unknown } | undefined;
+  const text = typeof body?.text === "string" ? body.text : "";
+  if (!text.trim()) {
+    res.status(400).json({ error: "text is required" });
+    return;
+  }
+  if (text.length > MAX_BOOK_TEXT_CHARS) {
+    res.status(400).json({ error: `text is too large (max ${MAX_BOOK_TEXT_CHARS.toLocaleString()} characters)` });
+    return;
+  }
+
+  try {
+    const result = await segmentBookIntoChapters({ text });
+    res.json(result);
+  } catch (err) {
+    console.error("Failed to segment book into chapters:", err);
+    res.status(502).json({ error: "Failed to segment this text into chapters. Please try again." });
+  }
 });
 
 app.listen(PORT, () => {
