@@ -153,10 +153,20 @@ type TimelineEntry =
     }
   | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean; summary?: string };
 
-// Mirrors ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts, which is the
+// Mirrors ENGLISH_SUBJECT_CODE in src/lib/studentScope.ts, which is the
 // actual enforcement point -- this copy only decides whether to render the
 // toggle at all, never grants anything on its own.
 const ENGLISH_SUBJECT_CODE = "ENG";
+
+// Mirrors FIXED_RESPONSE_LANGUAGE_SUBJECT in src/lib/studentScope.ts --
+// display-only here (the "Answers are limited to..." caption below), the
+// server independently applies the real rule via resolveResponseLanguage.
+// Duplicated rather than imported for the same reason ENGLISH_SUBJECT_CODE
+// above is: that module is server-only, this is client code.
+const FIXED_RESPONSE_LANGUAGE_SUBJECT: Partial<Record<string, Medium>> = {
+  HN: "Hindi",
+  BE: "Bengali",
+};
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 // Mirrors the server-side cap (~4.3MB decoded) so an oversized file is
@@ -696,7 +706,7 @@ export function ChatPanel({
             {isStaffUser && !medium
               ? "Staff access: unrestricted, not limited to any one syllabus."
               : `Answers are limited to this subject's syllabus, in ${
-                  showLanguageToggle && preferEnglish ? "English" : medium
+                  FIXED_RESPONSE_LANGUAGE_SUBJECT[subject.code] ?? (showLanguageToggle && preferEnglish ? "English" : medium)
                 }.`}
           </p>
         </div>

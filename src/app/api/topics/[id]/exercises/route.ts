@@ -2,10 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicExercises } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
+import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
-
-// Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
-const ENGLISH_SUBJECT_CODE = "ENG";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -48,17 +46,15 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
   ]);
 
-  const isEnglishSubject = subject?.code === ENGLISH_SUBJECT_CODE;
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
 
   // See the matching comment in /api/topics/[id]/summary/route.ts and
   // /api/chat/route.ts -- medium always stays this topic's own real content
   // medium; responseLanguage independently decides what language the
-  // exercises are generated/served in, defaulting to the student's native
-  // medium and only becoming the topic's own medium when the toggle is on.
-  const responseLanguage: Medium =
-    isEnglishSubject && !preferEnglish && nativeMedium !== topicMedium ? nativeMedium : topicMedium;
+  // exercises are generated/served in -- see resolveResponseLanguage's own
+  // comment in studentScope.ts for the full rule.
+  const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
 
   try {
     const { exercises } = await getTopicExercises({

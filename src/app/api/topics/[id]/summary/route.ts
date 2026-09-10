@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTopicSummary } from "@/lib/orchestratorClient";
+import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
-
-// Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts.
-const ENGLISH_SUBJECT_CODE = "ENG";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -50,7 +48,6 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
   ]);
 
-  const isEnglishSubject = subject?.code === ENGLISH_SUBJECT_CODE;
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
 
@@ -60,13 +57,12 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
   // syllabusMediumFor -- there is no separate "sibling" English-medium
   // topic to redirect to any more, since English-subject topics only ever
   // exist in that one medium). responseLanguage independently decides what
-  // language the summary/exercises text is generated/served in: it defaults
-  // to the student's own native medium and only becomes the topic's own
-  // medium when the toggle is switched on (or when the student's native
-  // medium already IS that topic's medium, e.g. an English-medium student
-  // asking about the English subject -- nothing to toggle to there).
-  const responseLanguage: Medium =
-    isEnglishSubject && !preferEnglish && nativeMedium !== topicMedium ? nativeMedium : topicMedium;
+  // language the summary/exercises text is generated/served in -- see
+  // resolveResponseLanguage's own comment in studentScope.ts for the full
+  // rule (fixed to the subject's own language for Hindi/Bengali, a
+  // student choice defaulting to their native medium for English, the
+  // native medium itself for everything else).
+  const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
 
   try {
     const { summary } = await getTopicSummary({

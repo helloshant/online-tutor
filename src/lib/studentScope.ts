@@ -10,6 +10,21 @@ export type StudentSubjectScope = {
   medium: Medium;
 };
 
+// Keyed on subjects.code, not name (see LANGUAGE_SUBJECT_MEDIUM's own
+// comment on why) -- exported so every SERVER-side caller that needs to
+// single out the English subject specifically (this file's own
+// resolveResponseLanguage below, and until now four separately
+// copy-pasted isEnglishSubject checks across /api/chat/route.ts and the
+// three /api/topics/[id]/* routes) shares the exact same string instead of
+// each redeclaring "ENG" locally -- exactly the kind of duplication that
+// let the responseLanguage bug below go unnoticed for Hindi/Bengali (every
+// copy got updated for English, none of them for anything else). A couple
+// of CLIENT components (chat-panel.tsx, dashboard-shell.tsx) still keep
+// their own local "ENG" copy rather than importing this one -- this file
+// is server-only (see the top import) and can't be pulled into client
+// code, so that duplication is a real constraint, not an oversight.
+export const ENGLISH_SUBJECT_CODE = "ENG";
+
 // IMPORTANT: `medium` on syllabus_topics/answered_questions/
 // chapter_document_chunks means "which student-medium COHORT this content
 // serves," NOT "what script/language the text happens to be written in."
@@ -79,10 +94,9 @@ const RIGID_LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
 // answered_questions has English-subject rows under BOTH medium=English
 // (a straight answer) and medium=Bengali (the SAME kind of content, but
 // translated for a Bengali-medium student who used this app's own
-// English-to-native-language toggle for comprehension -- see
-// isEnglishSubject/responseLanguage in /api/chat/route.ts and the
-// matching /api/topics/[id]/* routes for where that toggle actually
-// lives). A Bengali-medium student's own banked English-subject answers
+// English-to-native-language toggle for comprehension -- see this file's
+// own resolveResponseLanguage below for where that toggle's logic
+// actually lives. A Bengali-medium student's own banked English-subject answers
 // are the TRANSLATED ones, so forcing medium=English here (the way
 // resolveContentMedium correctly does for SYLLABUS scoping) would make
 // their own search/tag lookups find nothing they've actually banked.
@@ -90,6 +104,57 @@ const RIGID_LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
 // own one language, same as resolveContentMedium.
 export function resolveAnswerBankMedium(subjectCode: string, studentMedium: Medium): Medium {
   return RIGID_LANGUAGE_SUBJECT_MEDIUM[subjectCode] ?? studentMedium;
+}
+
+// A subject whose own class content is conducted in one fixed language no
+// matter which cohort's course a student is actually taking -- a Hindi
+// lesson is taught in Hindi whether the student is on Course A/Sparsh
+// (English-medium cohort) or Course B/Kshitij (Hindi-medium cohort, not
+// yet in this app's catalog), same for Bengali. Deliberately a DIFFERENT
+// question from LANGUAGE_SUBJECT_MEDIUM above (which decides which rows
+// are even in scope to draw content FROM, i.e. the cohort) -- this decides
+// what human language the tutor's own words should be written in, and the
+// two can genuinely disagree: resolveContentMedium correctly stopped
+// forcing Hindi content to medium=Hindi (see that constant's own comment
+// on the Sparsh case), but a Hindi CLASS is still always conducted in
+// Hindi regardless of which cohort's rows it drew from. Reported live: an
+// English-medium student's Hindi topic summary was coming back entirely in
+// English prose, because nothing downstream had ever asked this question
+// separately from "what medium is this student's own content in."
+// Deliberately excludes ENG -- see resolveResponseLanguage's own
+// English-specific branch below for why that one needs a student choice
+// instead of an unconditional rule.
+const FIXED_RESPONSE_LANGUAGE_SUBJECT: Partial<Record<string, Medium>> = {
+  HN: "Hindi",
+  BE: "Bengali",
+};
+
+// What human language a chat reply / topic summary / exercise should
+// actually be WRITTEN in for this subject -- previously reimplemented with
+// its own isEnglishSubject + responseLanguage formula in FOUR different
+// places (/api/chat/route.ts and the three /api/topics/[id]/* routes),
+// exactly the kind of duplication this file's own resolveContentMedium
+// comment already warned goes stale. Centralized here so every caller
+// shares one rule.
+//
+// Hindi and Bengali are unconditional (see FIXED_RESPONSE_LANGUAGE_SUBJECT
+// above): their own class content is always conducted in that language,
+// full stop, regardless of the student's own medium. English is the one
+// language subject where that ISN'T always true -- a non-English-medium
+// student may deliberately want immersive English replies for practice, or
+// may prefer their own native language since English is often genuinely
+// hard to follow in a second language -- so it stays the student's own
+// choice (preferEnglish, surfaced as ChatPanel's own language-toggle UI),
+// defaulting to their native medium as the more accessible starting point.
+// Every other subject has no fixed language of its own at all -- taught in
+// whatever the student's own medium already is, same as before.
+export function resolveResponseLanguage(subjectCode: string, studentMedium: Medium, preferEnglish: boolean): Medium {
+  const fixed = FIXED_RESPONSE_LANGUAGE_SUBJECT[subjectCode];
+  if (fixed) return fixed;
+  if (subjectCode === ENGLISH_SUBJECT_CODE && studentMedium !== "English") {
+    return preferEnglish ? "English" : studentMedium;
+  }
+  return studentMedium;
 }
 
 // Resolves the board/grade/medium a student's active subscription entitles

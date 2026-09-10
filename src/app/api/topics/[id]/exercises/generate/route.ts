@@ -5,11 +5,9 @@ import { isStaff } from "@/lib/auth";
 import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import { generateTopicExercise, type DifficultyLevel } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
+import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
 
-// Mirrors ENGLISH_SUBJECT_CODE in /api/chat/route.ts and
-// /api/topics/[id]/exercises/route.ts.
-const ENGLISH_SUBJECT_CODE = "ENG";
 const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 
 // On-demand generation for ONE specific pattern (Tier C's "Generate" on a
@@ -100,14 +98,12 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
   ]);
 
-  const isEnglishSubject = subject?.code === ENGLISH_SUBJECT_CODE;
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
 
   // Same responseLanguage resolution as GET /api/topics/[id]/exercises --
   // see that route's own comment.
-  const responseLanguage: Medium =
-    isEnglishSubject && !preferEnglish && nativeMedium !== topicMedium ? nativeMedium : topicMedium;
+  const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
 
   try {
     const { exercise } = await generateTopicExercise({
