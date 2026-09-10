@@ -71,7 +71,7 @@ export default async function ArchetypeMinerPage() {
             Curriculum taxonomies
           </Link>
           <Link href="/admin/archetype-miner/ocr" className="text-brand hover:underline">
-            OCR a scanned paper
+            OCR a scanned paper or book
           </Link>
         </div>
       </div>
