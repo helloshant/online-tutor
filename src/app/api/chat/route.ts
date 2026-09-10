@@ -112,6 +112,15 @@ async function buildStudentOrchestrationRequest(
     image?: ImageAttachment;
   }
 ): Promise<{ request: ChatOrchestrationRequest; topicsWithIds: SyllabusTopicWithId[] }> {
+  // board's own name is needed BEFORE contentMedium can be computed (see
+  // resolveContentMedium's own comment -- English's own rule is
+  // board-dependent), so this can't join the topics/grade fetch below in
+  // one single Promise.all the way it used to.
+  const [{ data: board }, { data: grade }] = await Promise.all([
+    supabase.from("boards").select("name").eq("id", params.boardId).single(),
+    supabase.from("grades").select("name").eq("id", params.gradeId).single(),
+  ]);
+
   // See the matching comments in the original single-branch version of this
   // route (still accurate): contentMedium decides what's in scope to ask
   // about (syllabus/RAG/cache), responseLanguage only decides what language
@@ -133,21 +142,17 @@ async function buildStudentOrchestrationRequest(
   // reimplemented here as its own narrower English-only formula, the same
   // gap resolveContentMedium already had for Hindi/Bengali before it was
   // centralized.
-  const contentMedium: Medium = resolveContentMedium(params.subjectCode, params.medium);
+  const contentMedium: Medium = resolveContentMedium(params.subjectCode, board?.name ?? "", params.medium);
   const responseLanguage: Medium = resolveResponseLanguage(params.subjectCode, params.medium, params.preferEnglish);
 
-  const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
-    supabase.from("boards").select("name").eq("id", params.boardId).single(),
-    supabase.from("grades").select("name").eq("id", params.gradeId).single(),
-    supabase
-      .from("syllabus_topics")
-      .select("id, chapter, topic")
-      .eq("board_id", params.boardId)
-      .eq("grade_id", params.gradeId)
-      .eq("subject_id", params.subjectId)
-      .eq("medium", contentMedium)
-      .order("sort_order"),
-  ]);
+  const { data: topics } = await supabase
+    .from("syllabus_topics")
+    .select("id, chapter, topic")
+    .eq("board_id", params.boardId)
+    .eq("grade_id", params.gradeId)
+    .eq("subject_id", params.subjectId)
+    .eq("medium", contentMedium)
+    .order("sort_order");
 
   const topicsWithIds = (topics ?? []) as SyllabusTopicWithId[];
 

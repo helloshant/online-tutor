@@ -32,40 +32,68 @@ export const ENGLISH_SUBJECT_CODE = "ENG";
 // student's Math textbook is both English-language text AND for
 // English-medium students) and for most language-subject content too --
 // but they genuinely diverge wherever a language subject has more than one
-// course. Confirmed live, reported directly: CBSE Grade 10 Hindi's
-// "Sparsh" textbook is Hindi-LANGUAGE text, but it's Hindi Course A --
-// taught to ENGLISH-medium students as their second language, not to
-// Hindi-medium students (who'd take Course B, e.g. Kshitij/Kritika,
-// covering different content this app has no data for yet). Those 14
-// syllabus_topics rows (and the 398 chapter_document_chunks rows chunked
-// from them) were tagged medium=Hindi -- reasoning "the text is in
-// Hindi" -- and corrected to medium=English once this was reported; a
-// Hindi-medium student's own Hindi-subject query now correctly finds
-// nothing yet (no Course B content exists) instead of incorrectly seeing
-// Course A content meant for English-medium students.
+// course. Confirmed live, reported directly, TWICE now:
+//   - CBSE Grade 10 Hindi's "Sparsh" textbook is Hindi-LANGUAGE text, but
+//     it's Hindi Course A -- taught to ENGLISH-medium students as their
+//     second language, not to Hindi-medium students (who'd take Course B,
+//     e.g. Kshitij/Kritika, covering different content this app has no
+//     data for yet). Those 14 syllabus_topics rows (and the 398
+//     chapter_document_chunks rows chunked from them) were tagged
+//     medium=Hindi -- reasoning "the text is in Hindi" -- and corrected to
+//     medium=English once this was reported.
+//   - West Bengal Board Grade 10 English is the SAME shape, just for a
+//     different board and the OPPOSITE cohort: a newly-ingested "English
+//     Second Language" reader (Father's Help, Fable, Sea Fever, ...) is
+//     Course A, taught to BENGALI-medium students as their second
+//     language -- correctly tagged medium=Bengali by the admin who
+//     ingested it, but INVISIBLE to every student because this function
+//     used to force English-subject content to medium=English
+//     unconditionally, assuming (true for CBSE/ICSE, false for West
+//     Bengal Board) that English is always a single course everyone
+//     shares. See SINGLE_COHORT_ENGLISH_BOARDS below for the fix.
 //
-// This is exactly why Hindi is NOT in either map below: once its
-// content is tagged by the cohort it actually serves, a plain
-// `studentMedium` passthrough (same as every ordinary content subject)
-// already does the right thing -- an English-medium student's Hindi
-// query naturally lands on the Course A rows (medium=English), and
-// nothing needs forcing. English (one single course, taken by every
-// student regardless of their own medium) and Bengali (one single course
-// SO FAR -- re-check this the same way if a second Bengali course is ever
-// reported) are each genuinely one-cohort subjects, so their own content
-// stays under one fixed medium value no matter which student asks.
+// This is exactly why Hindi is NOT in the map below: once its content is
+// tagged by the cohort it actually serves, a plain `studentMedium`
+// passthrough (same as every ordinary content subject) already does the
+// right thing -- an English-medium student's Hindi query naturally lands
+// on the Course A rows (medium=English), and nothing needs forcing.
+// Bengali (one single course SO FAR -- re-check this the same way if a
+// second Bengali course is ever reported) is a genuinely one-cohort
+// subject, so its own content stays under one fixed medium value no
+// matter which student asks. English needs its own, board-aware rule
+// instead of a place in this flat map -- see resolveContentMedium below.
 const LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
-  ENG: "English",
   BE: "Bengali",
 };
 
+// Boards where the English subject really is ONE course shared by every
+// student in a given board/grade, regardless of their own subscription
+// medium -- e.g. CBSE's own prescribed reader (First Flight etc.), read
+// identically by an English-medium and a Bengali-medium CBSE student
+// alike (only the TUTOR'S OWN EXPLANATION varies per student, via
+// resolveResponseLanguage's separate translate-toggle below -- never the
+// underlying syllabus content itself). This is the SAME assumption that
+// turned out false for CBSE's own Hindi subject (see this section's top
+// comment); it has now also been confirmed false for West Bengal Board's
+// English subject specifically, which genuinely has separate per-cohort
+// courses instead. Boards not proven to have that split stay listed here
+// by default -- re-check this the same way for any board a similar report
+// comes in for, rather than assuming every future board is safe just
+// because these two are.
+const SINGLE_COHORT_ENGLISH_BOARDS = new Set(["CBSE", "ICSE"]);
+
 // The medium a given subject's own SYLLABUS content is scoped under --
-// which syllabus_topics rows are even in scope to ask about, per
-// LANGUAGE_SUBJECT_MEDIUM's own comment. Exported so callers that don't go
-// through resolveStudentSubjectScope (e.g. /api/chat/route.ts, which
-// resolves its own subscription/subject-link lookup directly rather than
-// through the RLS-scoped client this function uses) still get the exact
-// same rule rather than reimplementing their own narrower version of it.
+// which syllabus_topics rows are even in scope to ask about. Exported so
+// callers that don't go through resolveStudentSubjectScope (e.g.
+// /api/chat/route.ts, which resolves its own subscription/subject-link
+// lookup directly rather than through the RLS-scoped client this function
+// uses) still get the exact same rule rather than reimplementing their own
+// narrower version of it.
+//
+// Needs `boardName`, unlike every other medium-resolution function in this
+// file, specifically because English's own rule is board-dependent (see
+// SINGLE_COHORT_ENGLISH_BOARDS above) in a way no other subject here is --
+// every other subject's rule only ever depends on subjectCode.
 //
 // NOT the right function for "what medium was this student's BANKED
 // answer recorded in" -- see resolveAnswerBankMedium's own comment on why
@@ -76,7 +104,10 @@ const LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
 // non-English-medium students -- Bengali-subject rows, with no such
 // toggle (so far), only ever exist under their own one language, same as
 // syllabus content).
-export function resolveContentMedium(subjectCode: string, studentMedium: Medium): Medium {
+export function resolveContentMedium(subjectCode: string, boardName: string, studentMedium: Medium): Medium {
+  if (subjectCode === ENGLISH_SUBJECT_CODE) {
+    return SINGLE_COHORT_ENGLISH_BOARDS.has(boardName) ? "English" : studentMedium;
+  }
   return LANGUAGE_SUBJECT_MEDIUM[subjectCode] ?? studentMedium;
 }
 
