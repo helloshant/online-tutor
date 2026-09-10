@@ -339,10 +339,16 @@ export function ChatPanel({
   // content only exists in the student's own medium, so there'd be nothing
   // for "English" to switch to. This component remounts per subject (see
   // dashboard-shell.tsx's `key={selectedSubject.id}` on ChatPanel), so the
-  // toggle naturally resets to "native" whenever the student switches away
+  // toggle naturally resets to "English" whenever the student switches away
   // and back, rather than needing an explicit reset effect here.
   const showLanguageToggle = medium !== null && medium !== "English" && subject.code === ENGLISH_SUBJECT_CODE;
-  const [preferEnglish, setPreferEnglish] = useState(false);
+  // Defaults to English (immersion), not the student's native medium --
+  // reported directly: with the previous native-first default, a student
+  // opening the English subject already saw native-language text, so
+  // clicking their OWN native-medium button (already the active one) was a
+  // no-op that looked exactly like "the toggle doesn't do anything." Native
+  // help is still one click away; it's just no longer the first thing shown.
+  const [preferEnglish, setPreferEnglish] = useState(true);
   // What the toggle actually means right now -- false whenever it isn't even
   // shown, same guard the server independently re-checks (see /api/chat and
   // /api/topics/[id]/summary), so this is never trusted on its own for
