@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { resolveStaffPreviewScope } from "@/lib/staffPreview";
-import { resolveContentMedium } from "@/lib/studentScope";
+import { resolveContentMedium, resolveResponseLanguage } from "@/lib/studentScope";
 import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import {
   getOrchestratedReply,
@@ -13,15 +13,6 @@ import {
   type ImageMediaType,
 } from "@/lib/orchestratorClient";
 import type { ChatMessage, Database, Medium } from "@/lib/supabase/types";
-
-// The one subject where "respond in the student's native medium" isn't
-// always what the student wants -- English is a language-learning subject
-// itself, so a non-English-medium student may deliberately want tutor
-// replies in English for immersion, not just their native medium. Gated to
-// this one subject code (see supabase/migrations/0003_seed_catalog.sql)
-// rather than a generic per-subject toggle, since every other subject's
-// content assumes explanations happen in the student's own language.
-const ENGLISH_SUBJECT_CODE = "ENG";
 
 const HISTORY_LIMIT = 20;
 const MAX_MESSAGE_LENGTH = 2000;
@@ -121,8 +112,6 @@ async function buildStudentOrchestrationRequest(
     image?: ImageAttachment;
   }
 ): Promise<{ request: ChatOrchestrationRequest; topicsWithIds: SyllabusTopicWithId[] }> {
-  const isEnglishSubject = params.subjectCode === ENGLISH_SUBJECT_CODE;
-
   // See the matching comments in the original single-branch version of this
   // route (still accurate): contentMedium decides what's in scope to ask
   // about (syllabus/RAG/cache), responseLanguage only decides what language
@@ -138,10 +127,14 @@ async function buildStudentOrchestrationRequest(
   // actually lives. Not the same function resolveStudentSubjectScope uses
   // for its own (differently-scoped) answer-bank lookups -- see
   // resolveAnswerBankMedium's own comment on why English specifically
-  // needs a different answer there.
+  // needs a different answer there. responseLanguage goes through the
+  // shared resolveResponseLanguage (see its own comment in studentScope.ts)
+  // -- a genuinely different question from contentMedium, and previously
+  // reimplemented here as its own narrower English-only formula, the same
+  // gap resolveContentMedium already had for Hindi/Bengali before it was
+  // centralized.
   const contentMedium: Medium = resolveContentMedium(params.subjectCode, params.medium);
-  const responseLanguage: Medium =
-    params.preferEnglish && isEnglishSubject && params.medium !== "English" ? "English" : params.medium;
+  const responseLanguage: Medium = resolveResponseLanguage(params.subjectCode, params.medium, params.preferEnglish);
 
   const [{ data: board }, { data: grade }, { data: topics }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", params.boardId).single(),
