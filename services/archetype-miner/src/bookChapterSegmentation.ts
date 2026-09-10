@@ -45,11 +45,22 @@ function escapeRegExp(s: string): string {
 
 // Finds `heading`'s real position in `text` -- a plain indexOf first (the
 // common case: the model copied it verbatim, as instructed), falling back
-// to a whitespace-tolerant regex search (runs of whitespace in `heading`
-// match ANY run of whitespace in `text`) so an OCR line-wrap or a stray
-// double space between the same words doesn't defeat an otherwise-correct
-// match. Returns -1, never throws, when neither finds it -- the caller
-// reports that boundary as unresolved rather than guessing.
+// to case-insensitive and whitespace-tolerant variants (in that order) for
+// two real, confirmed-live sources of drift between what the model
+// returned and the literal source bytes:
+//   - CASE: a printed book's own chapter/poem headings are very often
+//     rendered in full caps ("SEA FEVER"), but the model's own idea of a
+//     "clean" heading -- even asked to copy verbatim -- can still come
+//     back title-cased ("Sea Fever"). Confirmed directly: three real
+//     poem titles in a live book (Sea Fever, The Cat, The Snail) went
+//     unresolved and silently folded into a neighboring chapter's text
+//     purely because of this, before case-insensitive matching existed.
+//   - WHITESPACE: an OCR line-wrap or a stray double space between the
+//     same words (runs of whitespace in `heading` match ANY run of
+//     whitespace in `text`).
+// Returns -1, never throws, when nothing matches even with both
+// tolerances -- the caller reports that boundary as unresolved rather
+// than guessing.
 function findHeadingIndex(text: string, heading: string): number {
   const trimmed = heading.trim();
   if (!trimmed) return -1;
@@ -57,10 +68,13 @@ function findHeadingIndex(text: string, heading: string): number {
   const direct = text.indexOf(trimmed);
   if (direct !== -1) return direct;
 
+  const caseInsensitive = text.toLowerCase().indexOf(trimmed.toLowerCase());
+  if (caseInsensitive !== -1) return caseInsensitive;
+
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length === 0) return -1;
   const pattern = words.map(escapeRegExp).join("\\s+");
-  const match = new RegExp(pattern).exec(text);
+  const match = new RegExp(pattern, "i").exec(text);
   return match ? match.index : -1;
 }
 
