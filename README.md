@@ -2220,6 +2220,8 @@ above):
   / `GOOGLE_DOCUMENT_AI_CLIENT_EMAIL` / `GOOGLE_DOCUMENT_AI_PRIVATE_KEY` — from a Google Cloud
   project with the Document AI API enabled and a "Document OCR" processor created; see the inline
   comments in `services/vision-ocr/.env.example` for the exact Cloud Console steps.
+- `GOOGLE_DOCUMENT_AI_PROCESSOR_VERSION` — optional, pins a specific model version instead of that
+  processor's current default; see `.env.example`'s own comment for when this is worth trying.
 
 ### 5. Run it
 
