@@ -18,6 +18,7 @@ import {
   getStoredChapterSummary,
 } from "./chapterDocuments.js";
 import { findRelevantChapterChunks } from "./chapterRag.js";
+import { detectContentLanguage } from "./contentLanguage.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
 import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
@@ -59,6 +60,16 @@ import type {
 const PORT = Number(process.env.PORT) || 4000;
 const MAX_TOKENS = 1536;
 const SUMMARY_MAX_TOKENS = 700;
+// Sized for buildTopicSummaryTranslationPrompt specifically, not
+// buildTopicSummaryPrompt's own "a few short paragraphs" -- that prompt
+// FAITHFULLY REPRODUCES whatever real chapter_documents content exists for
+// a topic, which can be substantially longer than a quick revision summary
+// (e.g. several field-type documents -- overview, characters, vocabulary,
+// grammar, composition -- concatenated together by getStoredChapterSummary
+// for one topic). Reported live: the plain SUMMARY_MAX_TOKENS budget cut a
+// real translation off mid-way through, well before its own vocabulary/
+// grammar/composition sections.
+const SUMMARY_TRANSLATION_MAX_TOKENS = 4000;
 const EXERCISE_MAX_TOKENS = 2048;
 const EXERCISE_GENERATION_COUNT = 5;
 // findArchetypesForTopic's own default limit (5, matching
@@ -597,15 +608,35 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
 // each a fallback for the one before it:
 //
 //   1. Chapter notes (RAG): admin-authored/imported content for this exact
-//      topic (chapter_documents, the same store chat grounding reads from).
-//      When responseLanguage matches the topic's own medium exactly, this
-//      is shown as-is -- already curated by a human, no review gate,
-//      without ever touching the LLM. When it DOESN'T match, the same real
-//      content is still looked up (never skipped), but now goes through
-//      stage 4's LLM call as grounding to translate/adapt -- see that
-//      stage's own comment for why this changed. Only when NO
-//      chapter_documents content exists for this topic at all does this
-//      stage contribute nothing.
+//      topic (chapter_documents, the same store chat grounding reads from)
+//      -- always looked up, regardless of responseLanguage. When it's
+//      ALREADY written in responseLanguage, it's shown as-is -- already
+//      curated by a human, no review gate, without ever touching the LLM.
+//      When it isn't, the same real content still goes through stage 4's
+//      LLM call as grounding to translate/adapt (see that stage's own
+//      comment). Only when NO chapter_documents content exists for this
+//      topic at all does this stage contribute nothing.
+//
+//      Whether the stored content is "already written in responseLanguage"
+//      is decided by detectContentLanguage (contentLanguage.ts) reading
+//      the content's OWN characters -- deliberately NOT by comparing
+//      responseLanguage against this topic's `medium` column, which means
+//      "which student COHORT this content serves" (see the web app's own
+//      studentScope.ts top comment), not "what script this text is
+//      written in." Those two readings coincide for a single-cohort
+//      subject (CBSE English's own content really is in English, matching
+//      medium=English) but genuinely diverge the moment they don't (West
+//      Bengal Board's own English-Second-Language course: medium=Bengali
+//      is the COHORT it serves, but its real chapter_documents text was
+//      authored in English) -- confirmed live, TWICE: first when comparing
+//      against `medium` skipped this stage's real content entirely for any
+//      responseLanguage but the literal tag string (a Bengali-medium
+//      student's own DEFAULT English view of it fell to a fully ungrounded
+//      stage 4); then again, after that fix, when a Bengali-TOGGLED
+//      request came back as the SAME unmodified English content, because
+//      responseLanguage("Bengali") happened to equal the row's own
+//      medium("Bengali") tag even though not one real character of the
+//      text ever was Bengali.
 //   2. Cache (Redis): a summary generated earlier for this exact
 //      (topicId, responseLanguage) pair and already admin-approved -- see
 //      stage 3's caching rule below for why a pending_review summary never
@@ -626,33 +657,18 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
 //      self-heals on the next click rather than staying dead until someone
 //      notices and manually clears it.
 //   4. LLM: generates fresh (buildTopicSummaryPrompt, the model's own
-//      general knowledge of the chapter/topic by NAME only) when stage 1
-//      found nothing at all for this topic; otherwise TRANSLATES/adapts
-//      the real stage-1 content into responseLanguage
-//      (buildTopicSummaryTranslationPrompt) rather than inventing a fresh
-//      summary. Either way, upserts into topic_summaries (keyed on this
-//      responseLanguage) as 'pending_review' (never auto-approved, unlike
-//      answer-bank entries -- see 0026_topic_summary_review.sql), and is
-//      returned to this request but not cached, for the same reason as
-//      stage 3's pending case.
-//
-// Reported live: `medium` here is a topic's COHORT tag (see the web app's
-// own studentScope.ts top comment on why that's a different question from
-// "what language is this text written in"), which this route used to
-// treat as if it always equalled the language chapter_documents content is
-// actually written in -- true for a single-cohort subject (CBSE English's
-// own content really is in English, matching medium=English), false the
-// moment cohort and content-language genuinely diverge (West Bengal
-// Board's own English-Second-Language course: medium=Bengali is the
-// COHORT it serves, but its real chapter_documents text was authored in
-// English). Under the old rule, ANY responseLanguage other than the exact
-// medium string skipped stage 1's real content entirely and fell straight
-// to a fully ungrounded stage 4 -- including a Bengali-medium student's
-// own DEFAULT (English) view of that exact content, which is the common
-// case for exactly the students this course exists for. Stage 1 is now
-// ALWAYS consulted regardless of responseLanguage; only whether its result
-// is returned as-is (native) or handed to the LLM to translate (not
-// native) depends on the match.
+//      general knowledge of the chapter/topic by NAME only, SUMMARY_MAX_TOKENS)
+//      when stage 1 found nothing at all for this topic; otherwise
+//      TRANSLATES/adapts the real stage-1 content into responseLanguage
+//      (buildTopicSummaryTranslationPrompt, SUMMARY_TRANSLATION_MAX_TOKENS
+//      -- a larger budget, since faithfully reproducing real content that
+//      can span several concatenated field-type documents needs more room
+//      than a quick "few short paragraphs" summary) rather than inventing
+//      a fresh one. Either way, upserts into topic_summaries (keyed on
+//      this responseLanguage) as 'pending_review' (never auto-approved,
+//      unlike answer-bank entries -- see 0026_topic_summary_review.sql),
+//      and is returned to this request but not cached, for the same
+//      reason as stage 3's pending case.
 app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Response) => {
   const startedAt = Date.now();
   const body = req.body as Partial<TopicSummaryRequest> | undefined;
@@ -681,7 +697,6 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
 
   const medium = body.medium as Medium;
   const responseLanguage: Medium = (body.responseLanguage as Medium | undefined) ?? medium;
-  const isNativeLanguage = responseLanguage === medium;
 
   function respond(summary: string, source: TopicSummaryResponse["source"]) {
     void recordChatEvent({
@@ -696,13 +711,23 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
     res.json(response);
   }
 
-  // Always looked up now, regardless of isNativeLanguage -- see this
-  // route's own top comment for why. fromChapterNotes is real content
-  // ("what does this topic actually say") whenever it exists at all;
-  // isNativeLanguage only decides whether it's returned as-is (native) or
-  // handed to the LLM as grounding to translate (stage 4 below).
+  // Always looked up now, regardless of language -- see this route's own
+  // top comment for why. fromChapterNotes is real content ("what does
+  // this topic actually say") whenever it exists at all.
   const fromChapterNotes = await getStoredChapterSummary(body.topicId);
-  if (fromChapterNotes && isNativeLanguage) {
+  // Whether it can be shown completely as-is (no LLM call at all) depends
+  // on what language it's ACTUALLY written in -- detected from its own
+  // real characters (see contentLanguage.ts's own comment on why this,
+  // never the topic's `medium` column, which means "which cohort this
+  // serves," not "what script this text is in"; the two genuinely
+  // diverge for content like West Bengal Board's own English-Second-
+  // Language reader). Reported live: comparing against `medium` directly
+  // made a Bengali-toggled request return this exact content completely
+  // UNCHANGED -- still English prose -- because the row's own medium tag
+  // happened to already equal "Bengali", even though not one character of
+  // the real text ever was.
+  const isAlreadyInResponseLanguage = fromChapterNotes !== null && detectContentLanguage(fromChapterNotes) === responseLanguage;
+  if (fromChapterNotes && isAlreadyInResponseLanguage) {
     respond(fromChapterNotes, "chapter_notes");
     return;
   }
@@ -753,7 +778,10 @@ app.post("/v1/topic-summary", requireSharedSecret, async (req: Request, res: Res
       systemPrompt,
       history: [],
       message: "Write the summary now.",
-      maxTokens: SUMMARY_MAX_TOKENS,
+      // The translation prompt faithfully reproduces potentially much
+      // longer real content than a quick "few short paragraphs" summary --
+      // see SUMMARY_TRANSLATION_MAX_TOKENS's own comment.
+      maxTokens: fromChapterNotes ? SUMMARY_TRANSLATION_MAX_TOKENS : SUMMARY_MAX_TOKENS,
     });
 
     await upsertTopicSummary(body.topicId, responseLanguage, text);
