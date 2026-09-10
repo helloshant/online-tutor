@@ -78,8 +78,16 @@ async function ocrOneFile(file: OcrFileInput): Promise<OcrFileResult> {
   if (chunkTexts.length === 0) {
     return { fileName: file.fileName, ok: false, error: chunkErrors.join("; ") };
   }
-  const note = chunkErrors.length > 0 ? ` (${chunkErrors.length} of ${pageChunks.length} page range(s) failed: ${chunkErrors.join("; ")})` : "";
-  return { fileName: file.fileName, ok: true, text: chunkTexts.join("\n\n") + (note ? `\n\n[${note.trim()}]` : "") };
+  if (chunkErrors.length === 0) {
+    return { fileName: file.fileName, ok: true, text: chunkTexts.join("\n\n") };
+  }
+  // Set BOTH inline (so the extracted text is self-describing on its own)
+  // and as its own `note` field (so a caller can show this in a per-file
+  // status list without needing to scroll/search through possibly very
+  // long text to notice a partial failure happened at all -- see
+  // OcrFileResult's own comment in types.ts).
+  const note = `${chunkErrors.length} of ${pageChunks.length} page range(s) failed: ${chunkErrors.join("; ")}`;
+  return { fileName: file.fileName, ok: true, text: `${chunkTexts.join("\n\n")}\n\n[${note}]`, note };
 }
 
 // Image Processing -> Image-to-Text/Vision, per file, with each file's own
