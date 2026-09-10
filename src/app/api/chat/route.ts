@@ -126,16 +126,19 @@ async function buildStudentOrchestrationRequest(
   // See the matching comments in the original single-branch version of this
   // route (still accurate): contentMedium decides what's in scope to ask
   // about (syllabus/RAG/cache), responseLanguage only decides what language
-  // the reply is written in. contentMedium goes through the same
-  // resolveContentMedium every other subject-scoped route now uses (see
-  // its own comment in studentScope.ts) rather than this route's own
-  // narrower English-only version -- confirmed directly against real data
-  // that the same gap existed for Hindi and Bengali: syllabus_topics has
-  // zero rows for either subject under any medium but their own, so a
-  // Hindi-second-language student under an English-medium subscription
-  // (or an English-second-language student under a Hindi/Bengali-medium
-  // one) got contentMedium = their OWN medium here, which is never where
-  // that subject's own content actually lives.
+  // the reply is written in. contentMedium goes through the shared
+  // resolveContentMedium (see its own comment in studentScope.ts) rather
+  // than this route's own narrower English-only version -- confirmed
+  // directly against real data that the same gap existed for Hindi and
+  // Bengali: syllabus_topics has zero rows for either subject under any
+  // medium but their own, so a Hindi-second-language student under an
+  // English-medium subscription (or an English-second-language student
+  // under a Hindi/Bengali-medium one) got contentMedium = their OWN medium
+  // here, which is never where that subject's own SYLLABUS content
+  // actually lives. Not the same function resolveStudentSubjectScope uses
+  // for its own (differently-scoped) answer-bank lookups -- see
+  // resolveAnswerBankMedium's own comment on why English specifically
+  // needs a different answer there.
   const contentMedium: Medium = resolveContentMedium(params.subjectCode, params.medium);
   const responseLanguage: Medium =
     params.preferEnglish && isEnglishSubject && params.medium !== "English" ? "English" : params.medium;
