@@ -123,9 +123,27 @@ export async function runDocumentAiOcr(params: {
   if (!location) return { error: "Missing GOOGLE_DOCUMENT_AI_LOCATION environment variable" };
   if (!processorId) return { error: "Missing GOOGLE_DOCUMENT_AI_PROCESSOR_ID environment variable" };
 
+  // Optional -- when unset, `name` below resolves to the processor's own
+  // current DEFAULT version (unchanged from before this existed), exactly
+  // matching every deployment's existing behavior. Reported live: Bengali
+  // OCR was confirmed garbled (misread as Latin-looking nonsense) on the
+  // DEFAULT version even with correct languageHints and a genuine visual-
+  // OCR pass (enableNativePdfParsing: false already ruled out both a
+  // script-detection issue and a PDF-text-layer shortcut) -- a real,
+  // uploaded scanned image STILL came back wrong, which rules out every
+  // per-request setting this file controls. That points at the processor
+  // VERSION's own model quality for Bengali specifically (Document AI's
+  // language/script coverage genuinely varies release to release), not at
+  // anything this codebase sends per-call -- pinning a newer version here
+  // is the next thing worth trying once one's confirmed available in the
+  // Cloud Console's own "Manage versions" page for this processor.
+  const processorVersion = process.env.GOOGLE_DOCUMENT_AI_PROCESSOR_VERSION;
+
   try {
     const client = getClient();
-    const name = client.processorPath(projectId, location, processorId);
+    const name = processorVersion
+      ? client.processorVersionPath(projectId, location, processorId, processorVersion)
+      : client.processorPath(projectId, location, processorId);
     const [response] = await client.processDocument(
       {
         name,
