@@ -137,8 +137,24 @@ export async function runDocumentAiOcr(params: {
         // downside to always requesting the higher cap.
         imagelessMode: true,
         // See LANGUAGE_HINTS's own comment -- fixes Bengali coming back as
-        // misread Latin gibberish.
-        processOptions: { ocrConfig: { hints: { languageHints: LANGUAGE_HINTS } } },
+        // misread Latin gibberish. enableNativePdfParsing explicitly false
+        // (its own proto default, but set here so this never silently
+        // changes underneath a client library upgrade): this service exists
+        // specifically for scanned/photographed pages (see this file's own
+        // top comment and the OCR page's own copy) that have no trustworthy
+        // digital text layer of their own -- a genuinely digital-native PDF
+        // wouldn't need OCR at all. Reported live: languageHints alone made
+        // no difference whatsoever to a Bengali scan's output, byte-for-
+        // byte identical before and after -- the signature of Document AI
+        // reading an EXISTING text layer already embedded in the PDF
+        // (common when the scanning app/device already ran its own,
+        // lower-quality OCR and baked that result in as invisible,
+        // selectable text) rather than running fresh visual OCR on the
+        // page images at all, which would make any OCR-side config here,
+        // hints included, a no-op -- exactly what was observed.
+        processOptions: {
+          ocrConfig: { hints: { languageHints: LANGUAGE_HINTS }, enableNativePdfParsing: false },
+        },
       },
       PROCESS_DOCUMENT_CALL_OPTIONS
     );
