@@ -10,23 +10,37 @@ export type StudentSubjectScope = {
   medium: Medium;
 };
 
-// A language subject's own SYLLABUS content -- which chapters/topics
-// exist to ask about at all -- is always written in that language,
-// regardless of which medium the REST of a student's subjects are taught
-// in. "Hindi" means something genuinely different depending on who's
-// taking it (a second language under an English-medium subscription, a
-// first language under a Hindi-medium one), but either way its own
-// syllabus_topics rows only ever exist under medium=Hindi (confirmed
-// directly: zero Hindi-subject rows under medium=English, zero
-// English-subject rows under medium=Hindi, zero Bengali-subject rows
-// under medium=English/Hindi). Every other subject genuinely does follow
-// the student's own medium of instruction. Keyed by subjects.code, not
-// name, matching this app's own established convention (see
-// ENGLISH_SUBJECT_CODE, previously duplicated across /api/chat/route.ts
-// and every /api/topics/[id]/* route).
+// IMPORTANT: `medium` on syllabus_topics/answered_questions/
+// chapter_document_chunks means "which student-medium COHORT this content
+// serves," NOT "what script/language the text happens to be written in."
+// Those two readings coincide for every content subject (an English-medium
+// student's Math textbook is both English-language text AND for
+// English-medium students) and for most language-subject content too --
+// but they genuinely diverge wherever a language subject has more than one
+// course. Confirmed live, reported directly: CBSE Grade 10 Hindi's
+// "Sparsh" textbook is Hindi-LANGUAGE text, but it's Hindi Course A --
+// taught to ENGLISH-medium students as their second language, not to
+// Hindi-medium students (who'd take Course B, e.g. Kshitij/Kritika,
+// covering different content this app has no data for yet). Those 14
+// syllabus_topics rows (and the 398 chapter_document_chunks rows chunked
+// from them) were tagged medium=Hindi -- reasoning "the text is in
+// Hindi" -- and corrected to medium=English once this was reported; a
+// Hindi-medium student's own Hindi-subject query now correctly finds
+// nothing yet (no Course B content exists) instead of incorrectly seeing
+// Course A content meant for English-medium students.
+//
+// This is exactly why Hindi is NOT in either map below: once its
+// content is tagged by the cohort it actually serves, a plain
+// `studentMedium` passthrough (same as every ordinary content subject)
+// already does the right thing -- an English-medium student's Hindi
+// query naturally lands on the Course A rows (medium=English), and
+// nothing needs forcing. English (one single course, taken by every
+// student regardless of their own medium) and Bengali (one single course
+// SO FAR -- re-check this the same way if a second Bengali course is ever
+// reported) are each genuinely one-cohort subjects, so their own content
+// stays under one fixed medium value no matter which student asks.
 const LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
   ENG: "English",
-  HN: "Hindi",
   BE: "Bengali",
 };
 
@@ -44,16 +58,18 @@ const LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
 // specifically (confirmed directly: real English-subject answered_questions
 // rows exist under BOTH medium=English and medium=Bengali, the latter from
 // this app's own English-to-native-language translation toggle for
-// non-English-medium students -- Hindi/Bengali-subject rows, with no such
-// toggle, only ever exist under their own one language, same as syllabus
-// content).
+// non-English-medium students -- Bengali-subject rows, with no such
+// toggle (so far), only ever exist under their own one language, same as
+// syllabus content).
 export function resolveContentMedium(subjectCode: string, studentMedium: Medium): Medium {
   return LANGUAGE_SUBJECT_MEDIUM[subjectCode] ?? studentMedium;
 }
 
 // Deliberately excludes ENG -- see resolveAnswerBankMedium's own comment.
+// Also excludes HN, same as LANGUAGE_SUBJECT_MEDIUM above and for the same
+// reason: Hindi content is tagged by the cohort it serves now, so a plain
+// studentMedium passthrough is already correct here too.
 const RIGID_LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
-  HN: "Hindi",
   BE: "Bengali",
 };
 
@@ -70,7 +86,7 @@ const RIGID_LANGUAGE_SUBJECT_MEDIUM: Record<string, Medium> = {
 // are the TRANSLATED ones, so forcing medium=English here (the way
 // resolveContentMedium correctly does for SYLLABUS scoping) would make
 // their own search/tag lookups find nothing they've actually banked.
-// Hindi and Bengali, with no such translation toggle, stay rigid to their
+// Bengali, with no such translation toggle (so far), stays rigid to its
 // own one language, same as resolveContentMedium.
 export function resolveAnswerBankMedium(subjectCode: string, studentMedium: Medium): Medium {
   return RIGID_LANGUAGE_SUBJECT_MEDIUM[subjectCode] ?? studentMedium;
