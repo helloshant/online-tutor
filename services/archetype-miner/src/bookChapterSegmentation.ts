@@ -89,8 +89,14 @@ function stripLabelPrefix(heading: string): string | null {
 // generic residual string is far more likely to match somewhere spurious
 // (a running header, an unrelated sentence) than a genuinely mismatched
 // label prefix is to need more than a few words stripped from it.
+// Reported live: a real book's own titles were often genuinely just 1-2
+// words long ("একাকারে", "অভিষেক") -- an EARLIER, higher floor here (3)
+// blocked stripping far enough to ever reach them, since "label (2 words)
+// + 2-word title" only has 2 words left once the label's gone. Lowered to
+// 2 for that reason; genuine 1-word titles are covered separately below
+// by chapter_title itself, not by stripping this thin.
 const MAX_LEADING_WORDS_STRIPPED = 4;
-const MIN_REMAINING_WORDS = 3;
+const MIN_REMAINING_WORDS = 2;
 
 function stripLeadingWords(heading: string, count: number): string | null {
   const words = heading.split(/\s+/).filter(Boolean);
@@ -148,46 +154,135 @@ function findAllOccurrences(text: string, candidate: string): number[] {
 // also appeared, all clustered together, in the book's own table of
 // contents near the front, and the first-occurrence search landed there
 // instead of at each chapter's real starting point. Fixed with a
-// sequential, cursor-based search instead:
-//   - Every boundary after the first successfully-resolved one is
-//     searched for starting AFTER the previous one's own resolved
-//     position (never earlier) -- a real chapter's content can't occur
-//     before the chapter before it, so this alone rules out matching
-//     anything in the table of contents (always earlier in the book) for
-//     every chapter except conceivably the very first.
-//   - The FIRST boundary that resolves at all has no earlier boundary to
-//     anchor past a table of contents with, so it instead takes the LAST
-//     matching occurrence in the text from that point on, not the first
-//     -- a table of contents mention is virtually always earlier than
-//     the real chapter start, so the latest occurrence is the safer
-//     choice specifically for this one boundary. (A recurring running
-//     header repeating the same title on every page of a LATER chapter
-//     could in principle push this too far forward; accepted as a much
-//     smaller, much rarer risk than the table-of-contents case this
-//     fixes, and only this one boundary ever takes this branch.)
+// sequential, cursor-based search instead: every boundary after the first
+// successfully-resolved one is searched for starting AFTER the previous
+// one's own resolved position (never earlier) -- a real chapter's content
+// can't occur before the chapter before it, so this alone rules out
+// matching anything in the table of contents (always earlier in the book)
+// for every chapter except conceivably the very first.
 //
-// Every reasonable excerpt to search for is POOLED into one combined set
-// of occurrences, not tried one at a time stopping at the first that
-// finds anything -- deliberately, even though stripLeadingWords's own
-// variants are individually less precise than the heading as given.
+// The FIRST boundary that resolves at all has no earlier boundary to
+// anchor past a table of contents with, so it establishes its OWN anchor
+// instead: this candidate's own preciseVariants (the full heading, label
+// intact) are searched for on their own first, and if that finds
+// anything, the LAST such match is treated as roughly where the table of
+// contents ends for this candidate -- the same reasoning the original
+// "just take the last occurrence overall" rule used, but now applied only
+// to the precise tier, before the full (pooled, includes short/generic
+// variants) search runs again from just past that anchor. Once genuinely
+// past the table of contents, the FIRST remaining match is the real
+// heading -- not the last -- since a short/generic pooled variant
+// (chapter_title, an aggressively stripped heading) can otherwise ALSO
+// match something later still: an immediately-following author-name line,
+// or the same short title word recurring later in that chapter's own
+// prose. Confirmed live, via a synthetic stress test built while adding
+// chapter_title/short-variant pooling: blindly keeping "last occurrence
+// overall" once those shorter variants were added let exactly that happen
+// -- overshooting past the real heading into a later, wrong line and
+// silently truncating the chapter.
+//
+// The anchor is only trusted when something genuinely remains past it,
+// specifically past the full length of the anchoring match, not just its
+// start index (a shorter pooled variant can match again as a plain
+// SUBSTRING within that same span, which isn't a separate later
+// occurrence at all -- confirmed live, this exact self-overlap broke the
+// single-chapter/no-table-of-contents case, where the precise tier's one
+// match already IS the real heading). When nothing remains, the table of
+// contents most likely doesn't separately mention this chapter at all (or
+// there isn't one), so this falls back to the original, simpler "last
+// occurrence overall" rule, unaffected by any of this. (A recurring
+// running header repeating the same title on every page of a LATER
+// chapter could in principle still push an anchor-less resolution too far
+// forward; accepted as a much smaller, much rarer risk than the table-of-
+// contents case this all exists to fix, same as before this file's own
+// generalization.)
+//
+// The heading exactly as given, plus (when LABEL_PREFIX recognizes one) a
+// version with an English-style "Lesson N"/"Chapter N:" label stripped --
+// the ORIGINAL, pre-generalization variant set. Used on its own, not just
+// as part of the full pool below, specifically as a position ANCHOR for
+// the very first boundary -- see resolveBoundaries's own comment on why.
+function preciseVariants(heading: string): string[] {
+  const variants = [heading];
+  const withoutLabel = stripLabelPrefix(heading);
+  if (withoutLabel) variants.push(withoutLabel);
+  return variants;
+}
+
+// Every reasonable excerpt worth searching for, POOLED into one combined
+// set of occurrences downstream, not tried one at a time stopping at the
+// first that finds anything -- deliberately, even though stripLeadingWords's
+// own variants are individually less precise than the heading as given.
 // Confirmed live: a label-heavy heading (the full TOC-style excerpt, e.g.
 // "দ্বিতীয় পাঠ [title] [author]") often matches ONLY inside the table of
 // contents itself, never anywhere in the body -- stopping as soon as that
 // one (wrong) match was found would never even try the stripped variant
-// that finds the real, later occurrence, defeating the very "last
-// occurrence wins" logic below that this whole file exists to get right.
-// Pooling lets every variant's matches compete on equal footing; the
-// position-selection rules already handle picking the right one out of
-// however many turn up.
-function candidateVariants(heading: string): string[] {
-  const variants = [heading];
-  const withoutLabel = stripLabelPrefix(heading);
-  if (withoutLabel) variants.push(withoutLabel);
+// that finds the real, later occurrence, defeating the very TOC-skip logic
+// this whole file exists to get right. Pooling lets every variant's
+// matches compete on equal footing; resolveBoundaries's own selection
+// rules handle picking the right one out of however many turn up.
+//
+// Also pools in chapter_title itself, not just excerpts derived from
+// heading -- a real book's own titles are sometimes genuinely just one
+// word ("একাকারে", "অভিষেক"), too short to reach via stripLeadingWords
+// without dropping MIN_REMAINING_WORDS low enough to risk spurious
+// matches on ordinary short strings. chapter_title is a DIFFERENT kind of
+// signal: the model's own cleaned, deliberate account of the real title
+// (with the whole document in view, not a mechanical strip), reported
+// separately from heading precisely because it isn't promised to be a
+// verbatim excerpt -- so it may simply fail to match at all (a heavily
+// "cleaned" title that no longer matches the raw OCR text verbatim), same
+// harmless no-op as any other variant that doesn't appear in the text.
+function candidateVariants(candidate: { chapterTitle: string; heading: string }): string[] {
+  const { chapterTitle, heading } = candidate;
+  const variants = [...preciseVariants(heading), chapterTitle];
   for (let strip = 1; strip <= MAX_LEADING_WORDS_STRIPPED; strip++) {
     const stripped = stripLeadingWords(heading, strip);
     if (stripped) variants.push(stripped);
   }
   return variants;
+}
+
+// True when `index` is the first character of its own line (a real
+// printed heading's own position, virtually always) rather than embedded
+// mid-line or mid-sentence. Confirmed live, via a synthetic stress test
+// built while verifying this file's own short-variant/chapter_title
+// pooling (added once real titles turned out to be too short for
+// stripLeadingWords's own word-count floor alone): pooling in a bare,
+// generic title (a single word, or one short enough to plausibly recur)
+// makes it possible for that SAME word to also appear again later, mid-
+// sentence, inside its own chapter's running prose -- and for the very
+// first boundary specifically, whose selection rule takes the LAST
+// pooled occurrence (see this function's own top comment on why), that
+// later, wrong, self-referential mention can outrank the real heading
+// entirely, silently truncating the chapter. A genuine chapter heading
+// and a table-of-contents entry are both printed on their own line; an
+// incidental repeat of the same word inside a paragraph is not -- so this
+// is used to prefer occurrences that look like an actual heading over
+// ones that merely contain the same text.
+function isAtLineStart(text: string, index: number): boolean {
+  return index === 0 || text[index - 1] === "\n";
+}
+
+// Every occurrence of any of `variants` in `text` at or after `from`, in
+// order -- the shared building block both the main pooled search and the
+// precise-tier anchor search use.
+function occurrencesFrom(text: string, variants: string[], from: number): number[] {
+  return variants
+    .flatMap((variant) => findAllOccurrences(text, variant))
+    .filter((index) => index >= from)
+    .sort((a, b) => a - b);
+}
+
+// Prefer line-start occurrences when there are any -- see isAtLineStart's
+// own comment. Falls back to the unfiltered set when NONE start a line
+// (OCR line-wrap noise can genuinely put a real heading's own text mid-
+// line), so this can only ever narrow toward a better match, never
+// manufacture a brand new "unresolved" failure that wouldn't already have
+// happened before this existed.
+function preferLineStart(text: string, occurrences: number[]): number[] {
+  const lineStart = occurrences.filter((index) => isAtLineStart(text, index));
+  return lineStart.length > 0 ? lineStart : occurrences;
 }
 
 function resolveBoundaries(
@@ -199,17 +294,35 @@ function resolveBoundaries(
   let searchFrom = 0;
 
   for (const candidate of candidates) {
-    const occurrences = candidateVariants(candidate.heading)
-      .flatMap((variant) => findAllOccurrences(text, variant))
-      .filter((index) => index >= searchFrom)
-      .sort((a, b) => a - b);
+    const isFirstBoundary = resolved.length === 0;
+    let occurrences = preferLineStart(text, occurrencesFrom(text, candidateVariants(candidate), searchFrom));
+    let useFirst = !isFirstBoundary;
+
+    if (isFirstBoundary) {
+      const preciseOccurrences = occurrencesFrom(text, preciseVariants(candidate.heading), searchFrom);
+      if (preciseOccurrences.length > 0) {
+        // Past the full length of the anchoring match, not just its start
+        // index -- see this function's own top comment on why (a shorter
+        // pooled variant matching as a plain substring WITHIN that same
+        // span is not a separate, later occurrence).
+        const anchor = Math.max(...preciseOccurrences) + candidate.heading.length;
+        const afterAnchor = preferLineStart(text, occurrencesFrom(text, candidateVariants(candidate), anchor));
+        if (afterAnchor.length > 0) {
+          occurrences = afterAnchor;
+          useFirst = true;
+        }
+        // else: nothing genuinely remains past the anchor -- keep the
+        // original, unanchored `occurrences` and its "last occurrence
+        // overall" selection below, unaffected.
+      }
+    }
 
     if (occurrences.length === 0) {
       unresolved.push({ chapterTitle: candidate.chapterTitle, heading: candidate.heading });
       continue;
     }
 
-    const index = resolved.length === 0 ? occurrences[occurrences.length - 1] : occurrences[0];
+    const index = useFirst ? occurrences[0] : occurrences[occurrences.length - 1];
     resolved.push({ chapterTitle: candidate.chapterTitle, index });
     searchFrom = index + 1;
   }
