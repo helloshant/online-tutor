@@ -1231,14 +1231,31 @@ Part into further pieces.
 When the index itself lists an entry bilingually (its own English name
 on one line, a translation into the book's own language just below or
 beside it -- common in indexes for a book whose body isn't in English),
-take the name in whichever language the book's BODY TEXT is actually
-written in, not whichever language happens to be listed first in the
-index. A book written in Bengali, French, or any other language should
-come out with chapter_titles in that same language throughout -- never a
-mix where indexed chapters come out in English (because that's what the
-index happened to print first) while un-indexed chapters come out in the
-book's own language (because those were named straight from a body
-heading with no index entry to pull from at all).
+take the CHAPTER_TITLE (only -- see next paragraph) in whichever language
+the book's BODY TEXT is actually written in, not whichever language
+happens to be listed first in the index. A book written in Bengali,
+French, or any other language should come out with chapter_titles in
+that same language throughout -- never a mix where indexed chapters come
+out in English (because that's what the index happened to print first)
+while un-indexed chapters come out in the book's own language (because
+those were named straight from a body heading with no index entry to
+pull from at all).
+
+This bilingual-index guidance -- and the earlier guidance to align an
+indexed Part's chapter_title to the index's own name -- applies to
+chapter_title ONLY. It never changes what heading is or where it comes
+from: heading is still always copied VERBATIM from the exact spot in the
+BODY TEXT where this chapter actually begins (see the heading field's
+own definition above), in whatever language, spelling, and wording the
+body itself uses right there -- never translated, never paraphrased,
+and never assembled by combining pieces of the index's own wording
+(front matter or otherwise), even when that produces a heading in a
+different language or phrasing than chapter_title. Confirmed live: a
+model that tried to make heading match chapter_title's language, by
+composing a Bengali phrase out of the index's own English/Bengali
+listing instead of copying the body's real (and differently-worded)
+heading, produced text that occurs nowhere in the source at all --
+every one of those chapters failed to resolve.
 
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
