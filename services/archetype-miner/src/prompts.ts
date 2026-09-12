@@ -1207,6 +1207,27 @@ introduces the run -- or the index's own name for that unit -- as the
 chapter_title, with the run's FIRST sub-heading as where the chapter
 begins.
 
+When such an index exists, match its granularity exactly, one entry at
+a time. For a printed chapter that the index lists as only ONE item (or
+doesn't list at all), treat the ENTIRE printed chapter as a single
+chapter_title, no matter how many numbered or lettered sub-headings it
+contains internally -- do not split it further, even if some of those
+internal sub-headings look exactly like real chapter headings in
+isolation (their own title, their own substantial content). For a
+printed chapter the index lists as SEVERAL items sharing one base name
+(e.g. "Topic -- Part 1", "Topic -- Part 2", ...), search within that
+chapter's own body for where each Part's own subject actually begins --
+a numbered sub-heading, a lettered sub-heading, or simply a topic shift
+-- even if the body never prints the words "Part 1"/"Part 2" verbatim
+next to it; align each indexed Part to the closest such internal
+boundary in reading order and use the index's own name for that Part as
+the chapter_title. Content that doesn't correspond to any named index
+entry (a general review/analysis section tacked onto the end of a
+chapter, background material before the first real Part begins) stays
+folded into whichever indexed Part it falls within -- never a boundary
+of its own, and never a reason to split content the index treats as one
+Part into further pieces.
+
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
 chapter (one entry covering what should have been two) is a far smaller
