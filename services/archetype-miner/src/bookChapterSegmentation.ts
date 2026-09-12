@@ -23,6 +23,72 @@ import { buildBookChapterSegmentationPrompt } from "./prompts.js";
 
 const MAX_TOKENS = 8000;
 
+// Reported live: a real (cleaned, back-matter-trimmed) book blew Azure
+// OpenAI's gpt-4o context window in one call: "maximum context length is
+// 128000 tokens... your messages resulted in 138341 tokens" for a text
+// whose own JS string .length (UTF-16 code units -- what this constant is
+// compared against, same unit `text.length` uses everywhere else in this
+// file) was only 237,808 -- ~1.72 characters per token. Bengali text is
+// genuinely this token-DENSE (nowhere near the "~4 characters per token"
+// rule of thumb that holds for plain English); an earlier version of this
+// constant was sized against the wrong unit (this same text's BYTE length,
+// 611,139, not its JS character length) and would have kept failing.
+// Targets a comfortable ~70,000 input tokens per chunk at that same
+// density (128K minus real margin for the system prompt, MAX_TOKENS's own
+// output budget, and whichever LLM provider -- see llm.ts -- ends up
+// serving the call; Anthropic's own context window is comfortably larger,
+// so this is sized for the tightest supported provider, not the average
+// one), rounded down for safety against an even more token-dense book.
+const MAX_CHUNK_CHARS = 120_000;
+
+// A small overlap between consecutive chunks so a heading whose own
+// surrounding context (an author byline, an opening line confirming it's
+// a real heading and not a stray title mention) would otherwise land
+// right at a chunk's own cut point still has a decent chance of being
+// recognized as a heading by at least one of the two chunks that see it.
+// Harmless if a chapter genuinely gets proposed by both chunks it
+// straddles -- resolveBoundaries's own sequential search naturally treats
+// a repeat candidate as a no-op (nothing new left to find once the first
+// occurrence already consumed it), not a duplicate chapter.
+const CHUNK_OVERLAP_CHARS = 4_000;
+
+// How far back from a target split point to look for a real line break to
+// split on, rather than slicing mid-line/mid-word -- keeps a chunk's own
+// trailing/leading text readable to the model instead of starting or
+// ending on a fragment. Falls back to a hard cut at the target itself
+// when nothing turns up within this window (only possible for a pathological
+// input with no line breaks at all across a very long stretch).
+const SPLIT_SEARCH_WINDOW = 2_000;
+
+// Splits `text` into sequential, slightly-overlapping windows, each at
+// most `maxChars` -- mirrors the vision-ocr service's own pdfPaging.ts
+// (splitting a whole book past ONE service's own request-size ceiling is
+// an already-established pattern in this codebase, just a different
+// ceiling: an LLM's context window here instead of Document AI's request
+// size there). Returns a single-element array unchanged when `text`
+// already fits, so a normal-sized book pays no extra cost or behavior
+// change from this existing before.
+function splitTextIntoChunks(text: string, maxChars: number, overlapChars: number): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + maxChars, text.length);
+    if (end < text.length) {
+      // Prefer splitting at the last line break within SPLIT_SEARCH_WINDOW
+      // of the target end, searching backward from it.
+      const searchFrom = Math.max(start, end - SPLIT_SEARCH_WINDOW);
+      const lastBreak = text.lastIndexOf("\n", end);
+      if (lastBreak > searchFrom) end = lastBreak + 1;
+    }
+    chunks.push(text.slice(start, end));
+    if (end >= text.length) break;
+    start = Math.max(start + 1, end - overlapChars);
+  }
+  return chunks;
+}
+
 type RawBoundary = { chapter_title: string; heading: string };
 
 export type BookChapterChunk = { chapter_number: number; chapter_title: string; text: string };
@@ -330,6 +396,22 @@ function resolveBoundaries(
   return { resolved, unresolved };
 }
 
+// Parses one LLM call's own raw `data` into candidates, same validation
+// every chunk's response goes through -- factored out so segmentBookIntoChapters
+// can call it once per chunk without repeating the shape-checking inline.
+function parseCandidates(data: unknown): { chapterTitle: string; heading: string }[] {
+  if (!Array.isArray(data)) return [];
+  const candidates: { chapterTitle: string; heading: string }[] = [];
+  for (const item of data) {
+    if (typeof item !== "object" || item === null) continue;
+    const b = item as Partial<RawBoundary>;
+    if (typeof b.chapter_title !== "string" || !b.chapter_title.trim()) continue;
+    if (typeof b.heading !== "string" || !b.heading.trim()) continue;
+    candidates.push({ chapterTitle: b.chapter_title.trim(), heading: b.heading.trim() });
+  }
+  return candidates;
+}
+
 // The whole point of this file. `text` is the admin-reviewed raw OCR
 // output (see the OCR page's own "review this before using it" posture --
 // this runs only once an admin has already looked it over, never
@@ -338,24 +420,42 @@ function resolveBoundaries(
 // the real content) is dropped, same as this app's own established "not
 // every byte survives, only the real content" posture elsewhere (e.g.
 // off-scope content scanning).
+//
+// A real book can comfortably exceed a single LLM call's own context
+// window (see MAX_CHUNK_CHARS's own comment for the live report that
+// motivated this) -- split first, always, same "predictable cost, never a
+// guaranteed-failing call first" posture pdfPaging.ts already established
+// for Document AI's own request-size ceiling. Every chunk is asked to
+// propose boundaries independently (each chunk stands in for "the text"
+// as far as that one call is concerned), but boundary RESOLUTION still
+// runs exactly once, against the whole original `text` -- never per
+// chunk -- so a heading proposed from deep in a later chunk still gets
+// the SAME real-position search, same table-of-contents-skip, and same
+// sequential ordering guarantees as a normal, single-call run.
+//
+// One chunk's own LLM call failing (a parse error surviving all of
+// getJsonCompletion's own retries, a truncated response) is logged and
+// skipped, not a hard failure for the whole request -- this codebase's
+// established "fail open per unit of work" convention (see ocrPipeline.ts's
+// own per-page-range chunkErrors): whatever chapters that one chunk would
+// have proposed are simply missing from the result, same as if the model
+// itself had missed them, rather than losing every OTHER chunk's already-
+// successful work too.
 export async function segmentBookIntoChapters(params: { text: string }): Promise<SegmentBookResult> {
-  const { data } = await getJsonCompletion({
-    systemPrompt: buildBookChapterSegmentationPrompt(),
-    message: params.text,
-    maxTokens: MAX_TOKENS,
-  });
-
-  if (!Array.isArray(data)) {
-    return { chunks: [], unresolved: [] };
-  }
+  const textChunks = splitTextIntoChunks(params.text, MAX_CHUNK_CHARS, CHUNK_OVERLAP_CHARS);
 
   const candidates: { chapterTitle: string; heading: string }[] = [];
-  for (const item of data) {
-    if (typeof item !== "object" || item === null) continue;
-    const b = item as Partial<RawBoundary>;
-    if (typeof b.chapter_title !== "string" || !b.chapter_title.trim()) continue;
-    if (typeof b.heading !== "string" || !b.heading.trim()) continue;
-    candidates.push({ chapterTitle: b.chapter_title.trim(), heading: b.heading.trim() });
+  for (const [i, textChunk] of textChunks.entries()) {
+    try {
+      const { data } = await getJsonCompletion({
+        systemPrompt: buildBookChapterSegmentationPrompt(),
+        message: textChunk,
+        maxTokens: MAX_TOKENS,
+      });
+      candidates.push(...parseCandidates(data));
+    } catch (err) {
+      console.error(`Book chapter segmentation failed for chunk ${i + 1} of ${textChunks.length}:`, err);
+    }
   }
 
   const { resolved, unresolved } = resolveBoundaries(params.text, candidates);
