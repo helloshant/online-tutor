@@ -1187,6 +1187,26 @@ For each real chapter found, report:
   whether a number/label is physically part of the heading at its real
   location, leave it out.
 
+Some books also contain a table that enumerates every chapter/unit BY
+NAME for a different purpose (a QR-code/video index, a syllabus map, an
+appendix listing) -- if such a table clearly lists the book's own real
+chapters, its count and names are authoritative: match your output to
+THAT list rather than inventing a boundary at every numbered sub-heading
+you encounter while reading the body. A single real chapter's body text
+is very often broken up internally with a RUN of numbered sub-topics
+sharing the same leading number (e.g. "7.1", "7.2", ... "7.8", or "3.1",
+"3.2") -- these are internal structure, NOT separate chapters, even
+though each one carries a full heading of its own, its own title line,
+and a substantial amount of content, making it look exactly like a real
+chapter heading in isolation. Only report one of these numbered
+sub-headings as its own chapter_title entry when the book's own
+index/table of contents lists that EXACT number as a distinct unit;
+otherwise, treat the whole run of same-prefix numbered sub-headings as
+ONE chapter, and use the un-numbered (or single-number) heading that
+introduces the run -- or the index's own name for that unit -- as the
+chapter_title, with the run's FIRST sub-heading as where the chapter
+begins.
+
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
 chapter (one entry covering what should have been two) is a far smaller
