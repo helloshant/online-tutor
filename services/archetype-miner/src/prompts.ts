@@ -1228,6 +1228,18 @@ folded into whichever indexed Part it falls within -- never a boundary
 of its own, and never a reason to split content the index treats as one
 Part into further pieces.
 
+When the index itself lists an entry bilingually (its own English name
+on one line, a translation into the book's own language just below or
+beside it -- common in indexes for a book whose body isn't in English),
+take the name in whichever language the book's BODY TEXT is actually
+written in, not whichever language happens to be listed first in the
+index. A book written in Bengali, French, or any other language should
+come out with chapter_titles in that same language throughout -- never a
+mix where indexed chapters come out in English (because that's what the
+index happened to print first) while un-indexed chapters come out in the
+book's own language (because those were named straight from a body
+heading with no index entry to pull from at all).
+
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
 chapter (one entry covering what should have been two) is a far smaller
