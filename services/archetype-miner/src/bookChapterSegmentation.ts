@@ -52,6 +52,26 @@ const MAX_CHUNK_CHARS = 120_000;
 // occurrence already consumed it), not a duplicate chapter.
 const CHUNK_OVERLAP_CHARS = 4_000;
 
+// A book's own front matter -- title page, any table of contents or
+// index -- sits at the very start of its text, which lands in chunk 1
+// only. buildBookChapterSegmentationPrompt() explicitly tells the model
+// to use exactly that kind of index as authoritative for chapter count
+// and names when one is present, but a later chunk (covering, say, the
+// back half of a 100+ page book) never sees it at all under plain
+// splitTextIntoChunks -- confirmed live: a History textbook's own
+// QR-code chapter index sits on its first two pages, and chapters
+// covered by later chunks resolved inconsistently (some correctly split
+// per the index, some merged together, some split by every internal
+// sub-heading) exactly where that index wasn't available to compare
+// against, while chapters in the same chunk as the index behaved
+// correctly. Re-including this fixed excerpt in every chunk keeps the
+// index available throughout, not just to whichever chunk happens to
+// start at page 1. Sized generously above what a title page + index
+// table actually runs (a few thousand characters, confirmed against the
+// same History textbook) -- a book with no such front matter just pays
+// a harmless few thousand extra input characters per non-first chunk.
+const FRONT_MATTER_CHARS = 6_000;
+
 // How far back from a target split point to look for a real line break to
 // split on, rather than slicing mid-line/mid-word -- keeps a chunk's own
 // trailing/leading text readable to the model instead of starting or
@@ -412,6 +432,30 @@ function parseCandidates(data: unknown): { chapterTitle: string; heading: string
   return candidates;
 }
 
+// Chunk 0 (and the only chunk, for a book that fits in one call) already
+// starts at the book's own front matter, so it's sent unwrapped. Every
+// later chunk gets that front matter re-attached as a clearly-marked
+// reference block ahead of its own real text (see FRONT_MATTER_CHARS's
+// own comment for why) -- explicitly told it's reference-only so the
+// model doesn't propose a boundary from inside it, which would resolve
+// to the wrong position (the front matter, not wherever this chunk
+// actually starts) once boundary resolution runs against the real text.
+function buildChunkMessage(fullText: string, textChunk: string, chunkIndex: number): string {
+  if (chunkIndex === 0) return textChunk;
+  const frontMatter = fullText.slice(0, FRONT_MATTER_CHARS);
+  return (
+    "REFERENCE ONLY -- this is the book's own front matter (title page, " +
+    "table of contents, or index), included so you can use it exactly as " +
+    "the ROLE/TASK instructions describe, even though this chunk itself " +
+    "picks up partway through the book. Do NOT propose a chapter boundary " +
+    "from anywhere in this reference block -- it is not part of the text " +
+    "you are segmenting.\n\n" +
+    frontMatter +
+    "\n\n--- END OF REFERENCE. The text below is what you are actually segmenting. ---\n\n" +
+    textChunk
+  );
+}
+
 // The whole point of this file. `text` is the admin-reviewed raw OCR
 // output (see the OCR page's own "review this before using it" posture --
 // this runs only once an admin has already looked it over, never
@@ -449,7 +493,7 @@ export async function segmentBookIntoChapters(params: { text: string }): Promise
     try {
       const { data } = await getJsonCompletion({
         systemPrompt: buildBookChapterSegmentationPrompt(),
-        message: textChunk,
+        message: buildChunkMessage(params.text, textChunk, i),
         maxTokens: MAX_TOKENS,
       });
       candidates.push(...parseCandidates(data));
