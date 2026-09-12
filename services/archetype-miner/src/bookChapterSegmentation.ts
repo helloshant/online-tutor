@@ -190,6 +190,20 @@ function stripLeadingWords(heading: string, count: number): string | null {
   return words.slice(count).join(" ");
 }
 
+// Tolerated between two of `candidate`'s own words IN ADDITION TO plain
+// whitespace -- a single stray hyphen/dash/bullet-style character,
+// itself surrounded by whitespace, exactly the shape a line-wrapped OCR
+// separator leaves behind. Confirmed live: a heading printed in the
+// source as "Topic - Subtopic" line-wrapped across three OCR lines as
+// "Topic" / "-" / "Subtopic" -- the model's own heading excerpt (reasonably)
+// didn't include that stranded "-" as one of its own words, so the plain
+// \s+-only join below could never match across it, and this chapter's
+// entire boundary silently failed to resolve. OPTIONAL, so this can only
+// ever match something a stricter join already matched too -- ordinary
+// word-to-word whitespace with no such character present still matches
+// exactly as before.
+const JUNK_BETWEEN_WORDS = "\\s+(?:[-\u2010-\u2015*\u2022]\\s+)?";
+
 // One case-insensitive, whitespace-tolerant regex for `candidate` --
 // strictly matches everything an exact, case-sensitive substring search
 // would too (a run of exactly the same whitespace the candidate has is
@@ -202,7 +216,7 @@ function stripLeadingWords(heading: string, count: number): string | null {
 function buildHeadingRegex(candidate: string): RegExp | null {
   const words = candidate.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
-  return new RegExp(words.map(escapeRegExp).join("\\s+"), "gi");
+  return new RegExp(words.map(escapeRegExp).join(JUNK_BETWEEN_WORDS), "gi");
 }
 
 // Every position `candidate` matches in `text`, in order -- not just the
