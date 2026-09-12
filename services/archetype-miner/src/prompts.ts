@@ -1207,33 +1207,6 @@ introduces the run -- or the index's own name for that unit -- as the
 chapter_title, with the run's FIRST sub-heading as where the chapter
 begins.
 
-The reverse also happens: a single named topic is sometimes explicitly
-split by the book itself into several complete, separately-presented
-parts -- labelled with an ordinal word like "First/Second/Third/Fourth
-Part" (in Bengali, প্রথম/দ্বিতীয়/তৃতীয়/চতুর্থ পর্ব) -- that repeat the
-SAME topic title each time but each begin their own distinct block of
-content. When a topic's title recurs together with a part label like
-this, treat EACH part as its OWN chapter_title entry (e.g. "Topic Name --
-Part 1", "Topic Name -- Part 2"); do not merge several explicitly-labelled
-parts of the same topic into a single entry just because they share a
-title, and do not mistake the topic title repeating before each part
-label for a duplicate/table-of-contents mention of one chapter. Because
-the topic title alone won't distinguish one part from another, make sure
-the heading excerpt for each part includes the part label itself (or
-whatever text right there does distinguish it), not just the shared
-topic title.
-
-Within ONE such part -- or within an ordinary chapter that has no
-part-splitting at all -- the content is very often organized as a
-sequence of individual named sub-topics or examples with no numbering or
-part-label tying them together at all (e.g. a list of separate
-historical events, each with its own heading, dates, and substantial
-content). These are illustrative content INSIDE the part/chapter they
-fall within, not separate chapters of their own, even though each one
-has a real heading and looks self-contained in isolation -- the same
-"when in doubt, it's a sub-section" reasoning above applies to these just
-as it does to numbered sub-headings.
-
 When in doubt whether something is a new chapter or a sub-section of the
 one already in progress, treat it as the sub-section -- an under-split
 chapter (one entry covering what should have been two) is a far smaller
