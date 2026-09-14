@@ -1165,7 +1165,19 @@ or two below it the way a table of contents entry would have.
 For each real chapter found, report:
 - chapter_title: the chapter's own title, as it actually appears --
   cleaned of obvious OCR garbling if you're confident what it actually
-  says, otherwise left as printed.
+  says, otherwise left as printed. When a heading is itself printed
+  bilingually -- a title in the book's own primary/running-prose
+  language followed by a translation, often in parentheses or brackets
+  right after it (e.g. "ভৌতবিজ্ঞান ও পরিবেশ (Physical Science and
+  Environment)") -- report chapter_title in that SAME primary language
+  the surrounding running prose is written in, not the bracketed/secondary
+  translation, even though the translation is technically also real text
+  from the book. This applies everywhere a heading appears this way, not
+  only inside a front-matter index (see the index-handling guidance
+  further below for that separate case) -- a whole book whose running
+  text is in one language should come out with chapter_titles in that
+  same language throughout, never flipping to whichever language a
+  translation happens to be printed in right next to the real title.
 - heading: the EXACT text that marks where this chapter begins -- a
   short excerpt (a heading line, or if there's no distinct heading, the
   first several words of the chapter's own opening text) copied
