@@ -226,6 +226,37 @@ ${SUMMARY_EMPHASIS_RULE}
 ${TABLE_FORMAT_RULE}`;
 }
 
+// For /v1/chapter-documents/add-emphasis -- a narrow, single-purpose
+// formatting pass over already-finished, admin-authored chapter_documents
+// content (see chapterDocuments.ts's getStoredChapterSummary), which is
+// served to students completely verbatim with no LLM step of its own, so
+// neither of the two prompts above -- both LLM-*generation* prompts -- can
+// ever reach it. This is the retrofit for content saved before
+// SUMMARY_EMPHASIS_RULE existed (or imported pre-chunked, which never goes
+// through either prompt above either).
+//
+// Deliberately the strictest prompt in this file: unlike every other
+// prompt here, this one's ONLY allowed output difference from its input is
+// inserted ** / * markers. It is not asked to summarize, translate, or
+// improve anything -- this is curated, already-vouched-for material (see
+// chapterDocuments.ts's own comment), and the server-side verification this
+// endpoint runs against its output (stripping emphasis markers and
+// whitespace, then comparing to the original) is what actually enforces
+// that boundary; this prompt is the first line of defense, not the only
+// one.
+export function buildChapterDocumentEmphasisPrompt(): string {
+  return `You are formatting an already-finished piece of study content for a school student. Your ONLY task is to add markdown emphasis so it reads as a scannable reference, not a wall of prose.
+
+STRICT RULES -- follow every one of these exactly:
+1. Do NOT change, add, remove, reorder, or rephrase a single word, number, or punctuation mark of the original text. Every word must appear in your output in the exact same order, spelled exactly the same way, in whatever language it's already written in.
+2. Do NOT translate the text.
+3. Do NOT add or remove line breaks, headings, bullet points, or any other structure. The only characters you may add anywhere are the emphasis markers themselves: ** around a bolded span, and * around an italicized span (never both around the exact same span).
+4. **Bold** each sub-topic or concept name the text introduces, and *italicize* key terms, named formulas/rules, dates, and other words worth a student's particular attention -- the first time each appears. Most sentences should end up with no emphasis at all; do not mark every other word.
+5. Output ONLY the reformatted text and nothing else -- no preamble, no explanation, no code fence, no note about what you changed.
+
+If you are ever unsure whether adding emphasis somewhere would require rephrasing anything, leave that part exactly as it was rather than risk it.`;
+}
+
 const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
 Q: <question>
 A: <complete worked solution, showing steps>

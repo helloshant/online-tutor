@@ -304,6 +304,29 @@ export type ChapterDocumentImportChunksRequest = {
   chunks: { content: string; fieldType?: string; citation?: string }[];
 };
 
+// Deliberately just `content` -- no documentId/topicId/scope. This endpoint
+// never touches Postgres at all (unlike the two embed endpoints above),
+// only reformats text and hands it back; the caller (the web app's own
+// admin action) is the one that decides whether/how to save the result
+// back onto a chapter_documents row.
+export type ChapterDocumentEmphasisRequest = {
+  content: string;
+};
+
+// content is ALWAYS the full document back, chunk-for-chunk reassembled --
+// never partial -- with each chunk either the model's own verified
+// rewrite (real emphasis markers added, nothing else changed) or, wherever
+// that verification failed, the ORIGINAL chunk text completely untouched.
+// verifiedChunks + failedChunks always sum to the document's own chunk
+// count, so a caller can tell "nothing needed changing" (both low/zero)
+// apart from "the model kept failing verification" (failedChunks > 0)
+// without diffing the content itself.
+export type ChapterDocumentEmphasisResponse = {
+  content: string;
+  verifiedChunks: number;
+  failedChunks: number;
+};
+
 export type TokenUsage = { promptTokens: number; completionTokens: number };
 
 // What an LLM provider returns -- the model field echoes back the exact
