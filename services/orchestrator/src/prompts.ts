@@ -13,6 +13,18 @@ import type { DifficultyLevel, Medium, SyllabusTopic } from "./types.js";
 const TABLE_FORMAT_RULE =
   'When presenting tabular data (e.g. standard values across several angles/cases, a comparison of properties, a formula reference table), format it as a standard markdown table: a header row ("| Column A | Column B |"), a separator row directly below it using only dashes/colons ("|---|---|"), then one data row per line -- every row, including the separator, needs the same number of "|"-delimited cells as the header. This is parsed into an actual table for the student, so it is the ONLY layout that renders correctly for this kind of data -- never approximate a table with spaces/dashes as plain text, or a table appears broken even though the underlying data is fine.';
 
+// Reported directly: a stored topic summary came back as one wall of
+// plain-prose text -- no sub-topic stood out, no term was flagged as worth
+// particular attention, even though the rendering stack has supported
+// **bold**/*italic* markdown for a while (see math-text.tsx's own
+// renderEmphasis) -- the gap was entirely that nothing told the model to
+// actually USE it here. Scoped to the summary prompts specifically (not
+// every prompt in this file): a summary is read/skimmed as a static
+// reference card, exactly the shape emphasis earns its keep in, unlike an
+// ordinary back-and-forth chat reply.
+const SUMMARY_EMPHASIS_RULE =
+  'Use markdown emphasis so this reads as a scannable reference card, not a wall of prose: **bold** each sub-topic/concept name you introduce (e.g. "**Newton\'s First Law**"), and *italicize* key terms, named formulas/rules, and other words worth the student\'s particular attention the first time each appears. This renders as real bold/italic text, not literal asterisks -- use it to mark real structure and vocabulary, not on every other word.';
+
 export function buildTutorSystemPrompt(params: {
   subjectName: string;
   boardName: string;
@@ -155,6 +167,8 @@ Topic: "${topic}"
 
 Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Explain the core concept(s) clearly, state any key formulas/definitions/rules the student must remember, and keep it to a few short paragraphs -- this is a revision summary, not a full lesson, and it must not include practice questions or exercises.
 
+${SUMMARY_EMPHASIS_RULE}
+
 ${TABLE_FORMAT_RULE}`;
 }
 
@@ -206,6 +220,8 @@ ${sourceContent}
 """
 
 Render the SOURCE CONTENT above in ${responseLanguage}. This is a faithful translation/adaptation, NOT a fresh summary -- preserve every concept, formula, definition, and rule it actually states, in the same structure and level of detail, rather than writing what you already know about this chapter/topic from your own general knowledge. Do not add practice questions or exercises, and do not add facts the source content doesn't itself contain.
+
+${SUMMARY_EMPHASIS_RULE}
 
 ${TABLE_FORMAT_RULE}`;
 }
