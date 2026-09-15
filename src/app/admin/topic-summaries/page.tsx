@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import type { TopicSummaryValidationStatus } from "@/lib/supabase/types";
-import { approveTopicSummary, deleteTopicSummary, rejectTopicSummary } from "./actions";
+import { approveTopicSummary, deleteTopicSummary, regenerateAllTopicSummaries, rejectTopicSummary } from "./actions";
 
 const STATUS_FILTERS: { value: TopicSummaryValidationStatus | "all"; label: string }[] = [
   { value: "pending_review", label: "Pending review" },
@@ -53,10 +53,10 @@ type TopicSummaryRow = {
 export default async function TopicSummariesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; regenerated?: string; regenerateError?: string }>;
 }) {
   await requireAdminPage("topic_summaries");
-  const { status } = await searchParams;
+  const { status, regenerated, regenerateError } = await searchParams;
   const activeStatus = (status as TopicSummaryValidationStatus | "all" | undefined) ?? "pending_review";
 
   // Service-role client, same as every other admin page reading a table
@@ -88,20 +88,46 @@ export default async function TopicSummariesPage({
         whole class.
       </p>
 
-      <div className="mt-4 flex flex-wrap gap-2 text-sm">
-        {STATUS_FILTERS.map((f) => (
-          <a
-            key={f.value}
-            href={f.value === "pending_review" ? "/admin/topic-summaries" : `/admin/topic-summaries?status=${f.value}`}
-            className={`rounded-full border px-3 py-1 ${
-              activeStatus === f.value
-                ? "border-brand bg-brand text-white"
-                : "border-border text-foreground/70 hover:bg-brand/5"
-            }`}
+      {regenerated !== undefined && (
+        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          Marked {regenerated} summar{regenerated === "1" ? "y" : "ies"} for regeneration -- each one
+          rebuilds fresh, under whatever prompt is live, the next time a student opens that topic.
+        </p>
+      )}
+      {regenerateError && (
+        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          Something went wrong marking summaries for regeneration. Check the server logs and try again.
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2 text-sm">
+          {STATUS_FILTERS.map((f) => (
+            <a
+              key={f.value}
+              href={f.value === "pending_review" ? "/admin/topic-summaries" : `/admin/topic-summaries?status=${f.value}`}
+              className={`rounded-full border px-3 py-1 ${
+                activeStatus === f.value
+                  ? "border-brand bg-brand text-white"
+                  : "border-border text-foreground/70 hover:bg-brand/5"
+              }`}
+            >
+              {f.label}
+            </a>
+          ))}
+        </div>
+        {/* Every approved/pending_review row, not just the current filter's
+            page of up to 200 -- a prompt change (e.g. the markdown emphasis
+            rule) applies to the whole cache, so scoping this to whatever
+            happens to be on screen would leave most of it stale. */}
+        <form action={regenerateAllTopicSummaries}>
+          <ConfirmSubmitButton
+            confirmMessage="Mark every approved and pending-review summary for regeneration? Each one regenerates fresh (under the current prompt) the next time a student opens that topic -- already-rejected rows are left alone."
+            className="rounded-lg border border-brand px-3 py-1.5 text-sm font-medium text-brand hover:bg-brand/5"
           >
-            {f.label}
-          </a>
-        ))}
+            Regenerate all
+          </ConfirmSubmitButton>
+        </form>
       </div>
 
       <div className="mt-4 space-y-3">
