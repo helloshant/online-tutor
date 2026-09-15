@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
-import { embedChapterDocument, importChapterChunks } from "@/lib/orchestratorClient";
+import { addChapterDocumentEmphasis, embedChapterDocument, importChapterChunks } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ChapterDocumentSourceType, Medium } from "@/lib/supabase/types";
 
@@ -409,4 +410,164 @@ export async function importChapterChunksJson(
   return {
     success: { chaptersImported: byChapter.size, chunksImported, topicsCreated, embedFailures },
   };
+}
+
+// Shared by both emphasis actions below: runs one document through the
+// orchestrator's /v1/chapter-documents/add-emphasis, and if (and only if)
+// anything actually came back verified-different from what was sent,
+// saves the result and re-embeds it -- exactly the same save+re-embed
+// sequence saveChapterDocument runs after an ordinary manual edit, since
+// as far as chapter_document_chunks is concerned this *is* an edit, just
+// one the admin didn't type by hand. Returns null on an outright request
+// failure (network/orchestrator down); the caller decides how to surface
+// that.
+async function runEmphasisPass(
+  supabase: ReturnType<typeof createAdminClient>,
+  doc: { id: string; topic_id: string; content: string }
+): Promise<{ verifiedChunks: number; failedChunks: number; changed: boolean; embedded: boolean } | null> {
+  let result;
+  try {
+    result = await addChapterDocumentEmphasis(doc.content);
+  } catch (err) {
+    console.error(`Chapter document emphasis request failed for document ${doc.id}:`, err);
+    return null;
+  }
+
+  const changed = result.content !== doc.content;
+  if (!changed) {
+    // Every chunk either failed verification or genuinely had nothing left
+    // to mark -- either way there's nothing new to save or re-embed.
+    return { verifiedChunks: result.verifiedChunks, failedChunks: result.failedChunks, changed: false, embedded: true };
+  }
+
+  const { error: updateError } = await supabase
+    .from("chapter_documents")
+    .update({ content: result.content })
+    .eq("id", doc.id);
+  if (updateError) {
+    console.error(`Failed to save emphasized content for document ${doc.id}:`, updateError);
+    return null;
+  }
+
+  // content changed -- chapter_document_chunks needs regenerating to match,
+  // same as any other content edit (see saveChapterDocument above).
+  const { data: topic, error: topicError } = await supabase
+    .from("syllabus_topics")
+    .select("board_id, grade_id, subject_id, medium")
+    .eq("id", doc.topic_id)
+    .single();
+
+  let embedded = false;
+  if (topicError || !topic) {
+    console.error(`Failed to look up topic scope to re-embed document ${doc.id} after emphasis pass:`, topicError);
+  } else {
+    try {
+      const embedResult = await embedChapterDocument({
+        documentId: doc.id,
+        topicId: doc.topic_id,
+        boardId: topic.board_id,
+        gradeId: topic.grade_id,
+        subjectId: topic.subject_id,
+        medium: topic.medium as Medium,
+        content: result.content,
+      });
+      embedded = embedResult.embedded;
+    } catch (err) {
+      console.error(`Re-embedding request failed for document ${doc.id} after emphasis pass:`, err);
+    }
+  }
+
+  return { verifiedChunks: result.verifiedChunks, failedChunks: result.failedChunks, changed: true, embedded };
+}
+
+export interface AddEmphasisState {
+  error?: string;
+  success?: boolean;
+  verifiedChunks?: number;
+  failedChunks?: number;
+  embedWarning?: boolean;
+}
+
+// Retrofits markdown emphasis onto ONE already-saved chapter document --
+// see chapterDocuments.ts's own getStoredChapterSummary comment for why
+// this content needs a dedicated pass at all: it's served to students
+// completely verbatim, with no LLM step of its own to ever pick up
+// #99's SUMMARY_EMPHASIS_RULE (that rule only reaches a *generated*
+// topic_summaries row -- see regenerateAllTopicSummaries in
+// admin/topic-summaries/actions.ts for that side of this same underlying
+// report). Unlike that regenerate action, there's no "next view
+// regenerates fresh" fallback available here, so this rewrites the saved
+// text in place -- safely: see runEmphasisPass and the orchestrator's own
+// /v1/chapter-documents/add-emphasis for the actual verification that
+// keeps a chunk unchanged rather than risk a wording drift in
+// admin-vouched-for material.
+//
+// Bound to a specific document id from the client (see
+// AddEmphasisButton.tsx) via `.bind(null, id)`, the same pattern
+// topic-summaries' own reject/delete forms use for their row-scoped
+// actions -- here curried in ahead of useActionState's own
+// (state, formData) signature so the button can still show a per-click
+// verifiedChunks/failedChunks result.
+export async function addEmphasisToChapterDocument(
+  id: string,
+  _prevState: AddEmphasisState,
+  _formData: FormData
+): Promise<AddEmphasisState> {
+  await requireAdminPage("chapter_notes");
+  const supabase = createAdminClient();
+
+  const { data: doc, error } = await supabase
+    .from("chapter_documents")
+    .select("id, topic_id, content")
+    .eq("id", id)
+    .single();
+  if (error || !doc) return { error: "This document no longer exists." };
+
+  const result = await runEmphasisPass(supabase, doc);
+  if (!result) return { error: "Could not format this document right now. Please try again." };
+
+  revalidatePath("/admin/chapter-notes");
+  return {
+    success: true,
+    verifiedChunks: result.verifiedChunks,
+    failedChunks: result.failedChunks,
+    embedWarning: result.changed && !result.embedded,
+  };
+}
+
+// Bulk counterpart to addEmphasisToChapterDocument above -- every chapter
+// document in the table, one at a time (same sequential-loop-of-external-
+// calls shape importChapterChunksJson above already uses for a whole
+// book's worth of chapters). Built for the same situation
+// regenerateAllTopicSummaries was: a formatting fix that should reach
+// content saved before it existed, not just content saved after -- except
+// here there's no cheap "just invalidate the cache" version of that, since
+// this content was never cached or LLM-generated in the first place; each
+// document's actual stored text has to be rewritten, one real request per
+// document.
+export async function addEmphasisToAllChapterDocuments() {
+  await requireAdminPage("chapter_notes");
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase.from("chapter_documents").select("id, topic_id, content");
+  if (error) {
+    console.error("Failed to load chapter documents for bulk emphasis pass:", error);
+    redirect("/admin/chapter-notes?emphasisError=1");
+  }
+
+  const docs = data ?? [];
+  let documentsChanged = 0;
+  let documentsFailed = 0;
+
+  for (const doc of docs) {
+    const result = await runEmphasisPass(supabase, doc);
+    if (!result) {
+      documentsFailed++;
+      continue;
+    }
+    if (result.changed) documentsChanged++;
+  }
+
+  revalidatePath("/admin/chapter-notes");
+  redirect(`/admin/chapter-notes?emphasisDone=${docs.length}&emphasisChanged=${documentsChanged}&emphasisFailed=${documentsFailed}`);
 }

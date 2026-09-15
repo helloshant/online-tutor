@@ -416,6 +416,56 @@ export async function importChapterChunks(
   return { chunkCount: body.chunkCount, embedded: body.embedded };
 }
 
+export type ChapterDocumentEmphasisResponse = {
+  content: string;
+  // See the orchestrator's own /v1/chapter-documents/add-emphasis comment:
+  // these always sum to how many EMPHASIS_CHUNK_CHARS-sized windows the
+  // document was processed in. verifiedChunks is how many actually got the
+  // model's rewrite applied (real emphasis markers added, nothing else
+  // different); failedChunks is how many came back unchanged because the
+  // model's output didn't verify as identical-but-for-emphasis to the
+  // original, and were left exactly as they started rather than risked.
+  verifiedChunks: number;
+  failedChunks: number;
+};
+
+// Called by the admin Chapter Notes action to retrofit markdown emphasis
+// onto a chapter_documents row saved before SUMMARY_EMPHASIS_RULE existed
+// -- see chapterDocuments.ts's own getStoredChapterSummary comment for why
+// this content, unlike a topic_summaries row, is served to students
+// completely verbatim with no LLM step of its own to ever pick up a prompt
+// change on its own. Not best-effort like invalidateCachedAnswer below:
+// the caller decides what to do with a failure (surface it, leave the
+// document as it was), same reasoning as embedChapterDocument above.
+export async function addChapterDocumentEmphasis(content: string): Promise<ChapterDocumentEmphasisResponse> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/add-emphasis`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify({ content }),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (
+    !body ||
+    typeof body.content !== "string" ||
+    typeof body.verifiedChunks !== "number" ||
+    typeof body.failedChunks !== "number"
+  ) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { content: body.content, verifiedChunks: body.verifiedChunks, failedChunks: body.failedChunks };
+}
+
 export type CacheInvalidationScope = {
   boardId: string;
   gradeId: string;

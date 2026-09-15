@@ -13,6 +13,7 @@ import {
   setCachedTopicSummary,
 } from "./cache.js";
 import {
+  chunkText,
   embedAndStoreChapterDocument,
   embedAndStorePrechunkedDocument,
   getStoredChapterSummary,
@@ -24,6 +25,7 @@ import { getActiveLlmProvider, getChatReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
 import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
+  buildChapterDocumentEmphasisPrompt,
   buildExerciseGenerationPrompt,
   buildStaffSystemPrompt,
   buildTopicSummaryPrompt,
@@ -37,6 +39,8 @@ import type {
   AnswerScope,
   ChapterDocumentEmbedRequest,
   ChapterDocumentEmbedResponse,
+  ChapterDocumentEmphasisRequest,
+  ChapterDocumentEmphasisResponse,
   ChapterDocumentImportChunksRequest,
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
@@ -70,6 +74,21 @@ const SUMMARY_MAX_TOKENS = 700;
 // real translation off mid-way through, well before its own vocabulary/
 // grammar/composition sections.
 const SUMMARY_TRANSLATION_MAX_TOKENS = 4000;
+// /v1/chapter-documents/add-emphasis processes a document in windows this
+// big (characters), not the whole thing in one call -- chapterDocuments.ts's
+// own TARGET_CHUNK_CHARS=1500 is sized for RAG retrieval granularity, far
+// finer than an efficient formatting pass needs (that would mean many more
+// round trips, and more chances for one small chunk to lose its own
+// paragraph's context); this is sized instead so a single real chapter
+// document usually fits in one or two calls, while still keeping each
+// call's own output comfortably inside EMPHASIS_MAX_TOKENS below.
+const EMPHASIS_CHUNK_CHARS = 4000;
+// This pass only ever ADDS a handful of short ** / * markers -- the output
+// is never meaningfully longer than the input -- so this just needs to
+// comfortably clear EMPHASIS_CHUNK_CHARS's own character count with margin
+// for a script that tokenizes less efficiently than English, not room for
+// genuinely new content the way SUMMARY_TRANSLATION_MAX_TOKENS needs.
+const EMPHASIS_MAX_TOKENS = 4000;
 const EXERCISE_MAX_TOKENS = 2048;
 const EXERCISE_GENERATION_COUNT = 5;
 // findArchetypesForTopic's own default limit (5, matching
@@ -601,6 +620,84 @@ app.post("/v1/chapter-documents/import-chunks", requireSharedSecret, async (req:
   );
 
   const response: ChapterDocumentEmbedResponse = result;
+  res.json(response);
+});
+
+// Strips exactly what buildChapterDocumentEmphasisPrompt is allowed to add
+// (** / * markers) and collapses all whitespace, so two texts that differ
+// only in emphasis markup and incidental spacing/line-wrapping compare
+// equal -- anything else different (a reworded sentence, a dropped clause,
+// a changed number) still fails this comparison. This is the actual safety
+// boundary for /v1/chapter-documents/add-emphasis below, not the prompt --
+// a prompt is an instruction the model can still get wrong.
+function stripEmphasisForComparison(text: string): string {
+  return text.replace(/\*+/g, "").replace(/\s+/g, " ").trim();
+}
+
+// Retrofits markdown emphasis onto already-saved chapter_documents content
+// (see chapterDocuments.ts's getStoredChapterSummary) -- the one summary
+// "source" that SUMMARY_EMPHASIS_RULE can never reach, since it's served to
+// students completely verbatim with no LLM step of its own. Never called
+// from the student-facing path; only from the web app's admin Chapter
+// Notes action, on demand.
+//
+// Processes the document in EMPHASIS_CHUNK_CHARS-sized windows (chunkText,
+// the same paragraph-boundary-aware splitter the naive embedding path
+// uses) rather than one LLM call over the whole document -- keeps each
+// call's output comfortably within budget and means one bad chunk doesn't
+// take the rest of a long document down with it. Every chunk's own LLM
+// output is verified independently (stripEmphasisForComparison against
+// that same chunk's original text) before being used -- a chunk that fails
+// this check is returned completely UNCHANGED, from its own original text,
+// never from whatever the model produced for it. This fails closed on
+// purpose: content that stays exactly as it was is always an acceptable
+// outcome here, content that silently drifts from what an admin actually
+// vouched for is not.
+app.post("/v1/chapter-documents/add-emphasis", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<ChapterDocumentEmphasisRequest> | undefined;
+
+  if (!body || typeof body.content !== "string" || !body.content.trim()) {
+    res.status(400).json({ error: "content is required" });
+    return;
+  }
+
+  const systemPrompt = buildChapterDocumentEmphasisPrompt();
+  const chunks = chunkText(body.content, EMPHASIS_CHUNK_CHARS);
+
+  let verifiedChunks = 0;
+  let failedChunks = 0;
+  const processedChunks: string[] = [];
+
+  for (const chunk of chunks) {
+    try {
+      const { text } = await getChatReply({
+        systemPrompt,
+        history: [],
+        message: chunk,
+        maxTokens: EMPHASIS_MAX_TOKENS,
+      });
+      if (stripEmphasisForComparison(text) === stripEmphasisForComparison(chunk)) {
+        processedChunks.push(text.trim());
+        verifiedChunks++;
+      } else {
+        // Verification failed -- keep this chunk exactly as it started
+        // rather than risk the model's rewrite (see this route's own top
+        // comment).
+        processedChunks.push(chunk);
+        failedChunks++;
+      }
+    } catch (err) {
+      console.error("Chapter document emphasis pass failed for one chunk:", err);
+      processedChunks.push(chunk);
+      failedChunks++;
+    }
+  }
+
+  const response: ChapterDocumentEmphasisResponse = {
+    content: processedChunks.join("\n\n"),
+    verifiedChunks,
+    failedChunks,
+  };
   res.json(response);
 });
 
