@@ -1,8 +1,8 @@
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import type { ChapterDocumentSourceType, Medium } from "@/lib/supabase/types";
-import { addEmphasisToAllChapterDocuments, deleteChapterDocument } from "./actions";
+import { deleteChapterDocument } from "./actions";
+import { AddEmphasisAllProgress } from "./add-emphasis-all-progress";
 import { AddEmphasisButton } from "./add-emphasis-button";
 import { EditChapterDocumentForm } from "./edit-document-form";
 import { ImportChunksForm } from "./import-chunks-form";
@@ -33,15 +33,10 @@ export default async function ChapterNotesPage({
     medium?: string;
     sourceType?: string;
     search?: string;
-    emphasisDone?: string;
-    emphasisChanged?: string;
-    emphasisFailed?: string;
-    emphasisError?: string;
   }>;
 }) {
   await requireAdminPage("chapter_notes");
-  const { board, grade, subject, medium, sourceType, search, emphasisDone, emphasisChanged, emphasisFailed, emphasisError } =
-    await searchParams;
+  const { board, grade, subject, medium, sourceType, search } = await searchParams;
   const activeBoard = board || null;
   const activeGrade = grade || null;
   const activeSubject = subject || null;
@@ -167,32 +162,16 @@ export default async function ChapterNotesPage({
         repo before authoring content at scale.
       </p>
 
-      {emphasisDone !== undefined && (
-        <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          Checked {emphasisDone} document{emphasisDone === "1" ? "" : "s"} -- {emphasisChanged} formatted with new
-          emphasis, {emphasisFailed} couldn&rsquo;t be reached or saved.
-        </p>
-      )}
-      {emphasisError && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          Something went wrong loading documents for formatting. Check the server logs and try again.
-        </p>
-      )}
-
       <div className="mt-4">
         {/* Every chapter document, not just the current filter's page --
             served completely verbatim (see getStoredChapterSummary in the
             orchestrator), so a formatting-prompt improvement never reaches
             an already-saved one on its own the way a topic_summaries row
-            does; this is the retrofit for everything saved before it. */}
-        <form action={addEmphasisToAllChapterDocuments}>
-          <ConfirmSubmitButton
-            confirmMessage="Add markdown emphasis to every chapter document? Each one is checked individually and only saved if the result verifies as unchanged apart from the added emphasis -- this can take a while for a lot of documents."
-            className="rounded-lg border border-brand px-3 py-1.5 text-sm font-medium text-brand hover:bg-brand/5"
-          >
-            Add emphasis to all
-          </ConfirmSubmitButton>
-        </form>
+            does; this is the retrofit for everything saved before it. Runs
+            in the background with a progress bar (see that component's own
+            comment) rather than blocking the whole browser tab on one
+            request until every document is done. */}
+        <AddEmphasisAllProgress />
       </div>
 
       <section className="mt-6 rounded-xl border border-border bg-surface">
