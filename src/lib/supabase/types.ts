@@ -318,6 +318,12 @@ export type TopicSummaryValidationStatus = "pending_review" | "approved" | "reje
 export type TopicSummary = {
   id: string;
   topic_id: string;
+  // What language the `summary` text is actually written in -- see
+  // 0027_topic_summary_language.sql's own comment for why this is a
+  // distinct question from the topic's own `medium` (the syllabus cohort
+  // it belongs to), and why a topic can have more than one row now, one
+  // per language.
+  language: string;
   summary: string;
   validation_status: TopicSummaryValidationStatus;
   created_at: string;
