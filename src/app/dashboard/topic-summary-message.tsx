@@ -200,6 +200,39 @@ export function TopicSummaryMessage({
     setChapterTopicsError(null);
     try {
       const supabase = createClient();
+
+      // `chapter` doubles as two different things depending on the
+      // subject, and only one of them is worth a sibling picker. For
+      // subjects with real books/chapters (Bengali's "Sahitya Onushilon",
+      // English's "Realm", Maths' "Ganit Prakash"...), `chapter` genuinely
+      // groups several distinct lesson-topics, and browsing siblings is
+      // useful. But for Physics/Chemistry/Maths/Biology-style subjects,
+      // every topic instead carries `chapter` equal to the SUBJECT's own
+      // name (confirmed directly against the data: this is a deliberate,
+      // board-wide convention for subjects whose syllabus has no separate
+      // book/chapter layer -- each `topic` row already IS one full
+      // textbook chapter, the finest grain that exists). Grouping "by
+      // chapter" there would just re-list the entire subject's topic
+      // index right back at the student -- observed directly as
+      // confusing, not narrowing anything. So this checks the subject's
+      // own name first and, on a match, skips the picker list entirely
+      // and goes straight to this topic's own exercises, same as the
+      // original single-topic behavior.
+      const { data: subjectRow } = await supabase
+        .from("subjects")
+        .select("name")
+        .eq("id", topic.subject_id)
+        .maybeSingle();
+
+      if (
+        subjectRow?.name &&
+        subjectRow.name.toLowerCase() === topic.chapter.toLowerCase()
+      ) {
+        setChapterTopics([topic]);
+        handleSelectExerciseTopic(topic);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("syllabus_topics")
         .select("*")
@@ -397,13 +430,19 @@ export function TopicSummaryMessage({
                   <p className="text-xs font-semibold uppercase tracking-wide text-foreground/40">
                     Exercises — {selectedExerciseTopic.topic}
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleBackToChapterTopics}
-                    className="shrink-0 text-xs text-foreground/40 hover:underline"
-                  >
-                    ← All topics in this chapter
-                  </button>
+                  {/* Omitted when chapterTopics only ever held this one
+                      topic (the flat-subject skip-the-picker case above --
+                      "back" there would just lead to a one-item dead end,
+                      not a real list to browse). */}
+                  {chapterTopics && chapterTopics.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleBackToChapterTopics}
+                      className="shrink-0 text-xs text-foreground/40 hover:underline"
+                    >
+                      ← All topics in this chapter
+                    </button>
+                  )}
                 </div>
 
                 {exercisesError && (
