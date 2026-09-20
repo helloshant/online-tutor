@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { findAnswerInBank, findRelevantExercises, getExerciseForGrading, recordAnswer } from "./answerBank.js";
 import { validateAnswerForStorage } from "./answerValidation.js";
 import { findArchetypesForTopic, recordArchetypeProgress, recordArchetypeAttemptResult } from "./archetypeExercises.js";
+import { findConceptContent, findConceptsForTopic } from "./chunkConcepts.js";
 import { gradeExerciseAnswer } from "./exerciseGrading.js";
 import {
   deleteCachedAnswer,
@@ -26,12 +27,14 @@ import { recordChatEvent } from "./observabilityClient.js";
 import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
   buildChapterDocumentEmphasisPrompt,
+  buildConceptExerciseGenerationPrompt,
   buildExerciseGenerationPrompt,
   buildStaffSystemPrompt,
   buildTopicSummaryPrompt,
   buildTopicSummaryTranslationPrompt,
   buildTutorSystemPrompt,
 } from "./prompts.js";
+import type { ExerciseArchetype } from "./prompts.js";
 import { isQuestionInSyllabus, SYLLABUS_REJECTION_MESSAGE } from "./syllabusGate.js";
 import { bestMatchingTopic } from "./syllabusFilter.js";
 import { getStoredTopicSummary, upsertTopicSummary } from "./topicSummary.js";
@@ -46,6 +49,8 @@ import type {
   ChatOrchestrationResponse,
   DifficultyLevel,
   ExerciseItem,
+  GenerateConceptExercisesRequest,
+  GenerateConceptExercisesResponse,
   GenerateTopicExerciseRequest,
   GenerateTopicExerciseResponse,
   GradeExerciseRequest,
@@ -53,10 +58,14 @@ import type {
   ImageAttachment,
   ImageMediaType,
   Medium,
+  TopicConceptsRequest,
+  TopicConceptsResponse,
   TopicExercisesRequest,
   TopicExercisesResponse,
   TopicPatternsRequest,
   TopicPatternsResponse,
+  TopicSubtopicsRequest,
+  TopicSubtopicsResponse,
   TopicSummaryRequest,
   TopicSummaryResponse,
 } from "./types.js";
@@ -1027,8 +1036,38 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     medium: responseLanguage,
   };
 
+  // Set only when a student picked a sub-topic pill (see
+  // /v1/topic-exercises/subtopics) rather than "all exercises for this
+  // chapter" -- narrows BOTH the bank-lookup and the generation-grounding
+  // steps below down to just this sub-topic's own archetypes. The
+  // archetype lookup has to happen up front here (rather than only after a
+  // bank miss, as the unscoped path below still does) because even a bank
+  // HIT needs filtering: a plain topic-scoped bank match could easily
+  // belong to a different sub-topic of the same chapter. limit:
+  // PATTERN_PICKER_LIMIT (not the default MAX_ARCHETYPES=5) so filtering
+  // by subTopic afterward sees every mined archetype, not an arbitrary
+  // first-5 slice that might not even contain a match for this sub-topic.
+  const subTopicFilter = body.subTopic?.trim().toLowerCase();
+  let scopedArchetypeIds: Set<string> | null = null;
+  let scopedArchetypes: ExerciseArchetype[] = [];
+  if (subTopicFilter) {
+    const allArchetypes = await findArchetypesForTopic({
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      subjectName: body.subjectName,
+      chapter: body.chapter,
+      topic: body.topic,
+      limit: PATTERN_PICKER_LIMIT,
+    });
+    scopedArchetypes = allArchetypes.filter((a) => a.subTopic?.trim().toLowerCase() === subTopicFilter);
+    scopedArchetypeIds = new Set(scopedArchetypes.map((a) => a.archetypeId));
+  }
+
   const found = await findRelevantExercises(scope, body.topicId);
-  if (found.length > 0) {
+  const relevantFound = scopedArchetypeIds
+    ? found.filter((f) => f.archetype_id !== null && scopedArchetypeIds!.has(f.archetype_id))
+    : found;
+  if (relevantFound.length > 0) {
     void recordChatEvent({
       userId: body.userId,
       mode: "student",
@@ -1036,12 +1075,12 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       gradeId: scope.gradeId,
       subjectId: scope.subjectId,
       medium: scope.medium,
-      question: `topic-exercises: ${body.chapter} / ${body.topic}`,
+      question: `topic-exercises: ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
       source: "database",
       latencyMs: Date.now() - startedAt,
     });
     const response: TopicExercisesResponse = {
-      exercises: found.map((f) => ({
+      exercises: relevantFound.map((f) => ({
         id: f.id,
         question: f.question,
         answer: f.answer,
@@ -1061,13 +1100,21 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
     // have nothing mined yet) just means buildExerciseGenerationPrompt
     // falls back to its original ungrounded instruction, same as before
     // this existed -- fails open, never blocks exercise generation.
-    const archetypes = await findArchetypesForTopic({
-      boardName: body.boardName,
-      gradeName: body.gradeName,
-      subjectName: body.subjectName,
-      chapter: body.chapter,
-      topic: body.topic,
-    });
+    //
+    // Reuses the already-fetched, already-filtered scopedArchetypes above
+    // when a sub-topic was requested, rather than looking archetypes up a
+    // second time -- the unscoped path is untouched, still looked up here
+    // for the first time on a genuine bank miss, exactly as before this
+    // sub-topic feature existed.
+    const archetypes = subTopicFilter
+      ? scopedArchetypes
+      : await findArchetypesForTopic({
+          boardName: body.boardName,
+          gradeName: body.gradeName,
+          subjectName: body.subjectName,
+          chapter: body.chapter,
+          topic: body.topic,
+        });
     // Visibility into how often generation is actually archetype-grounded
     // versus falling back to the ungrounded prompt -- the only way to see
     // this from outside without it (a hit/miss ratio isn't reflected
@@ -1150,7 +1197,7 @@ app.post("/v1/topic-exercises", requireSharedSecret, async (req: Request, res: R
       gradeId: scope.gradeId,
       subjectId: scope.subjectId,
       medium: scope.medium,
-      question: `topic-exercises: ${body.chapter} / ${body.topic}`,
+      question: `topic-exercises: ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
       source: "llm",
       provider: getActiveLlmProvider(),
       model,
@@ -1209,9 +1256,194 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
       difficultyDistribution: a.difficultyDistribution,
       yearsObserved: a.yearsObserved,
       questionCountByYear: a.questionCountByYear,
+      subTopic: a.subTopic,
     })),
   };
   res.json(response);
+});
+
+// Groups the same mined archetypes /v1/topic-exercises/patterns lists by
+// their own real sub-topic label (ExerciseArchetype.subTopic) instead of
+// listing every pattern flat -- powers the "pick a sub-topic" picker shown
+// before a student drills into a chapter's exercises. Archetypes with no
+// subTopic (no supporting question ever had a curriculum.topic) are
+// dropped rather than lumped into an "Other" bucket -- there's nothing
+// real to label that bucket with. Empty is the common case (most chapters
+// have nothing mined at all) and isn't an error -- the frontend falls back
+// to /v1/topic-exercises/concepts (Part B) or, failing that too, today's
+// flat unscoped batch.
+app.post("/v1/topic-exercises/subtopics", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<TopicSubtopicsRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.subjectName !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string"
+  ) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, chapter, and topic are required" });
+    return;
+  }
+
+  const archetypes = await findArchetypesForTopic({
+    boardName: body.boardName,
+    gradeName: body.gradeName,
+    subjectName: body.subjectName,
+    chapter: body.chapter,
+    topic: body.topic,
+    // Same reasoning as PATTERN_PICKER_LIMIT above -- every mined
+    // archetype needs to be visible to this grouping, not just the top 5
+    // meant for batch-generation grounding.
+    limit: PATTERN_PICKER_LIMIT,
+  });
+
+  const groups = new Map<string, { name: string; patternCount: number; questionCount: number }>();
+  for (const a of archetypes) {
+    if (!a.subTopic) continue;
+    const key = a.subTopic.trim().toLowerCase();
+    const questionCount = Object.values(a.questionCountByYear).reduce((sum, n) => sum + n, 0);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.patternCount += 1;
+      existing.questionCount += questionCount;
+    } else {
+      groups.set(key, { name: a.subTopic, patternCount: 1, questionCount });
+    }
+  }
+
+  const response: TopicSubtopicsResponse = {
+    subtopics: Array.from(groups.values()).sort((a, b) => b.questionCount - a.questionCount),
+  };
+  res.json(response);
+});
+
+// Sibling of /v1/topic-exercises/subtopics for a chapter with nothing
+// mined at all (see chunkConcepts.ts -- WBBSE/ICSE) -- lists the chapter's
+// own concept-eligible chunks (key_definitions/formulas_and_laws-style) as
+// sub-topic picks instead. Empty is normal (a narrative/literature-style
+// chapter with no such chunks) -- the frontend falls back to today's flat
+// unscoped batch either way.
+app.post("/v1/topic-exercises/concepts", requireSharedSecret, async (req: Request, res: Response) => {
+  const body = req.body as Partial<TopicConceptsRequest> | undefined;
+
+  if (!body || typeof body.topicId !== "string" || !body.topicId) {
+    res.status(400).json({ error: "topicId is required" });
+    return;
+  }
+
+  const concepts = await findConceptsForTopic(body.topicId);
+  const response: TopicConceptsResponse = { concepts };
+  res.json(response);
+});
+
+// On-demand generation scoped to ONE concept picked from
+// /v1/topic-exercises/concepts -- grounded in that concept's own chunk
+// content (see buildConceptExerciseGenerationPrompt), never the whole
+// chapter. Deliberately skips the answer-bank lookup, same reasoning as
+// /v1/topic-exercises/generate just above: this service has no column to
+// disambiguate one concept from another within the same topic_id, so a
+// bank check here couldn't safely tell "banked for this concept" apart
+// from "banked for a different concept in the same chapter" -- always
+// fresh generation instead, an acceptable v1 cost given WBBSE/ICSE traffic
+// is far lower than CBSE's own archetype-grounded path above.
+const CONCEPT_EXERCISE_COUNT = 3;
+
+app.post("/v1/topic-exercises/generate-for-concept", requireSharedSecret, async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  const body = req.body as Partial<GenerateConceptExercisesRequest> | undefined;
+
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !body.userId ||
+    typeof body.topicId !== "string" ||
+    !body.topicId ||
+    typeof body.boardId !== "string" ||
+    !body.boardId ||
+    typeof body.gradeId !== "string" ||
+    !body.gradeId ||
+    typeof body.subjectId !== "string" ||
+    !body.subjectId ||
+    typeof body.subjectName !== "string" ||
+    typeof body.boardName !== "string" ||
+    typeof body.gradeName !== "string" ||
+    typeof body.medium !== "string" ||
+    typeof body.chapter !== "string" ||
+    typeof body.topic !== "string" ||
+    typeof body.conceptId !== "string" ||
+    !body.conceptId
+  ) {
+    res.status(400).json({
+      error:
+        "userId, topicId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, chapter, topic, and conceptId are required",
+    });
+    return;
+  }
+
+  const medium = body.medium as Medium;
+  const responseLanguage: Medium = (body.responseLanguage as Medium | undefined) ?? medium;
+  const scope = { boardId: body.boardId, gradeId: body.gradeId, subjectId: body.subjectId, medium: responseLanguage };
+
+  const concept = await findConceptContent(body.topicId, body.conceptId);
+  if (!concept) {
+    // Stale picker (the chapter's content changed since it was shown) --
+    // nothing to generate, not an error.
+    const response: GenerateConceptExercisesResponse = { exercises: [] };
+    res.json(response);
+    return;
+  }
+
+  try {
+    const systemPrompt = buildConceptExerciseGenerationPrompt({
+      subjectName: body.subjectName,
+      boardName: body.boardName,
+      gradeName: body.gradeName,
+      medium,
+      responseLanguage,
+      chapter: body.chapter,
+      topic: body.topic,
+      conceptTerm: concept.term,
+      conceptContent: concept.content,
+      count: CONCEPT_EXERCISE_COUNT,
+    });
+    const { text, model, usage } = await getChatReply({
+      systemPrompt,
+      history: [],
+      message: "Generate the exercises now.",
+      maxTokens: EXERCISE_MAX_TOKENS,
+    });
+
+    const parsed = parseGeneratedExercises(text);
+    const stored: ExerciseItem[] = [];
+    for (const exercise of parsed) {
+      const item = await storeGeneratedExercise(scope, body.topicId, body.userId, exercise, null);
+      if (item) stored.push(item);
+    }
+
+    void recordChatEvent({
+      userId: body.userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `topic-exercises/generate-for-concept: ${body.chapter} / ${body.topic} (${concept.term})`,
+      source: "llm",
+      provider: getActiveLlmProvider(),
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    const response: GenerateConceptExercisesResponse = { exercises: stored };
+    res.json(response);
+  } catch (err) {
+    console.error("Concept-scoped exercise generation failed:", err);
+    res.status(502).json({ error: "Could not generate exercises right now. Please try again shortly." });
+  }
 });
 
 // On-demand generation for ONE specific mined pattern -- Tier C's

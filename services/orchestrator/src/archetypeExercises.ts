@@ -83,6 +83,30 @@ function normalize(s: string): string {
   return s.trim().toLowerCase();
 }
 
+// Picks the most common value in `values` after normalizing for comparison
+// (see normalize above), returning the first-seen ORIGINAL-cased string
+// from the winning group -- used to derive an archetype's own display
+// sub-topic (ExerciseArchetype.subTopic) from every one of its supporting
+// questions' own curriculum.topic, several of which are often near-
+// duplicates differing only in casing/whitespace. null on an empty input,
+// covering an archetype with no supporting question carrying a
+// curriculum.topic at all.
+function modeOf(values: string[]): string | null {
+  if (values.length === 0) return null;
+  const counts = new Map<string, { count: number; display: string }>();
+  for (const v of values) {
+    const key = normalize(v);
+    const existing = counts.get(key);
+    if (existing) existing.count += 1;
+    else counts.set(key, { count: 1, display: v });
+  }
+  let best: { count: number; display: string } | null = null;
+  for (const entry of counts.values()) {
+    if (!best || entry.count > best.count) best = entry;
+  }
+  return best?.display ?? null;
+}
+
 // A model occasionally emits a year as a numeric STRING ("2025") instead
 // of a number, inconsistently within the same array -- confirmed live in
 // production: several archetypes.archetype->stats->years_observed arrays
@@ -177,8 +201,11 @@ export async function findArchetypesForTopic(params: {
     const resolved = row.archetype.supporting_question_ids
       .map((qid) => chapterByQuestion.get(`${row.run_id}:${qid}`))
       .filter((v): v is { chapter: string; topic: string } => Boolean(v));
-    const isMatch = resolved.some((r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic);
-    if (!isMatch) continue;
+    const matchedTopics = resolved
+      .filter((r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic)
+      .map((r) => r.topic);
+    if (matchedTopics.length === 0) continue;
+    const subTopic = modeOf(matchedTopics);
 
     const dist = row.archetype.stats?.difficulty_distribution;
     // All-zero (no question ever classified) is treated the same as no
@@ -226,6 +253,7 @@ export async function findArchetypesForTopic(params: {
           new Set((row.archetype.stats?.years_observed ?? []).map(toYear).filter((y): y is number => y !== null))
         ).sort((a, b) => a - b),
         questionCountByYear,
+        subTopic,
       },
       totalQuestions: Object.values(questionCountByYear).reduce((sum, n) => sum + n, 0),
     });

@@ -19,6 +19,24 @@ import type { SyllabusTopic } from "@/lib/supabase/types";
 // branch below.
 type SearchExercise = { question: string; answer: string };
 
+// Mirrors /api/topics/[id]/exercises/subtopics' own SubtopicOption shape --
+// same "define a local mirror type on the client side" convention
+// pattern-picker.tsx's own Pattern type already follows, rather than
+// importing a type across the route-file boundary. A real, exam-mined
+// sub-topic (CBSE today) or one of the chapter's own content-chunk
+// concepts (the WBBSE/ICSE fallback) -- see that route's own comment on
+// why these are two genuinely separate sources merged into one flat list.
+type SubtopicOption =
+  | { kind: "archetype"; name: string; questionCount: number }
+  | { kind: "concept"; id: string; term: string };
+
+// The synthetic "skip the sub-topic breakdown" pill always offered
+// alongside any real ones, plus the value auto-selected when a chapter has
+// no real sub-topic data at all (see handleSelectExerciseTopic) -- same
+// flat, whole-chapter batch this app always showed before this feature
+// existed.
+type SubtopicSelection = SubtopicOption | { kind: "all" };
+
 // Rendered as a message bubble inside the chat timeline (see chat-panel.tsx)
 // rather than a separate panel or modal -- clicking a syllabus topic drops
 // its summary straight into the conversation so a student can immediately
@@ -89,6 +107,20 @@ export function TopicSummaryMessage({
   // the sidebar itself.
   const [selectedExerciseTopic, setSelectedExerciseTopic] =
     useState<SyllabusTopic | null>(null);
+
+  // The selected topic's own sub-topic breakdown (see
+  // /api/topics/[id]/exercises/subtopics) -- null while still loading
+  // (right after a topic is picked above), an empty array for a chapter
+  // with no real sub-topic data at all (in which case selectedSubtopic
+  // below is set straight to {kind:"all"} and the picker below never
+  // renders -- same flat behavior as before this feature existed).
+  const [subtopics, setSubtopics] = useState<SubtopicOption[] | null>(null);
+  const [loadingSubtopics, setLoadingSubtopics] = useState(false);
+  // Which pill was clicked -- null means the pill row above is still what
+  // should show (only possible when subtopics is non-empty; see
+  // handleSelectExerciseTopic).
+  const [selectedSubtopic, setSelectedSubtopic] =
+    useState<SubtopicSelection | null>(null);
 
   const [exercises, setExercises] = useState<PracticeExerciseItem[] | null>(
     null,
@@ -188,6 +220,8 @@ export function TopicSummaryMessage({
     setChapterTopics(null);
     setChapterTopicsError(null);
     setSelectedExerciseTopic(null);
+    setSubtopics(null);
+    setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
     setTopicTags([]);
@@ -259,14 +293,19 @@ export function TopicSummaryMessage({
   // (see handleSelectExerciseTopic) and, indirectly, whenever that
   // selection needs re-fetching (a preferEnglish flip resets back to the
   // chapter list entirely, so no retry path needs this on the same target
-  // twice).
-  async function handleLoadExercises(target: SyllabusTopic) {
+  // twice). `subTopic`, when given, narrows generation to just that real
+  // mined sub-topic (see the orchestrator's own TopicExercisesRequest
+  // comment) -- omitted both for the flat "all exercises" pick and for the
+  // auto-selected flat path when a chapter has no sub-topic data at all.
+  async function handleLoadExercises(target: SyllabusTopic, subTopic?: string) {
     setLoadingExercises(true);
     setExercisesError(null);
     try {
-      const res = await fetch(
-        `/api/topics/${target.id}/exercises?preferEnglish=${preferEnglish}`,
-      );
+      const params = new URLSearchParams({
+        preferEnglish: String(preferEnglish),
+      });
+      if (subTopic) params.set("subTopic", subTopic);
+      const res = await fetch(`/api/topics/${target.id}/exercises?${params}`);
       const body = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(body?.exercises)) {
         setExercisesError(body?.error ?? "Could not load exercises.");
@@ -292,17 +331,115 @@ export function TopicSummaryMessage({
     }
   }
 
-  function handleSelectExerciseTopic(target: SyllabusTopic) {
+  // Sibling of handleLoadExercises above, scoped to one of the chapter's
+  // own content-chunk concepts (see the orchestrator's own
+  // GenerateConceptExercisesRequest/generate-for-concept comments) rather
+  // than a real mined sub-topic. No tag fetch here -- a concept-scoped
+  // batch is always freshly generated (never banked, see that route's own
+  // comment on why), so there's no accumulated admin-tagged set to offer a
+  // "refine by tag" row for the way the other two paths have.
+  async function handleLoadConceptExercises(
+    target: SyllabusTopic,
+    conceptId: string,
+  ) {
+    setLoadingExercises(true);
+    setExercisesError(null);
+    try {
+      const params = new URLSearchParams({
+        preferEnglish: String(preferEnglish),
+        conceptId,
+      });
+      const res = await fetch(
+        `/api/topics/${target.id}/exercises/generate-for-concept?${params}`,
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(body?.exercises)) {
+        setExercisesError(body?.error ?? "Could not load exercises.");
+        return;
+      }
+      setExercises(body.exercises);
+    } catch {
+      setExercisesError("Could not load exercises.");
+    } finally {
+      setLoadingExercises(false);
+    }
+  }
+
+  // Loads this topic's own sub-topic breakdown, then either shows the pill
+  // row (real sub-topic data exists) or falls straight through to the flat
+  // whole-chapter batch (none does) -- see subtopics' own comment. A
+  // fetch failure is treated the same as "nothing to browse" rather than
+  // surfaced as its own error: the flat batch is always a safe fallback,
+  // and a broken sub-topic picker should never block exercises entirely.
+  async function handleSelectExerciseTopic(target: SyllabusTopic) {
     setSelectedExerciseTopic(target);
-    void handleLoadExercises(target);
+    setSubtopics(null);
+    setSelectedSubtopic(null);
+    setExercises(null);
+    setExercisesError(null);
+    setTopicTags([]);
+    setActiveTagFilter(null);
+    setFilteredExercises(null);
+
+    setLoadingSubtopics(true);
+    try {
+      const res = await fetch(`/api/topics/${target.id}/exercises/subtopics`);
+      const body = await res.json().catch(() => null);
+      const options: SubtopicOption[] =
+        res.ok && Array.isArray(body?.subtopics) ? body.subtopics : [];
+      setSubtopics(options);
+      if (options.length === 0) {
+        setSelectedSubtopic({ kind: "all" });
+        void handleLoadExercises(target);
+      }
+    } catch {
+      setSubtopics([]);
+      setSelectedSubtopic({ kind: "all" });
+      void handleLoadExercises(target);
+    } finally {
+      setLoadingSubtopics(false);
+    }
+  }
+
+  function handleSelectSubtopic(
+    target: SyllabusTopic,
+    option: SubtopicSelection,
+  ) {
+    setSelectedSubtopic(option);
+    setExercises(null);
+    setExercisesError(null);
+    setTopicTags([]);
+    setActiveTagFilter(null);
+    setFilteredExercises(null);
+
+    if (option.kind === "all") void handleLoadExercises(target);
+    else if (option.kind === "archetype")
+      void handleLoadExercises(target, option.name);
+    else void handleLoadConceptExercises(target, option.id);
+  }
+
+  // Drops back to the sub-topic pill row without re-fetching it --
+  // subtopics itself never goes stale mid-session (a preferEnglish flip
+  // already clears it separately, above), so there's nothing to
+  // re-request, only this one sub-topic's own exercise state to clear.
+  function handleBackToSubtopics() {
+    setSelectedSubtopic(null);
+    setExercises(null);
+    setExercisesError(null);
+    setTopicTags([]);
+    setActiveTagFilter(null);
+    setFilteredExercises(null);
   }
 
   // Drops back to the chapter's topic list without re-fetching it --
   // chapterTopics itself never goes stale mid-session (a preferEnglish
   // flip already clears it separately, above), so there's nothing to
-  // re-request, only this one topic's own exercise state to clear.
+  // re-request, only this one topic's own sub-topic/exercise state to
+  // clear.
   function handleBackToChapterTopics() {
     setSelectedExerciseTopic(null);
+    setSubtopics(null);
+    setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
     setTopicTags([]);
@@ -445,110 +582,175 @@ export function TopicSummaryMessage({
                   )}
                 </div>
 
-                {exercisesError && (
-                  <p className="mb-2 text-red-600">{exercisesError}</p>
-                )}
-
-                {/* The lookup checks the answer bank first (instant) but falls
-                    through to the LLM on a miss, which can take a few
-                    seconds -- this makes that wait visible instead of just a
-                    silent gap while exercises is still null. */}
-                {exercises === null && loadingExercises ? (
+                {loadingSubtopics ? (
                   <p className="text-sm text-foreground/50">
-                    <LoadingIndicator label="Asking the tutor for relevant exercises…" />
+                    <LoadingIndicator label="Finding sub-topics…" />
                   </p>
-                ) : exercises === null ? null : (
+                ) : subtopics === null ? null : selectedSubtopic === null ? (
+                  // Only reachable when subtopics.length > 0 --
+                  // handleSelectExerciseTopic auto-selects {kind:"all"} the
+                  // moment subtopics comes back empty, skipping this pill
+                  // row entirely (see its own comment).
                   <>
-                    {topicTags.length > 0 && (
-                      <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs text-foreground/40">
-                          Refine by tag:
-                        </span>
-                        {topicTags.map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() =>
-                              activeTagFilter === t
-                                ? clearTagFilter()
-                                : handleFilterByTag(t)
-                            }
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
-                              activeTagFilter === t
-                                ? "bg-brand text-white"
-                                : "bg-brand/10 text-brand hover:bg-brand/20"
-                            }`}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                        {activeTagFilter && (
-                          <button
-                            type="button"
-                            onClick={clearTagFilter}
-                            className="text-xs text-foreground/40 hover:underline"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                      {selectedExerciseTopic.topic} — pick a sub-topic
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {subtopics.map((s) => (
+                        <button
+                          key={
+                            s.kind === "archetype"
+                              ? `archetype:${s.name}`
+                              : `concept:${s.id}`
+                          }
+                          type="button"
+                          onClick={() =>
+                            handleSelectSubtopic(selectedExerciseTopic, s)
+                          }
+                          className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20"
+                        >
+                          {s.kind === "archetype"
+                            ? `${s.name}${s.questionCount > 0 ? ` (${s.questionCount})` : ""}`
+                            : s.term}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectSubtopic(selectedExerciseTopic, {
+                            kind: "all",
+                          })
+                        }
+                        className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/60 transition hover:bg-foreground/20"
+                      >
+                        All exercises for this chapter
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Only shown once a real pill was picked -- the
+                        auto-selected flat path (subtopics came back empty)
+                        has no picker to go back to. */}
+                    {subtopics.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleBackToSubtopics}
+                        className="mb-2 text-xs text-foreground/40 hover:underline"
+                      >
+                        ← Different sub-topic
+                      </button>
                     )}
 
-                    {loadingFilter ? (
-                      <p className="text-foreground/50">Filtering…</p>
-                    ) : activeTagFilter ? (
-                      // Tag-filtered results come from a different endpoint
-                      // (/api/answer-bank/search) with no stable id in its
-                      // response shape -- shown immediately, same as before
-                      // the grading flow existed, rather than extending that
-                      // endpoint too. See SearchExercise's own comment.
-                      filteredExercises === null ||
-                      filteredExercises.length === 0 ? (
-                        <p className="text-foreground/50">
-                          No exercises tagged &quot;{activeTagFilter}&quot; for
-                          this topic.
-                        </p>
-                      ) : (
-                        <>
-                          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
-                            Relevant exercises — &quot;{activeTagFilter}&quot;
-                          </p>
-                          <ol className="space-y-4">
-                            {filteredExercises.map((ex, i) => (
-                              <li key={i}>
-                                <p className="whitespace-pre-wrap font-medium">
-                                  {i + 1}. <MathText text={ex.question} />
-                                </p>
-                                <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
-                                  <MathText text={ex.answer} />
-                                </p>
-                                {/* No target_id -- several exercises share this one
+                    {exercisesError && (
+                      <p className="mb-2 text-red-600">{exercisesError}</p>
+                    )}
+
+                    {/* The lookup checks the answer bank first (instant) but falls
+                        through to the LLM on a miss, which can take a few
+                        seconds -- this makes that wait visible instead of just a
+                        silent gap while exercises is still null. */}
+                    {exercises === null && loadingExercises ? (
+                      <p className="text-sm text-foreground/50">
+                        <LoadingIndicator label="Asking the tutor for relevant exercises…" />
+                      </p>
+                    ) : exercises === null ? null : (
+                      <>
+                        {topicTags.length > 0 && (
+                          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs text-foreground/40">
+                              Refine by tag:
+                            </span>
+                            {topicTags.map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() =>
+                                  activeTagFilter === t
+                                    ? clearTagFilter()
+                                    : handleFilterByTag(t)
+                                }
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                                  activeTagFilter === t
+                                    ? "bg-brand text-white"
+                                    : "bg-brand/10 text-brand hover:bg-brand/20"
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                            {activeTagFilter && (
+                              <button
+                                type="button"
+                                onClick={clearTagFilter}
+                                className="text-xs text-foreground/40 hover:underline"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {loadingFilter ? (
+                          <p className="text-foreground/50">Filtering…</p>
+                        ) : activeTagFilter ? (
+                          // Tag-filtered results come from a different endpoint
+                          // (/api/answer-bank/search) with no stable id in its
+                          // response shape -- shown immediately, same as before
+                          // the grading flow existed, rather than extending that
+                          // endpoint too. See SearchExercise's own comment.
+                          filteredExercises === null ||
+                          filteredExercises.length === 0 ? (
+                            <p className="text-foreground/50">
+                              No exercises tagged &quot;{activeTagFilter}&quot;
+                              for this topic.
+                            </p>
+                          ) : (
+                            <>
+                              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                                Relevant exercises — &quot;{activeTagFilter}
+                                &quot;
+                              </p>
+                              <ol className="space-y-4">
+                                {filteredExercises.map((ex, i) => (
+                                  <li key={i}>
+                                    <p className="whitespace-pre-wrap font-medium">
+                                      {i + 1}. <MathText text={ex.question} />
+                                    </p>
+                                    <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                                      <MathText text={ex.answer} />
+                                    </p>
+                                    {/* No target_id -- several exercises share this one
                                 topic and this path has no stable per-instance
                                 row id available here (see FeedbackButtons' own
                                 comment on targetId); content_snapshot alone is
                                 what tells this exercise apart from its
                                 siblings for whoever reviews it. */}
-                                <FeedbackButtons
-                                  kind="exercise"
-                                  subjectId={selectedExerciseTopic.subject_id}
-                                  question={`${selectedExerciseTopic.chapter} / ${selectedExerciseTopic.topic}`}
-                                  contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
-                                />
-                              </li>
-                            ))}
-                          </ol>
-                        </>
-                      )
-                    ) : (
-                      <TopicPractice
-                        topicId={selectedExerciseTopic.id}
-                        subjectId={selectedExerciseTopic.subject_id}
-                        chapter={selectedExerciseTopic.chapter}
-                        topic={selectedExerciseTopic.topic}
-                        preferEnglish={preferEnglish}
-                        initialExercises={exercises}
-                        emptyLabel="No exercises available for this topic yet."
-                      />
+                                    <FeedbackButtons
+                                      kind="exercise"
+                                      subjectId={
+                                        selectedExerciseTopic.subject_id
+                                      }
+                                      question={`${selectedExerciseTopic.chapter} / ${selectedExerciseTopic.topic}`}
+                                      contentSnapshot={`Q: ${ex.question}\n\nA: ${ex.answer}`}
+                                    />
+                                  </li>
+                                ))}
+                              </ol>
+                            </>
+                          )
+                        ) : (
+                          <TopicPractice
+                            topicId={selectedExerciseTopic.id}
+                            subjectId={selectedExerciseTopic.subject_id}
+                            chapter={selectedExerciseTopic.chapter}
+                            topic={selectedExerciseTopic.topic}
+                            preferEnglish={preferEnglish}
+                            initialExercises={exercises}
+                            emptyLabel="No exercises available for this topic yet."
+                          />
+                        )}
+                      </>
                     )}
                   </>
                 )}

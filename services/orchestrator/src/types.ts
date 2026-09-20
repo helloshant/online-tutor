@@ -126,6 +126,14 @@ export type TopicExercisesRequest = {
   responseLanguage?: Medium;
   chapter: string;
   topic: string;
+  // Set only when a student picked a sub-topic pill from
+  // /v1/topic-exercises/subtopics (rather than "all exercises for this
+  // chapter") -- narrows both the bank-lookup and generation-grounding
+  // steps down to just the archetypes whose own subTopic matches this
+  // (case/whitespace-insensitive), see server.ts's own comment on this
+  // route. Omitted entirely for the unscoped batch, which keeps its
+  // original, unchanged behavior.
+  subTopic?: string;
 };
 
 // id is the answered_questions row id -- every exercise returned to a
@@ -195,6 +203,10 @@ export type TopicPattern = {
   // year. See archetypeExercises.ts's own comment on why this is derived
   // at read time rather than trusted from Stage 2's own stats object.
   questionCountByYear: Record<string, number>;
+  // See ExerciseArchetype's own comment in prompts.ts -- unused by the
+  // flat pattern picker itself, only by /v1/topic-exercises/subtopics'
+  // grouping.
+  subTopic: string | null;
 };
 
 export type TopicPatternsRequest = {
@@ -207,6 +219,84 @@ export type TopicPatternsRequest = {
 
 export type TopicPatternsResponse = {
   patterns: TopicPattern[];
+};
+
+// One group of archetypes sharing the same real, mined sub-topic label
+// within a chapter (e.g. "Double Fertilization" within "Sexual
+// Reproduction in Flowering Plants") -- powers the sub-topic picker shown
+// before a student drills into a chapter's exercises. See
+// ExerciseArchetype.subTopic's own comment on why this grouping is exact-
+// string, not a clean canonical taxonomy.
+export type TopicSubtopicsRequest = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  topic: string;
+};
+
+export type TopicSubtopic = {
+  name: string;
+  // How many distinct archetypes share this sub-topic label -- used only
+  // for ordering (most-attested first), never shown to a student.
+  patternCount: number;
+  // Summed across every archetype in the group's own questionCountByYear
+  // -- the real evidence count a student might plausibly care about,
+  // analogous to a single pattern's own yearsObserved/questionCountByYear
+  // suffix in the flat picker.
+  questionCount: number;
+};
+
+export type TopicSubtopicsResponse = {
+  subtopics: TopicSubtopic[];
+};
+
+// Sibling of TopicSubtopicsRequest/Response for subjects with nothing
+// mined at all (WBBSE/ICSE -- confirmed zero archetypes for either board)
+// -- falls back to the chapter's own content chunks as a sub-topic source
+// instead. Only needs topicId: the chunk lookup is a direct topic_id
+// filter, no board/grade/subject-name matching involved (unlike the
+// archetype path, which has to soft-match against independently-named
+// mining data). See chunkConcepts.ts.
+export type TopicConceptsRequest = {
+  topicId: string;
+};
+
+export type TopicConcept = {
+  // Normalized term text -- stable and re-derivable from the same chunk
+  // data on a later /v1/topic-exercises/generate-for-concept call, so
+  // there's no need for a separate database id.
+  id: string;
+  // Original-cased display term, e.g. "Microsporogenesis".
+  term: string;
+};
+
+export type TopicConceptsResponse = {
+  concepts: TopicConcept[];
+};
+
+// On-demand generation scoped to ONE concept's own chunk content (not the
+// whole chapter's RAG-retrieved content, and not archetype-grounded --
+// there is none for these subjects) -- see chunkConcepts.ts and
+// buildConceptExerciseGenerationPrompt in prompts.ts.
+export type GenerateConceptExercisesRequest = {
+  userId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  responseLanguage?: Medium;
+  chapter: string;
+  topic: string;
+  conceptId: string;
+};
+
+export type GenerateConceptExercisesResponse = {
+  exercises: ExerciseItem[];
 };
 
 // On-demand generation for ONE specific pattern the student picked (both

@@ -324,6 +324,19 @@ export type ExerciseArchetype = {
   // see findArchetypesForTopic's own comment on how this is derived.
   // Unused by the generation prompt itself, same as yearsObserved above.
   questionCountByYear: Record<string, number>;
+  // The archetype's own fine-grained sub-topic within this chapter, e.g.
+  // "Double Fertilization" or "Pollination" within "Sexual Reproduction in
+  // Flowering Plants" -- the mode (most-common, normalized-compare) of
+  // curriculum.topic across every supporting question that matched this
+  // chapter, see findArchetypesForTopic's own comment on how this is
+  // derived. Not a clean canonical taxonomy: the same real concept can
+  // legitimately surface under two differently-worded values here (e.g.
+  // "Pollination" vs "Pollination and Fertilization") since Stage 1 names
+  // it independently per paper with no cross-reference to a fixed list.
+  // null when no supporting question had a curriculum.topic at all.
+  // Unused by the generation prompt itself -- only read by the sub-topic
+  // grouping endpoint (/v1/topic-exercises/subtopics).
+  subTopic: string | null;
 };
 
 function describeArchetype(a: ExerciseArchetype, index: number): string {
@@ -422,6 +435,53 @@ Topic: "${topic}"
 Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. ${taskInstruction}
 
 ${archetypes.length > 0 ? EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN : EXERCISE_FORMAT_INSTRUCTIONS}`;
+}
+
+// Sibling of buildExerciseGenerationPrompt above for subjects with nothing
+// mined at all (see chunkConcepts.ts's own comment on why -- WBBSE/ICSE
+// have zero archetypes). Grounded in one specific CONCEPT's own chunk
+// content (a term/law/method the chapter's own notes already isolate as
+// one unit) rather than either archetypes or a bare chapter/topic name --
+// notably, this is actually MORE grounded than buildExerciseGenerationPrompt's
+// own ungrounded fallback path, which never reads any real chapter content
+// at all. No archetype attribution exists for a concept-scoped exercise,
+// so this reuses the plain EXERCISE_FORMAT_INSTRUCTIONS (no "Pattern: N"
+// line to ask for or parse).
+export function buildConceptExerciseGenerationPrompt(params: {
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  responseLanguage?: Medium;
+  chapter: string;
+  topic: string;
+  // The concept's own display term, e.g. "Microsporogenesis" -- named
+  // explicitly in the instruction so the model doesn't have to infer scope
+  // from the raw chunk content alone.
+  conceptTerm: string;
+  // The concept's own chunk content, verbatim (joined across every chunk
+  // sharing this concept's term -- see chunkConcepts.ts) -- the actual
+  // grounding for what to ask about and what facts/formulas are fair game.
+  conceptContent: string;
+  count: number;
+}): string {
+  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic, conceptTerm, conceptContent, count } =
+    params;
+
+  return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
+
+Chapter: "${chapter}"
+Topic: "${topic}"
+Concept: "${conceptTerm}"
+
+Here is the chapter's own material on this specific concept, to ground your questions in:
+"""
+${conceptContent}
+"""
+
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.
+
+${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
 
 // Used only by questionRewrite.ts, immediately before a chat Q&A pair is

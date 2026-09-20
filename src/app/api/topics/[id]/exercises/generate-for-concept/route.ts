@@ -1,23 +1,26 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getTopicExercises } from "@/lib/orchestratorClient";
+import { generateConceptExercises } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
 
-// Every code path below must return through NextResponse.json -- this
-// top-level catch is the backstop so an unexpected throw never reaches the
-// client as an empty/non-JSON body. Same pattern as /api/chat.
+// On-demand generation scoped to ONE concept a student picked from the
+// sub-topic pill row (see /api/topics/[id]/exercises/subtopics and
+// topic-summary-message.tsx) -- the WBBSE/ICSE sibling of
+// /api/topics/[id]/exercises?subTopic=... for chapters with real archetype
+// mining. Same "resolve topicId -> board/grade/subject, then call the
+// orchestrator" shape as /api/topics/[id]/exercises/route.ts.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    return await handleGetExercises(request, await params);
+    return await handleGet(request, await params);
   } catch (err) {
-    console.error("Unexpected error in GET /api/topics/[id]/exercises:", err);
+    console.error("Unexpected error in GET /api/topics/[id]/exercises/generate-for-concept:", err);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 }
 
-async function handleGetExercises(request: Request, { id: topicId }: { id: string }) {
+async function handleGet(request: Request, { id: topicId }: { id: string }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -29,11 +32,10 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
 
   const url = new URL(request.url);
   const preferEnglish = url.searchParams.get("preferEnglish") === "true";
-  // Set only when the student picked a sub-topic pill (see
-  // /api/topics/[id]/exercises/subtopics) rather than "all exercises for
-  // this chapter" -- narrows generation to just that sub-topic, see
-  // getTopicExercises/the orchestrator's own TopicExercisesRequest comment.
-  const subTopic = url.searchParams.get("subTopic") ?? undefined;
+  const conceptId = url.searchParams.get("conceptId");
+  if (!conceptId) {
+    return NextResponse.json({ error: "conceptId is required" }, { status: 400 });
+  }
 
   const { data: topicRow } = await supabase
     .from("syllabus_topics")
@@ -54,16 +56,10 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
 
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
-
-  // See the matching comment in /api/topics/[id]/summary/route.ts and
-  // /api/chat/route.ts -- medium always stays this topic's own real content
-  // medium; responseLanguage independently decides what language the
-  // exercises are generated/served in -- see resolveResponseLanguage's own
-  // comment in studentScope.ts for the full rule.
   const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
 
   try {
-    const { exercises } = await getTopicExercises({
+    const { exercises } = await generateConceptExercises({
       userId: user.id,
       topicId,
       boardId: topicRow.board_id,
@@ -71,24 +67,16 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
       subjectId: topicRow.subject_id,
       subjectName: subject?.name ?? "",
       boardName: board?.name ?? "",
-      // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade
-      // N") never matches archetype education_context.grade_or_year ("N")
-      // unstripped, which meant every archetype-grounded generation
-      // through this route silently fell back to the ungrounded prompt
-      // regardless of real mining coverage.
       gradeName: toArchetypeGradeOrYear(grade?.name ?? ""),
       medium: topicMedium,
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
-      subTopic,
+      conceptId,
     });
     return NextResponse.json({ exercises });
   } catch (err) {
-    console.error("Topic exercises request failed:", err);
-    return NextResponse.json(
-      { error: "Could not load exercises. Please try again shortly." },
-      { status: 502 }
-    );
+    console.error("Concept exercises request failed:", err);
+    return NextResponse.json({ error: "Could not load exercises. Please try again shortly." }, { status: 502 });
   }
 }

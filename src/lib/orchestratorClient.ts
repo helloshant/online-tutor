@@ -145,6 +145,11 @@ export type TopicExercisesRequest = {
   responseLanguage?: Medium;
   chapter: string;
   topic: string;
+  // Set only when a student picked a sub-topic pill (see getTopicSubtopics
+  // below) rather than "all exercises for this chapter" -- see the
+  // orchestrator's own TopicExercisesRequest comment for how this narrows
+  // both the bank lookup and generation grounding.
+  subTopic?: string;
 };
 
 // id is the exercise's own stable answered_questions row id -- always
@@ -215,7 +220,134 @@ export type TopicPattern = {
   // year, e.g. { "2025": 1, "2026": 2 } -- see the orchestrator's own
   // TopicPattern comment.
   questionCountByYear: Record<string, number>;
+  // See the orchestrator's own ExerciseArchetype.subTopic comment. Not
+  // used by PatternPicker itself, kept only for parity with the
+  // orchestrator's wire shape.
+  subTopic: string | null;
 };
+
+// One group of archetypes sharing the same real, mined sub-topic label
+// within a chapter -- see the orchestrator's own TopicSubtopic/
+// /v1/topic-exercises/subtopics comments. Powers the sub-topic picker
+// shown before a student drills into a chapter's exercises, for subjects
+// with real mining coverage (CBSE today).
+export type TopicSubtopic = {
+  name: string;
+  patternCount: number;
+  questionCount: number;
+};
+
+export type TopicSubtopicsRequest = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  topic: string;
+};
+
+export async function getTopicSubtopics(request: TopicSubtopicsRequest): Promise<{ subtopics: TopicSubtopic[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/subtopics`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.subtopics)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { subtopics: body.subtopics as TopicSubtopic[] };
+}
+
+// Sibling of TopicSubtopic for a chapter with nothing mined at all (see
+// the orchestrator's own TopicConcept/chunkConcepts.ts comments --
+// WBBSE/ICSE) -- one of the chapter's own content-chunk concepts (a
+// term/law/method), used as a sub-topic pick instead.
+export type TopicConcept = {
+  id: string;
+  term: string;
+};
+
+export async function getTopicConcepts(topicId: string): Promise<{ concepts: TopicConcept[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/concepts`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify({ topicId }),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.concepts)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { concepts: body.concepts as TopicConcept[] };
+}
+
+// On-demand generation scoped to ONE concept picked from getTopicConcepts
+// above -- see the orchestrator's own GenerateConceptExercisesRequest/
+// /v1/topic-exercises/generate-for-concept comments. Deliberately no
+// answer-bank check on this path (always fresh) -- see that route's own
+// comment on why.
+export type GenerateConceptExercisesRequest = {
+  userId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  responseLanguage?: Medium;
+  chapter: string;
+  topic: string;
+  conceptId: string;
+};
+
+export async function generateConceptExercises(
+  request: GenerateConceptExercisesRequest
+): Promise<{ exercises: ExerciseItem[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/generate-for-concept`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+  }
+  if (!body || !Array.isArray(body.exercises)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { exercises: body.exercises as ExerciseItem[] };
+}
 
 export type TopicPatternsRequest = {
   boardName: string;
