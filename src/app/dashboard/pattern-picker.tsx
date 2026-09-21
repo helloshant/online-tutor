@@ -86,10 +86,16 @@ function topDifficulty(
   )[0][0];
 }
 
-// "Usually Hard (7 of 10 mined)" -- raw counts, not a percentage, so this
-// stays honest about how little data some patterns have (a percentage of
-// 1 question would read as false precision) and never claims anything
-// about a pattern with nothing classified at all.
+// "Usually Hard (7 of 10 in real exams)" -- raw counts, not a percentage,
+// so this stays honest about how little data some patterns have (a
+// percentage of 1 question would read as false precision) and never
+// claims anything about a pattern with nothing classified at all.
+// Reported directly: the original wording said "(7 of 10 mined)" --
+// "mined" is internal mining-pipeline language never meant to reach a
+// student (same reasoning TopicPattern's own comment gives for never
+// showing "archetype"/"mining" language at all), and reads especially
+// oddly at "(1 of 1 mined)" -- a tiny sample described in jargon a
+// student has no context for.
 function describeDifficultyHint(
   dist: Record<DifficultyLevel, number> | null,
 ): string | null {
@@ -99,7 +105,7 @@ function describeDifficultyHint(
   const [top, topCount] = DIFFICULTY_LEVELS.map(
     (level) => [level, dist[level]] as const,
   ).sort((a, b) => b[1] - a[1])[0];
-  return `Usually ${top} (${topCount} of ${total} mined)`;
+  return `Usually ${top} (${topCount} of ${total} in real exams)`;
 }
 
 // " (2025, 2026 ×2)" -- how many of this pattern's own questions came
