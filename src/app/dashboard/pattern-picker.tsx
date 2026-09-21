@@ -455,7 +455,11 @@ export function PatternPicker({
                       generating !== null || active.difficulty === level
                     }
                     title={`Generate another, ${level}`}
-                    className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                      active.difficulty === level
+                        ? "bg-brand/20 text-brand"
+                        : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                    }`}
                   >
                     {level}
                   </button>
@@ -476,7 +480,11 @@ export function PatternPicker({
                     generating !== null || active.difficulty === undefined
                   }
                   title="Generate another, unconstrained difficulty"
-                  className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                    active.difficulty === undefined
+                      ? "bg-brand/20 text-brand"
+                      : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                  }`}
                 >
                   Any
                 </button>
@@ -486,7 +494,17 @@ export function PatternPicker({
                 active.pattern -- there's no per-pattern historical type
                 distribution to calibrate against (see ActiveSelection's
                 own comment), so it applies just as well to the random
-                "Generate another" pick as to a specific pattern. */}
+                "Generate another" pick as to a specific pattern.
+                Reported directly: the currently-selected pill used to
+                only fade (disabled:opacity-40, same as the difficulty
+                pills above) -- right when the selected type happened to
+                be the FIRST pill in this fixed-order list (MCQ), that put
+                a dim, seemingly-broken "MCQ" button directly under a
+                "Type: MCQ" label saying the identical word, reading like
+                a rendering glitch rather than "you're already here."
+                A distinct highlighted color (matching the difficulty
+                pills' own identical fix just above) makes the current
+                selection read as a clear, deliberate state instead. */}
             <span className="text-xs text-foreground/40">
               Type: {active.type ? EXERCISE_TYPE_LABELS[active.type] : "Any"}
             </span>
@@ -506,7 +524,11 @@ export function PatternPicker({
                 }
                 disabled={generating !== null || active.type === t}
                 title={`Generate another, ${EXERCISE_TYPE_LABELS[t]}`}
-                className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                  active.type === t
+                    ? "bg-brand/20 text-brand"
+                    : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                }`}
               >
                 {EXERCISE_TYPE_LABELS[t]}
               </button>
@@ -525,7 +547,11 @@ export function PatternPicker({
               }
               disabled={generating !== null || active.type === undefined}
               title="Generate another, any type"
-              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+              className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                active.type === undefined
+                  ? "bg-brand/20 text-brand"
+                  : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+              }`}
             >
               Any type
             </button>
