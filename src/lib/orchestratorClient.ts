@@ -355,6 +355,9 @@ export type TopicPatternsRequest = {
   subjectName: string;
   chapter: string;
   topic: string;
+  // See the orchestrator's own TopicPatternsRequest.subTopic comment --
+  // narrows the listed patterns to just the student's selected sub-topic.
+  subTopic?: string;
 };
 
 export async function getTopicPatterns(request: TopicPatternsRequest): Promise<{ patterns: TopicPattern[] }> {

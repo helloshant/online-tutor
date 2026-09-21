@@ -39,6 +39,11 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
   const archetypeId = typeof body?.archetypeId === "string" ? body.archetypeId : undefined;
   const archetypeRunId = typeof body?.archetypeRunId === "string" ? body.archetypeRunId : undefined;
   const preferEnglish = body?.preferEnglish === true;
+  // Set only when this "Generate"/"Generate another" click happened
+  // underneath an already-selected sub-topic pill -- see
+  // GenerateTopicExerciseRequest.subTopic's own comment for why this has
+  // to be threaded through here too, not just the initial exercises list.
+  const subTopic = typeof body?.subTopic === "string" ? body.subTopic : undefined;
   // Invalid/absent just means "Any difficulty" -- never a 400, this is
   // the one optional refinement on an otherwise already-valid request.
   const requestedDifficulty = VALID_DIFFICULTIES.includes(body?.requestedDifficulty)
@@ -122,6 +127,7 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
+      subTopic,
       archetypeId,
       archetypeRunId,
       requestedDifficulty,

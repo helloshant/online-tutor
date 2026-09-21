@@ -215,6 +215,12 @@ export type TopicPatternsRequest = {
   subjectName: string;
   chapter: string;
   topic: string;
+  // Set only when the picker is being shown underneath an already-selected
+  // sub-topic pill (see TopicExercisesRequest.subTopic's own comment) --
+  // narrows the listed patterns down to just that sub-topic's own
+  // archetypes instead of every pattern mined for the whole chapter.
+  // Omitted entirely for the flat, chapter-wide picker.
+  subTopic?: string;
 };
 
 export type TopicPatternsResponse = {

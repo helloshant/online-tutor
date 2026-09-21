@@ -1235,7 +1235,7 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
     return;
   }
 
-  const archetypes = await findArchetypesForTopic({
+  const allArchetypes = await findArchetypesForTopic({
     boardName: body.boardName,
     gradeName: body.gradeName,
     subjectName: body.subjectName,
@@ -1245,6 +1245,19 @@ app.post("/v1/topic-exercises/patterns", requireSharedSecret, async (req: Reques
     // a student to choose from -- see PATTERN_PICKER_LIMIT's own comment.
     limit: PATTERN_PICKER_LIMIT,
   });
+
+  // Set only when this picker is being shown underneath an already-
+  // selected sub-topic pill -- narrows the listed patterns down to just
+  // that sub-topic's own archetypes, same case/whitespace-insensitive
+  // match /v1/topic-exercises' own subTopicFilter uses. Without this, a
+  // student who picked "Pollination" saw every OTHER pattern in the whole
+  // chapter too ("Double Fertilization", "Seed Formation", ...) in this
+  // picker, even though the exercises above it were already correctly
+  // scoped -- the actual bug this parameter fixes.
+  const subTopicFilter = body.subTopic?.trim().toLowerCase();
+  const archetypes = subTopicFilter
+    ? allArchetypes.filter((a) => a.subTopic?.trim().toLowerCase() === subTopicFilter)
+    : allArchetypes;
 
   const response: TopicPatternsResponse = {
     patterns: archetypes.map((a) => ({
@@ -1495,7 +1508,7 @@ app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Reques
     : undefined;
 
   try {
-    const archetypes = await findArchetypesForTopic({
+    const allArchetypes = await findArchetypesForTopic({
       boardName: body.boardName,
       gradeName: body.gradeName,
       subjectName: body.subjectName,
@@ -1509,11 +1522,26 @@ app.post("/v1/topic-exercises/generate", requireSharedSecret, async (req: Reques
       limit: PATTERN_PICKER_LIMIT,
     });
 
+    // Same sub-topic scoping as /v1/topic-exercises/patterns above --
+    // without this, "Generate another" (no archetypeId, a random pick from
+    // `archetypes`) could draw a pattern from a completely different
+    // sub-topic of the same chapter than the one the student is currently
+    // practicing, the same scope leak the patterns list itself had.
+    const subTopicFilter = body.subTopic?.trim().toLowerCase();
+    const archetypes = subTopicFilter
+      ? allArchetypes.filter((a) => a.subTopic?.trim().toLowerCase() === subTopicFilter)
+      : allArchetypes;
+
     if (archetypes.length === 0) {
-      // Nothing mined for this chapter/topic -- the picker itself
-      // wouldn't have shown anything to click, so this only happens on a
-      // stale/replayed request. Nothing to ground an on-demand generation
-      // in, so there's nothing to do -- not an error.
+      // Nothing mined for this chapter/topic (or, when subTopicFilter is
+      // set, nothing left after narrowing to that sub-topic -- a stale
+      // picker, since a real one would never have offered a pattern this
+      // filter now excludes) -- the picker itself wouldn't have shown
+      // anything to click. Nothing to ground an on-demand generation in,
+      // so there's nothing to do -- not an error, and deliberately never
+      // falls back to the wider, unscoped archetype pool here (that would
+      // silently reintroduce the same scope leak this parameter exists to
+      // fix).
       const response: GenerateTopicExerciseResponse = { exercise: null };
       res.json(response);
       return;

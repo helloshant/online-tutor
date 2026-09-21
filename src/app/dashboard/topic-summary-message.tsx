@@ -746,6 +746,18 @@ export function TopicSummaryMessage({
                             chapter={selectedExerciseTopic.chapter}
                             topic={selectedExerciseTopic.topic}
                             preferEnglish={preferEnglish}
+                            // Only a real mined sub-topic (kind:"archetype")
+                            // narrows the pattern picker underneath -- a
+                            // concept pick (kind:"concept") has no archetype
+                            // data behind it at all (WBBSE/ICSE, see
+                            // chunkConcepts.ts), and "all exercises for this
+                            // chapter" (kind:"all") is deliberately unscoped,
+                            // same as before this sub-topic feature existed.
+                            subTopic={
+                              selectedSubtopic?.kind === "archetype"
+                                ? selectedSubtopic.name
+                                : undefined
+                            }
                             initialExercises={exercises}
                             emptyLabel="No exercises available for this topic yet."
                           />

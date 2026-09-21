@@ -11,14 +11,14 @@ import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 // which resolves the same names for the same reason), nothing else.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    return await handleGet(await params);
+    return await handleGet(request, await params);
   } catch (err) {
     console.error("Unexpected error in GET /api/topics/[id]/exercises/patterns:", err);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 }
 
-async function handleGet({ id: topicId }: { id: string }) {
+async function handleGet(request: Request, { id: topicId }: { id: string }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,6 +38,13 @@ async function handleGet({ id: topicId }: { id: string }) {
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
+  const url = new URL(request.url);
+  // Set only when this picker is being shown underneath an already-
+  // selected sub-topic pill (see /api/topics/[id]/exercises/subtopics) --
+  // see getTopicPatterns's own comment for why this has to be threaded
+  // through here, not just on the exercises/generate routes.
+  const subTopic = url.searchParams.get("subTopic") ?? undefined;
+
   const [{ data: board }, { data: grade }, { data: subject }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
@@ -54,6 +61,7 @@ async function handleGet({ id: topicId }: { id: string }) {
       subjectName: subject?.name ?? "",
       chapter: topicRow.chapter,
       topic: topicRow.topic,
+      subTopic,
     });
     return NextResponse.json({ patterns });
   } catch (err) {

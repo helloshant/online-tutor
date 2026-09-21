@@ -42,6 +42,7 @@ export function TopicPractice({
   chapter,
   topic,
   preferEnglish,
+  subTopic,
   initialExercises,
   emptyLabel,
 }: {
@@ -50,6 +51,12 @@ export function TopicPractice({
   chapter: string;
   topic: string;
   preferEnglish: boolean;
+  // Present only when TopicSummaryMessage mounts this for an already-
+  // selected sub-topic pill (a real mined sub-topic, not "All exercises
+  // for this chapter") -- passed straight through to PatternPicker, see
+  // its own comment. Omitted for an ordinary chat reply, which has no
+  // sub-topic concept at all.
+  subTopic?: string;
   // Present only for TopicSummaryMessage's own "Relevant Exercises"
   // click-to-load batch -- omitted for an ordinary chat reply, which has
   // no such batch and starts with nothing but the pattern picker.
@@ -177,18 +184,23 @@ export function TopicPractice({
         </>
       )}
 
-      {/* Keyed on topicId+preferEnglish so either changing remounts
-          PatternPicker fresh (see its own comment on why it resets this
-          way, not via an in-effect reset). Never actually changes within
-          TopicSummaryMessage's own usage (topicId is fixed once loaded,
-          and a preferEnglish flip already remounts this whole
-          TopicPractice instance one level up) -- matters for
+      {/* Keyed on topicId+preferEnglish+subTopic so any of them changing
+          remounts PatternPicker fresh (see its own comment on why it
+          resets this way, not via an in-effect reset). topicId is fixed
+          once loaded and a preferEnglish flip already remounts this whole
+          TopicPractice instance one level up -- matters for
           chat-panel.tsx's usage, where a student can flip the language
-          toggle while an existing reply's picker is already mounted. */}
+          toggle while an existing reply's picker is already mounted.
+          subTopic DOES change within one TopicPractice instance's own
+          lifetime today -- TopicSummaryMessage keeps the same
+          TopicPractice mounted across a "different sub-topic" pick, so
+          without this in the key the picker would keep showing patterns
+          for whichever sub-topic it first loaded. */}
       <PatternPicker
-        key={`${topicId}:${preferEnglish}`}
+        key={`${topicId}:${preferEnglish}:${subTopic ?? ""}`}
         topicId={topicId}
         preferEnglish={preferEnglish}
+        subTopic={subTopic}
         onExerciseGenerated={handleExerciseGenerated}
       />
     </div>

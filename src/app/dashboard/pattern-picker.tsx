@@ -120,10 +120,20 @@ type ActiveSelection = { pattern: Pattern | null; difficulty: DifficultyLevel | 
 export function PatternPicker({
   topicId,
   preferEnglish,
+  subTopic,
   onExerciseGenerated,
 }: {
   topicId: string;
   preferEnglish: boolean;
+  // Set only when this picker is mounted underneath an already-selected
+  // sub-topic pill (see topic-summary-message.tsx's own subtopic picker,
+  // and TopicPractice's own comment on why this has to be threaded
+  // through) -- narrows both the listed patterns and any on-demand
+  // generation down to just that sub-topic's own archetypes. Omitted
+  // entirely for an ordinary chat reply's mount (chat-panel.tsx), which
+  // has no sub-topic concept at all, and for TopicSummaryMessage's own
+  // "All exercises for this chapter" pick.
+  subTopic?: string;
   onExerciseGenerated: (exercise: PatternPickerExercise) => void;
 }) {
   const [patterns, setPatterns] = useState<Pattern[]>([]);
@@ -150,7 +160,8 @@ export function PatternPicker({
 
     (async () => {
       try {
-        const res = await fetch(`/api/topics/${topicId}/exercises/patterns`);
+        const query = subTopic ? `?subTopic=${encodeURIComponent(subTopic)}` : "";
+        const res = await fetch(`/api/topics/${topicId}/exercises/patterns${query}`);
         const body = await res.json().catch(() => null);
         if (!cancelled && res.ok && Array.isArray(body?.patterns)) {
           setPatterns(body.patterns);
@@ -166,7 +177,7 @@ export function PatternPicker({
     return () => {
       cancelled = true;
     };
-  }, [topicId, preferEnglish]);
+  }, [topicId, preferEnglish, subTopic]);
 
   async function handleGenerate(selection: ActiveSelection) {
     if (generating !== null) return;
@@ -181,6 +192,7 @@ export function PatternPicker({
         body: JSON.stringify({
           ...(selection.pattern ? { archetypeId: selection.pattern.archetypeId, archetypeRunId: selection.pattern.runId } : {}),
           ...(selection.difficulty ? { requestedDifficulty: selection.difficulty } : {}),
+          ...(subTopic ? { subTopic } : {}),
           preferEnglish,
         }),
       });
