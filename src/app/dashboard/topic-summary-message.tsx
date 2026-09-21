@@ -773,15 +773,25 @@ export function TopicSummaryMessage({
                         scrolling all the way back up past everything just
                         shown, the exact "no way back" report this fixes.
                         Same condition, same handler, just a second place to
-                        reach it from. */}
+                        reach it from. Reported directly again even with
+                        this in place: a plain faint text link blended right
+                        into the background after a long list of exercises,
+                        easy to scroll past without ever registering it was
+                        there -- a visible top border plus real button
+                        styling (matching the brand-tinted pill buttons used
+                        everywhere else in this flow, not another quiet text
+                        link) gives it the same weight as "Try another like
+                        this" right above it. */}
                     {subtopics.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleBackToSubtopics}
-                        className="mt-3 text-xs text-foreground/40 hover:underline"
-                      >
-                        ← Different sub-topic
-                      </button>
+                      <div className="mt-4 border-t border-border pt-3">
+                        <button
+                          type="button"
+                          onClick={handleBackToSubtopics}
+                          className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20"
+                        >
+                          ← Different sub-topic
+                        </button>
+                      </div>
                     )}
                   </>
                 )}
