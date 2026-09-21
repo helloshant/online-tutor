@@ -195,7 +195,7 @@ export function PatternPicker({
   // button in the row at once.
   const [generating, setGenerating] = useState<string | null>(null);
   // Which ROW triggered the in-flight request -- the top pill row, or the
-  // refinement panel's own "Try another like this"/"Another random one"
+  // refinement panel's own "Try another like this"/"Generate another"
   // button. Reported directly: clicking "Try another like this" showed
   // "Generating…" on BOTH that button AND the matching pattern pill above
   // it at once, reading like two separate things were happening, when it
@@ -427,7 +427,7 @@ export function PatternPicker({
                 ? "Generating…"
                 : active.pattern
                   ? "Try another like this"
-                  : "Another random one"}
+                  : "Generate another"}
             </button>
             {active.pattern && (
               <>
