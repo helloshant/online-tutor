@@ -1,6 +1,14 @@
 "use client";
 
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CitationText } from "@/components/citation-text";
 import { WorkedSteps } from "@/components/worked-steps";
@@ -8,7 +16,11 @@ import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
 import { TopicPractice } from "./topic-practice";
-import { buildRevealUnits, buildRevealedText, totalRevealWeight } from "@/lib/messageReveal";
+import {
+  buildRevealUnits,
+  buildRevealedText,
+  totalRevealWeight,
+} from "@/lib/messageReveal";
 import type { ChatMessage, Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 // Renders an assistant message's content, optionally animating it in
@@ -43,7 +55,9 @@ const AssistantMessageContent = memo(function AssistantMessageContent({
 }) {
   const units = useMemo(() => buildRevealUnits(content), [content]);
   const totalWeight = useMemo(() => totalRevealWeight(units), [units]);
-  const [revealedWeight, setRevealedWeight] = useState(() => (animate ? 0 : totalWeight));
+  const [revealedWeight, setRevealedWeight] = useState(() =>
+    animate ? 0 : totalWeight,
+  );
 
   // Boxed the same way TopicSummaryMessage's onSummaryLoadedRef is --
   // fires every tick of the interval below, so it always needs the LATEST
@@ -90,7 +104,10 @@ const AssistantMessageContent = memo(function AssistantMessageContent({
     // just losing the natural cadence, not real progress -- still avoided).
   }, [animate, totalWeight]);
 
-  const display = useMemo(() => buildRevealedText(units, revealedWeight), [units, revealedWeight]);
+  const display = useMemo(
+    () => buildRevealedText(units, revealedWeight),
+    [units, revealedWeight],
+  );
   return <WorkedSteps text={display} />;
 });
 
@@ -151,7 +168,13 @@ type TimelineEntry =
       revealOnMount?: boolean;
       matchedTopic?: { id: string; chapter: string; topic: string } | null;
     }
-  | { kind: "topic"; entryId: string; topic: SyllabusTopic; preferEnglish: boolean; summary?: string };
+  | {
+      kind: "topic";
+      entryId: string;
+      topic: SyllabusTopic;
+      preferEnglish: boolean;
+      summary?: string;
+    };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/lib/studentScope.ts, which is the
 // actual enforcement point -- this copy only decides whether to render the
@@ -168,7 +191,12 @@ const FIXED_RESPONSE_LANGUAGE_SUBJECT: Partial<Record<string, Medium>> = {
   BE: "Bengali",
 };
 
-const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 // Mirrors the server-side cap (~4.3MB decoded) so an oversized file is
 // rejected client-side with an immediate message instead of a round trip.
 const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
@@ -182,12 +210,17 @@ function readImageFile(file: File): Promise<SelectedImage> {
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read that image. Please try again."));
+    reader.onerror = () =>
+      reject(new Error("Could not read that image. Please try again."));
     reader.onload = () => {
       const dataUrl = reader.result as string;
       const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
       if (base64.length > MAX_IMAGE_BASE64_LENGTH) {
-        reject(new Error("That image is too large. Please attach something under ~4MB."));
+        reject(
+          new Error(
+            "That image is too large. Please attach something under ~4MB.",
+          ),
+        );
         return;
       }
       resolve({ mediaType: file.type, base64, dataUrl });
@@ -229,17 +262,25 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const { message, previewImageUrl } = entry;
   return (
-    <div className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
+    <div
+      className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}
+    >
       <div
         className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
-          message.role === "user" ? "bg-brand text-white" : "border border-border bg-surface text-foreground"
+          message.role === "user"
+            ? "bg-brand text-white"
+            : "border border-border bg-surface text-foreground"
         }`}
       >
         {previewImageUrl && (
           // A transient client-side data URL, never persisted, so
           // next/image's remote-loader/optimization machinery doesn't apply.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={previewImageUrl} alt="Attached" className="mb-2 max-h-48 rounded-lg border border-white/20" />
+          <img
+            src={previewImageUrl}
+            alt="Attached"
+            className="mb-2 max-h-48 rounded-lg border border-white/20"
+          />
         )}
         {isRegenerating ? (
           <span className="text-foreground/40">
@@ -274,9 +315,16 @@ const MessageBubble = memo(function MessageBubble({
           bubble, and not while this exact reply is still being re-answered
           in another language (nothing stable to attach feedback to
           mid-regeneration). */}
-      {message.role === "assistant" && !isRegenerating && !message.id.startsWith("optimistic-") && (
-        <FeedbackButtons kind="chat_message" targetId={message.id} subjectId={subjectId} contentSnapshot={message.content} />
-      )}
+      {message.role === "assistant" &&
+        !isRegenerating &&
+        !message.id.startsWith("optimistic-") && (
+          <FeedbackButtons
+            kind="chat_message"
+            targetId={message.id}
+            subjectId={subjectId}
+            contentSnapshot={message.content}
+          />
+        )}
       {/* Practice a specific pattern -- only when the server confidently
           matched this reply to a real syllabus topic (see TimelineEntry's
           own comment on matchedTopic) and, same reasoning as the
@@ -286,17 +334,20 @@ const MessageBubble = memo(function MessageBubble({
           it has" reasoning topic-summary-message.tsx's own card uses,
           styled to match it (rounded-2xl border bg-surface) so it reads
           as one attached card, not squeezed into the chat-bubble shape. */}
-      {message.role === "assistant" && !isRegenerating && !message.id.startsWith("optimistic-") && entry.matchedTopic && (
-        <div className="mt-1.5 w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
-          <TopicPractice
-            topicId={entry.matchedTopic.id}
-            subjectId={subjectId}
-            chapter={entry.matchedTopic.chapter}
-            topic={entry.matchedTopic.topic}
-            preferEnglish={preferEnglish}
-          />
-        </div>
-      )}
+      {message.role === "assistant" &&
+        !isRegenerating &&
+        !message.id.startsWith("optimistic-") &&
+        entry.matchedTopic && (
+          <div className="mt-1.5 w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+            <TopicPractice
+              topicId={entry.matchedTopic.id}
+              subjectId={subjectId}
+              chapter={entry.matchedTopic.chapter}
+              topic={entry.matchedTopic.topic}
+              preferEnglish={preferEnglish}
+            />
+          </div>
+        )}
     </div>
   );
 });
@@ -329,19 +380,26 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(
+    null,
+  );
   // Id of the assistant message currently being regenerated in a different
   // language (see the toggle-driven effect below) -- distinct from
   // `sending`, which is only for a brand-new message the student is
   // actively typing/submitting.
-  const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
+  const [regeneratingMessageId, setRegeneratingMessageId] = useState<
+    string | null
+  >(null);
   // Only English (the subject) offers this -- every other subject's
   // content only exists in the student's own medium, so there'd be nothing
   // for "English" to switch to. This component remounts per subject (see
   // dashboard-shell.tsx's `key={selectedSubject.id}` on ChatPanel), so the
   // toggle naturally resets to "English" whenever the student switches away
   // and back, rather than needing an explicit reset effect here.
-  const showLanguageToggle = medium !== null && medium !== "English" && subject.code === ENGLISH_SUBJECT_CODE;
+  const showLanguageToggle =
+    medium !== null &&
+    medium !== "English" &&
+    subject.code === ENGLISH_SUBJECT_CODE;
   // Defaults to English (immersion), not the student's native medium --
   // reported directly: with the previous native-first default, a student
   // opening the English subject already saw native-language text, so
@@ -355,6 +413,11 @@ export function ChatPanel({
   // anything but deciding what to render/send.
   const effectivePreferEnglish = showLanguageToggle && preferEnglish;
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Wraps everything scrollRef scrolls -- see the ResizeObserver effect
+  // below, which watches THIS element's own height (not scrollRef's own
+  // box size, which stays fixed by the flex layout regardless of how much
+  // content it holds) to notice growth.
+  const contentRef = useRef<HTMLDivElement>(null);
   const lastClickIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -392,14 +455,26 @@ export function ChatPanel({
       if (subscriptionId) {
         query = query.eq("subscription_id", subscriptionId);
       } else if (boardId && gradeId && medium) {
-        query = query.is("subscription_id", null).eq("board_id", boardId).eq("grade_id", gradeId).eq("medium", medium);
+        query = query
+          .is("subscription_id", null)
+          .eq("board_id", boardId)
+          .eq("grade_id", gradeId)
+          .eq("medium", medium);
       } else {
-        query = query.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+        query = query
+          .is("subscription_id", null)
+          .is("board_id", null)
+          .is("grade_id", null);
       }
 
       const { data } = await query.order("created_at", { ascending: true });
       if (!cancelled) {
-        setTimeline(((data as ChatMessage[]) ?? []).map((message) => ({ kind: "message", message })));
+        setTimeline(
+          ((data as ChatMessage[]) ?? []).map((message) => ({
+            kind: "message",
+            message,
+          })),
+        );
         setLoadingHistory(false);
       }
     })();
@@ -421,12 +496,53 @@ export function ChatPanel({
   // triggers (a new timeline entry, a topic summary finishing its own
   // async load) keep the smooth scroll, since those are one-off jumps.
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior,
+    });
   }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [timeline, scrollToBottom]);
+
+  // General follow-up to the two triggers above, which only cover a new
+  // timeline entry and a topic bubble's own initial summary settling.
+  // Reported directly: content that grows a topic bubble well AFTER its
+  // summary already loaded -- the chapter/sub-topic pickers, an initial
+  // exercise batch, PatternPicker's own on-demand generations, "Generate
+  // more exercises" -- never triggered either of those, so the view sat
+  // wherever it happened to be while a student's newly generated
+  // questions appeared below the fold. Rather than threading a matching
+  // "just grew" callback prop through every one of those (and every
+  // future one), this watches `contentRef`'s own rendered height directly
+  // -- ResizeObserver fires on ANY layout growth inside it, regardless of
+  // which component or async action caused it. Only auto-follows when
+  // already within a small threshold of the bottom, so a student who
+  // scrolled up to reread earlier content never gets yanked back down by
+  // something unrelated finishing below. `instant`, same reasoning as
+  // handleRevealProgress below -- this can fire in quick bursts during a
+  // multi-step fetch, and fighting a still-in-flight smooth scroll from
+  // one of the other triggers would read as jittery.
+  useEffect(() => {
+    const container = scrollRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const NEAR_BOTTOM_PX = 120;
+    const observer = new ResizeObserver(() => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceFromBottom < NEAR_BOTTOM_PX) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: "instant",
+        });
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   // Stable identity (scrollToBottom itself never changes -- see its own
   // useCallback above) so it can be passed as a MessageBubble prop without
@@ -434,7 +550,10 @@ export function ChatPanel({
   // here would be a brand-new function every ChatPanel render, which would
   // make every bubble's shallow prop comparison see a "changed" prop and
   // re-render anyway, silently undoing the whole point of memoizing them.
-  const handleRevealProgress = useCallback(() => scrollToBottom("instant"), [scrollToBottom]);
+  const handleRevealProgress = useCallback(
+    () => scrollToBottom("instant"),
+    [scrollToBottom],
+  );
 
   // Stores a topic bubble's summary text back onto its own timeline entry
   // once TopicSummaryMessage's fetch resolves (see that component's
@@ -447,10 +566,14 @@ export function ChatPanel({
     (entryId: string, summary: string | null) => {
       scrollToBottom();
       setTimeline((prev) =>
-        prev.map((entry) => (entry.kind === "topic" && entry.entryId === entryId ? { ...entry, summary: summary ?? undefined } : entry))
+        prev.map((entry) =>
+          entry.kind === "topic" && entry.entryId === entryId
+            ? { ...entry, summary: summary ?? undefined }
+            : entry,
+        ),
       );
     },
-    [scrollToBottom]
+    [scrollToBottom],
   );
 
   // Called by the form's Send button below. useCallback (rather than a
@@ -479,7 +602,11 @@ export function ChatPanel({
       const lastEntry = timelineRef.current[timelineRef.current.length - 1];
       const topicContext =
         lastEntry && lastEntry.kind === "topic" && lastEntry.summary
-          ? { chapter: lastEntry.topic.chapter, topic: lastEntry.topic.topic, summary: lastEntry.summary }
+          ? {
+              chapter: lastEntry.topic.chapter,
+              topic: lastEntry.topic.topic,
+              summary: lastEntry.summary,
+            }
           : undefined;
 
       const optimisticMessage: ChatMessage = {
@@ -496,7 +623,11 @@ export function ChatPanel({
       };
       setTimeline((prev) => [
         ...prev,
-        { kind: "message", message: optimisticMessage, previewImageUrl: image?.dataUrl },
+        {
+          kind: "message",
+          message: optimisticMessage,
+          previewImageUrl: image?.dataUrl,
+        },
       ]);
 
       try {
@@ -506,7 +637,9 @@ export function ChatPanel({
           body: JSON.stringify({
             subjectId: subject.id,
             message: trimmed,
-            image: image ? { mediaType: image.mediaType, base64: image.base64 } : undefined,
+            image: image
+              ? { mediaType: image.mediaType, base64: image.base64 }
+              : undefined,
             // Harmless to send even when the toggle isn't shown/relevant --
             // the server only honors it for English-subject, non-English-medium
             // students (see ENGLISH_SUBJECT_CODE in src/app/api/chat/route.ts).
@@ -523,12 +656,22 @@ export function ChatPanel({
         const body = await res.json();
 
         if (!res.ok) {
-          throw new Error(body.error ?? "Something went wrong. Please try again.");
+          throw new Error(
+            body.error ?? "Something went wrong. Please try again.",
+          );
         }
 
         setTimeline((prev) => [
-          ...prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id),
-          { kind: "message", message: body.userMessage as ChatMessage, previewImageUrl: image?.dataUrl },
+          ...prev.filter(
+            (entry) =>
+              entry.kind !== "message" ||
+              entry.message.id !== optimisticMessage.id,
+          ),
+          {
+            kind: "message",
+            message: body.userMessage as ChatMessage,
+            previewImageUrl: image?.dataUrl,
+          },
           {
             kind: "message",
             message: body.assistantMessage as ChatMessage,
@@ -538,7 +681,11 @@ export function ChatPanel({
         ]);
       } catch (err) {
         setTimeline((prev) =>
-          prev.filter((entry) => entry.kind !== "message" || entry.message.id !== optimisticMessage.id)
+          prev.filter(
+            (entry) =>
+              entry.kind !== "message" ||
+              entry.message.id !== optimisticMessage.id,
+          ),
         );
         setInput(trimmed);
         setSelectedImage(image);
@@ -547,7 +694,15 @@ export function ChatPanel({
         setSending(false);
       }
     },
-    [sending, subscriptionId, subject.id, boardId, gradeId, medium, preferEnglish]
+    [
+      sending,
+      subscriptionId,
+      subject.id,
+      boardId,
+      gradeId,
+      medium,
+      preferEnglish,
+    ],
   );
 
   // Re-answers an already-shown assistant reply in a new language and
@@ -560,7 +715,11 @@ export function ChatPanel({
   // me that answer in the other language," the same expectation the topic
   // case already sets.
   const regenerateLastReply = useCallback(
-    async (assistantMessageId: string, questionText: string, nextPreferEnglish: boolean) => {
+    async (
+      assistantMessageId: string,
+      questionText: string,
+      nextPreferEnglish: boolean,
+    ) => {
       setRegeneratingMessageId(assistantMessageId);
       try {
         const res = await fetch("/api/chat", {
@@ -589,16 +748,20 @@ export function ChatPanel({
                   revealOnMount: true,
                   matchedTopic: body.matchedTopic ?? null,
                 }
-              : entry
-          )
+              : entry,
+          ),
         );
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not translate the last reply.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not translate the last reply.",
+        );
       } finally {
         setRegeneratingMessageId(null);
       }
     },
-    [subject.id, boardId, gradeId, medium]
+    [subject.id, boardId, gradeId, medium],
   );
 
   // Fires regenerateLastReply above exactly when the toggle changes *and*
@@ -618,10 +781,21 @@ export function ChatPanel({
     regeneratedPreferEnglishRef.current = effectivePreferEnglish;
 
     const lastEntry = timeline[timeline.length - 1];
-    if (!lastEntry || lastEntry.kind !== "message" || lastEntry.message.role !== "assistant") return;
+    if (
+      !lastEntry ||
+      lastEntry.kind !== "message" ||
+      lastEntry.message.role !== "assistant"
+    )
+      return;
     const pairedUser = timeline[timeline.length - 2];
-    if (!pairedUser || pairedUser.kind !== "message" || pairedUser.message.role !== "user") return;
-    if (pairedUser.previewImageUrl || pairedUser.message.content === "[Image]") return;
+    if (
+      !pairedUser ||
+      pairedUser.kind !== "message" ||
+      pairedUser.message.role !== "user"
+    )
+      return;
+    if (pairedUser.previewImageUrl || pairedUser.message.content === "[Image]")
+      return;
 
     const assistantMessageId = lastEntry.message.id;
     const questionText = pairedUser.message.content;
@@ -629,7 +803,13 @@ export function ChatPanel({
     // it sets regeneratingMessageId synchronously before its first await,
     // which the effects linter (correctly) won't allow running straight
     // off this effect's own synchronous body.
-    void Promise.resolve().then(() => regenerateLastReply(assistantMessageId, questionText, effectivePreferEnglish));
+    void Promise.resolve().then(() =>
+      regenerateLastReply(
+        assistantMessageId,
+        questionText,
+        effectivePreferEnglish,
+      ),
+    );
   }, [effectivePreferEnglish, timeline, regenerateLastReply]);
 
   // A fresh clickId (even for the same topic clicked twice) drops a new
@@ -672,16 +852,25 @@ export function ChatPanel({
   // derived from another piece of local state, and the guard below (bailing
   // once syncedPreferEnglish already matches) keeps this to one extra
   // render per real toggle flip rather than looping.
-  const [syncedPreferEnglish, setSyncedPreferEnglish] = useState(effectivePreferEnglish);
+  const [syncedPreferEnglish, setSyncedPreferEnglish] = useState(
+    effectivePreferEnglish,
+  );
   if (syncedPreferEnglish !== effectivePreferEnglish) {
     setSyncedPreferEnglish(effectivePreferEnglish);
     setTimeline((prev) => {
       if (prev.length === 0) return prev;
       const lastEntry = prev[prev.length - 1];
-      if (lastEntry.kind !== "topic" || lastEntry.preferEnglish === effectivePreferEnglish) return prev;
+      if (
+        lastEntry.kind !== "topic" ||
+        lastEntry.preferEnglish === effectivePreferEnglish
+      )
+        return prev;
 
       const next = [...prev];
-      next[prev.length - 1] = { ...lastEntry, preferEnglish: effectivePreferEnglish };
+      next[prev.length - 1] = {
+        ...lastEntry,
+        preferEnglish: effectivePreferEnglish,
+      };
       return next;
     });
   }
@@ -694,7 +883,9 @@ export function ChatPanel({
       setError(null);
       setSelectedImage(await readImageFile(file));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read that image.");
+      setError(
+        err instanceof Error ? err.message : "Could not read that image.",
+      );
     }
   }
 
@@ -712,7 +903,8 @@ export function ChatPanel({
             {isStaffUser && !medium
               ? "Staff access: unrestricted, not limited to any one syllabus."
               : `Answers are limited to this subject's syllabus, in ${
-                  FIXED_RESPONSE_LANGUAGE_SUBJECT[subject.code] ?? (showLanguageToggle && preferEnglish ? "English" : medium)
+                  FIXED_RESPONSE_LANGUAGE_SUBJECT[subject.code] ??
+                  (showLanguageToggle && preferEnglish ? "English" : medium)
                 }.`}
           </p>
         </div>
@@ -731,7 +923,9 @@ export function ChatPanel({
               onClick={() => setPreferEnglish(false)}
               aria-pressed={!preferEnglish}
               className={`rounded-full px-2.5 py-1 font-medium transition ${
-                !preferEnglish ? "bg-brand text-white" : "text-foreground/60 hover:text-foreground"
+                !preferEnglish
+                  ? "bg-brand text-white"
+                  : "text-foreground/60 hover:text-foreground"
               }`}
             >
               {medium}
@@ -741,7 +935,9 @@ export function ChatPanel({
               onClick={() => setPreferEnglish(true)}
               aria-pressed={preferEnglish}
               className={`rounded-full px-2.5 py-1 font-medium transition ${
-                preferEnglish ? "bg-brand text-white" : "text-foreground/60 hover:text-foreground"
+                preferEnglish
+                  ? "bg-brand text-white"
+                  : "text-foreground/60 hover:text-foreground"
               }`}
             >
               English
@@ -750,47 +946,60 @@ export function ChatPanel({
         )}
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-        {loadingHistory && <p className="text-sm text-foreground/40">Loading chat history…</p>}
-        {!loadingHistory && timeline.length === 0 && (
-          <p className="text-sm text-foreground/40">
-            Ask your first {subject.name} question below to get started.
-          </p>
-        )}
-        {timeline.map((entry) =>
-          entry.kind === "topic" ? (
-            <TopicSummaryMessage
-              key={entry.entryId}
-              topic={entry.topic}
-              preferEnglish={entry.preferEnglish}
-              onSummaryLoaded={(summary) => handleTopicSummaryLoaded(entry.entryId, summary)}
-            />
-          ) : (
-            <MessageBubble
-              key={entry.message.id}
-              entry={entry}
-              subjectId={subject.id}
-              isRegenerating={entry.message.id === regeneratingMessageId}
-              onRevealProgress={handleRevealProgress}
-              preferEnglish={effectivePreferEnglish}
-            />
-          )
-        )}
-        {sending && (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/40">
-              <LoadingIndicator label="Thinking…" />
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
+        <div ref={contentRef} className="space-y-4">
+          {loadingHistory && (
+            <p className="text-sm text-foreground/40">Loading chat history…</p>
+          )}
+          {!loadingHistory && timeline.length === 0 && (
+            <p className="text-sm text-foreground/40">
+              Ask your first {subject.name} question below to get started.
+            </p>
+          )}
+          {timeline.map((entry) =>
+            entry.kind === "topic" ? (
+              <TopicSummaryMessage
+                key={entry.entryId}
+                topic={entry.topic}
+                preferEnglish={entry.preferEnglish}
+                onSummaryLoaded={(summary) =>
+                  handleTopicSummaryLoaded(entry.entryId, summary)
+                }
+              />
+            ) : (
+              <MessageBubble
+                key={entry.message.id}
+                entry={entry}
+                subjectId={subject.id}
+                isRegenerating={entry.message.id === regeneratingMessageId}
+                onRevealProgress={handleRevealProgress}
+                preferEnglish={effectivePreferEnglish}
+              />
+            ),
+          )}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/40">
+                <LoadingIndicator label="Thinking…" />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <form onSubmit={sendMessage} className="shrink-0 border-t border-border bg-surface p-3 sm:p-4">
+      <form
+        onSubmit={sendMessage}
+        className="shrink-0 border-t border-border bg-surface p-3 sm:p-4"
+      >
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
         {selectedImage && (
           <div className="mb-2 flex w-fit items-center gap-2 rounded-lg border border-border bg-background p-1.5 pr-2">
             {/* eslint-disable-next-line @next/next/no-img-element -- transient local preview, never persisted */}
-            <img src={selectedImage.dataUrl} alt="Selected" className="h-10 w-10 rounded object-cover" />
+            <img
+              src={selectedImage.dataUrl}
+              alt="Selected"
+              className="h-10 w-10 rounded object-cover"
+            />
             <button
               type="button"
               onClick={() => setSelectedImage(null)}
