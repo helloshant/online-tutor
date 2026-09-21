@@ -127,6 +127,13 @@ export function TopicSummaryMessage({
   );
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
+  // Only for the concept path's own "Generate more exercises" action (see
+  // handleLoadConceptExercises' own `append` comment) -- a separate flag
+  // from loadingExercises so this action's own button can show its own
+  // busy state without also re-triggering the initial-load spinner, which
+  // only checks `exercises === null` and would never see this since
+  // exercises is already populated by the time this action is reachable.
+  const [loadingMoreExercises, setLoadingMoreExercises] = useState(false);
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -224,6 +231,7 @@ export function TopicSummaryMessage({
     setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
+    setLoadingMoreExercises(false);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -340,11 +348,20 @@ export function TopicSummaryMessage({
   // batch is always freshly generated (never banked, see that route's own
   // comment on why), so there's no accumulated admin-tagged set to offer a
   // "refine by tag" row for the way the other two paths have.
+  //
+  // `append`, when true, ADDS this fresh batch onto whatever's already
+  // shown instead of replacing it -- used by the "Generate more exercises"
+  // action below, which needs the earlier questions to stay put (a student
+  // partway through grading them shouldn't lose their in-progress work).
+  // The initial pill click still replaces (append defaults to false),
+  // matching every other "pick a sub-topic" path here.
   async function handleLoadConceptExercises(
     target: SyllabusTopic,
     conceptId: string,
+    append = false,
   ) {
-    setLoadingExercises(true);
+    if (append) setLoadingMoreExercises(true);
+    else setLoadingExercises(true);
     setExercisesError(null);
     try {
       const params = new URLSearchParams({
@@ -359,11 +376,14 @@ export function TopicSummaryMessage({
         setExercisesError(body?.error ?? "Could not load exercises.");
         return;
       }
-      setExercises(body.exercises);
+      setExercises((prev) =>
+        append ? [...(prev ?? []), ...body.exercises] : body.exercises,
+      );
     } catch {
       setExercisesError("Could not load exercises.");
     } finally {
-      setLoadingExercises(false);
+      if (append) setLoadingMoreExercises(false);
+      else setLoadingExercises(false);
     }
   }
 
@@ -379,6 +399,7 @@ export function TopicSummaryMessage({
     setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
+    setLoadingMoreExercises(false);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -410,6 +431,7 @@ export function TopicSummaryMessage({
     setSelectedSubtopic(option);
     setExercises(null);
     setExercisesError(null);
+    setLoadingMoreExercises(false);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -428,6 +450,7 @@ export function TopicSummaryMessage({
     setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
+    setLoadingMoreExercises(false);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -444,6 +467,7 @@ export function TopicSummaryMessage({
     setSelectedSubtopic(null);
     setExercises(null);
     setExercisesError(null);
+    setLoadingMoreExercises(false);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -783,7 +807,7 @@ export function TopicSummaryMessage({
                         link) gives it the same weight as "Try another like
                         this" right above it. */}
                     {subtopics.length > 0 && (
-                      <div className="mt-4 border-t border-border pt-3">
+                      <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border pt-3">
                         <button
                           type="button"
                           onClick={handleBackToSubtopics}
@@ -791,6 +815,41 @@ export function TopicSummaryMessage({
                         >
                           ← Different sub-topic
                         </button>
+                        {/* Only the concept path (WBBSE/ICSE's own
+                            content-chunk fallback, see chunkConcepts.ts)
+                            needs this -- a real mined sub-topic already
+                            gets an equivalent "Generate another" from
+                            PatternPicker above (see its own subTopic prop),
+                            and the flat "all exercises" pick has nothing
+                            here to scope a fresh call to. Reported
+                            directly: this concept path had no way at all
+                            to get more questions on the same sub-topic
+                            once the initial batch of three ran out --
+                            reuses generate-for-concept (always fresh, never
+                            banked, see handleLoadConceptExercises' own
+                            comment) with append:true so the earlier
+                            questions -- and any answers already typed into
+                            them -- stay put. */}
+                        {selectedSubtopic?.kind === "concept" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              selectedExerciseTopic &&
+                              selectedSubtopic.kind === "concept" &&
+                              void handleLoadConceptExercises(
+                                selectedExerciseTopic,
+                                selectedSubtopic.id,
+                                true,
+                              )
+                            }
+                            disabled={loadingMoreExercises}
+                            className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
+                          >
+                            {loadingMoreExercises
+                              ? "Generating…"
+                              : "Generate more exercises"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
