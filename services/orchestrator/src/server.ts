@@ -302,12 +302,10 @@ app.post(
         res.json(response);
       } catch (err) {
         console.error("LLM chat completion failed:", err);
-        res
-          .status(502)
-          .json({
-            error:
-              "The tutor is temporarily unavailable. Please try again shortly.",
-          });
+        res.status(502).json({
+          error:
+            "The tutor is temporarily unavailable. Please try again shortly.",
+        });
       }
       return;
     }
@@ -591,12 +589,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("LLM chat completion failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "The tutor is temporarily unavailable. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "The tutor is temporarily unavailable. Please try again shortly.",
+      });
     }
   },
 );
@@ -625,12 +621,9 @@ app.post(
       typeof body.question !== "string" ||
       !body.question
     ) {
-      res
-        .status(400)
-        .json({
-          error:
-            "boardId, gradeId, subjectId, medium, and question are required",
-        });
+      res.status(400).json({
+        error: "boardId, gradeId, subjectId, medium, and question are required",
+      });
       return;
     }
 
@@ -1047,12 +1040,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("Topic summary generation failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "Could not generate a summary right now. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "Could not generate a summary right now. Please try again shortly.",
+      });
     }
   },
 );
@@ -1388,12 +1379,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("Exercise generation failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "Could not generate exercises right now. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "Could not generate exercises right now. Please try again shortly.",
+      });
     }
   },
 );
@@ -1418,12 +1407,10 @@ app.post(
       typeof body.chapter !== "string" ||
       typeof body.topic !== "string"
     ) {
-      res
-        .status(400)
-        .json({
-          error:
-            "boardName, gradeName, subjectName, chapter, and topic are required",
-        });
+      res.status(400).json({
+        error:
+          "boardName, gradeName, subjectName, chapter, and topic are required",
+      });
       return;
     }
 
@@ -1494,12 +1481,10 @@ app.post(
       typeof body.chapter !== "string" ||
       typeof body.topic !== "string"
     ) {
-      res
-        .status(400)
-        .json({
-          error:
-            "boardName, gradeName, subjectName, chapter, and topic are required",
-        });
+      res.status(400).json({
+        error:
+          "boardName, gradeName, subjectName, chapter, and topic are required",
+      });
       return;
     }
 
@@ -1666,11 +1651,21 @@ app.post(
       const parsed = parseGeneratedExercises(text);
       const stored: ExerciseItem[] = [];
       for (const exercise of parsed) {
+        // requestedType, when set, wins over the model's own self-reported
+        // "Type: ..." tag -- confirmed directly: the model reliably WROTE
+        // the requested type's actual content (a genuinely numerical
+        // problem when asked for one), but its own self-classification
+        // tag disagreed, mislabeling it short_answer/long_answer instead.
+        // We already told it what to write; trusting that instruction
+        // over a separate, apparently less reliable self-tag is strictly
+        // more accurate. The self-tag is still the only signal available
+        // when nothing specific was requested (the batch path, or "Any"),
+        // so it's the fallback, not discarded.
         const item = await storeGeneratedExercise(
           scope,
           body.topicId,
           body.userId,
-          exercise,
+          { ...exercise, type: requestedType ?? exercise.type },
           null,
         );
         if (item) stored.push(item);
@@ -1696,12 +1691,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("Concept-scoped exercise generation failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "Could not generate exercises right now. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "Could not generate exercises right now. Please try again shortly.",
+      });
     }
   },
 );
@@ -1855,12 +1848,15 @@ app.post(
         runId: chosen.runId,
         archetypeId: chosen.archetypeId,
       };
+      // requestedType wins over the model's own self-reported "Type: ..."
+      // tag -- see the identical fix (and its own comment) in
+      // /v1/topic-exercises/generate-for-concept above.
       const item = first
         ? await storeGeneratedExercise(
             scope,
             body.topicId,
             body.userId,
-            first,
+            { ...first, type: requestedType ?? first.type },
             archetypeAttribution,
           )
         : null;
@@ -1898,12 +1894,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("On-demand topic exercise generation failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "Could not generate a question right now. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "Could not generate a question right now. Please try again shortly.",
+      });
     }
   },
 );
@@ -1995,12 +1989,10 @@ app.post(
       res.json(response);
     } catch (err) {
       console.error("Exercise grading failed:", err);
-      res
-        .status(502)
-        .json({
-          error:
-            "Could not grade this attempt right now. Please try again shortly.",
-        });
+      res.status(502).json({
+        error:
+          "Could not grade this attempt right now. Please try again shortly.",
+      });
     }
   },
 );
