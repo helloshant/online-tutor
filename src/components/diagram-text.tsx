@@ -35,10 +35,14 @@ const DIAGRAM_PATTERN = /\[DIAGRAM\]\s*([\s\S]*?)\s*\[\/DIAGRAM\]/g;
 // partial diagram), the same outcome as any other malformed field, rather
 // than a raw, uncaught JSON syntax error.
 function sanitizeAlmostJson(raw: string): string {
-  return raw.replace(/:(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=[,}\]])/g, (match, pre, ident, post) => {
-    if (ident === "true" || ident === "false" || ident === "null") return match;
-    return `:${pre}null${post}`;
-  });
+  return raw.replace(
+    /:(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=[,}\]])/g,
+    (match, pre, ident, post) => {
+      if (ident === "true" || ident === "false" || ident === "null")
+        return match;
+      return `:${pre}null${post}`;
+    },
+  );
 }
 
 // When a diagram fails to parse, also strips a trailing heading-only line
@@ -85,7 +89,9 @@ export function DiagramText({ text }: { text: string }) {
       spec = null;
     }
 
-    const precedingText = spec ? text.slice(lastIndex, index) : stripOrphanedHeading(text.slice(lastIndex, index));
+    const precedingText = spec
+      ? text.slice(lastIndex, index)
+      : stripOrphanedHeading(text.slice(lastIndex, index));
     if (precedingText) {
       parts.push(<TableText key={key++} text={precedingText} />);
     }
@@ -106,7 +112,28 @@ export function DiagramText({ text }: { text: string }) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(<TableText key={key++} text={text.slice(lastIndex)} />);
+    const remainder = text.slice(lastIndex);
+    // DIAGRAM_PATTERN above only matches a COMPLETE block -- an open
+    // [DIAGRAM] tag with no closing [/DIAGRAM] (the reply was cut off
+    // before finishing it, e.g. hit its token budget mid-JSON) never
+    // matches at all, so without this check the raw, truncated JSON would
+    // fall straight through to TableText/CitationText and render as
+    // literal broken markup. Same fail-open posture as a malformed
+    // (but complete) block: dropped silently, along with any heading that
+    // existed only to introduce it, rather than shown to the student.
+    const openIdx = remainder.indexOf("[DIAGRAM]");
+    if (openIdx === -1) {
+      parts.push(<TableText key={key++} text={remainder} />);
+    } else {
+      const before = stripOrphanedHeading(remainder.slice(0, openIdx));
+      if (before) {
+        parts.push(<TableText key={key++} text={before} />);
+      }
+      console.warn(
+        "Dropped an unterminated [DIAGRAM] block (reply was likely truncated):",
+        remainder.slice(openIdx),
+      );
+    }
   }
 
   return <>{parts}</>;
