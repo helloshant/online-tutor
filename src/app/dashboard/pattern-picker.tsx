@@ -383,10 +383,19 @@ export function PatternPicker({
             )
           }
           disabled={generating !== null}
-          className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
+          // Reported directly: this pill "doesn't appear" -- it renders
+          // unconditionally, same as every pattern pill next to it, but
+          // its own unselected style (a very muted gray on gray) blended
+          // into the row next to the much more visible brand-purple
+          // pattern pills, easy to scan right past. A visible border in
+          // BOTH states -- not just a contrast bump -- keeps it clearly
+          // present, and deliberately still neutral-toned (not brand
+          // purple) so it still reads as "a different kind of action,"
+          // not one more mined pattern.
+          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
             active && !active.pattern
-              ? "bg-foreground/70 text-white"
-              : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+              ? "border-foreground/70 bg-foreground/70 text-white"
+              : "border-foreground/30 bg-foreground/5 text-foreground/70 hover:bg-foreground/10"
           }`}
         >
           {generating === GENERATING_RANDOM && generatingTrigger === "pill"
