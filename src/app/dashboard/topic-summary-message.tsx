@@ -146,14 +146,14 @@ export function TopicSummaryMessage({
   );
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
-  // Only for the concept path's own "Generate more exercises" action (see
+  // Only for the concept path's own "More practice on this concept" action (see
   // handleLoadConceptExercises' own `append` comment) -- a separate flag
   // from loadingExercises so this action's own button can show its own
   // busy state without also re-triggering the initial-load spinner, which
   // only checks `exercises === null` and would never see this since
   // exercises is already populated by the time this action is reachable.
   const [loadingMoreExercises, setLoadingMoreExercises] = useState(false);
-  // Which type the concept path's own "Generate more exercises" button
+  // Which type the concept path's own "More practice on this concept" button
   // should ask for next -- undefined means "Any" (today's mixed
   // behavior). Reported directly: there was no way to request a specific
   // type at all. Only meaningful once selectedSubtopic.kind === "concept"
@@ -383,7 +383,7 @@ export function TopicSummaryMessage({
   // "refine by tag" row for the way the other two paths have.
   //
   // `append`, when true, ADDS this fresh batch onto whatever's already
-  // shown instead of replacing it -- used by the "Generate more exercises"
+  // shown instead of replacing it -- used by the "More practice on this concept"
   // action below, which needs the earlier questions to stay put (a student
   // partway through grading them shouldn't lose their in-progress work).
   // The initial pill click still replaces (append defaults to false),
@@ -888,7 +888,16 @@ export function TopicSummaryMessage({
                             banked, see handleLoadConceptExercises' own
                             comment) with append:true so the earlier
                             questions -- and any answers already typed into
-                            them -- stay put. */}
+                            them -- stay put.
+                            Deliberately NOT worded "Generate another" --
+                            reported directly: with PatternPicker's own
+                            "Generate another" sometimes visible further up
+                            in the SAME panel (a chapter can have both real
+                            mined patterns AND its own content-chunk
+                            concepts), two near-identical labels for two
+                            different-scoped actions read as one confusing
+                            duplicate. "More practice on this concept"
+                            names what it's actually scoped to instead. */}
                         {selectedSubtopic?.kind === "concept" && (
                           <>
                             <button
@@ -908,7 +917,7 @@ export function TopicSummaryMessage({
                             >
                               {loadingMoreExercises
                                 ? "Generating…"
-                                : "Generate more exercises"}
+                                : "More practice on this concept"}
                             </button>
                             {/* Reported directly: no way to ask for a
                                 specific question type at all. Mirrors
