@@ -1562,7 +1562,13 @@ app.post(
 // from "banked for a different concept in the same chapter" -- always
 // fresh generation instead, an acceptable v1 cost given WBBSE/ICSE traffic
 // is far lower than CBSE's own archetype-grounded path above.
-const CONCEPT_EXERCISE_COUNT = 3;
+//
+// Kept equal to PatternPicker's own per-click count (see its own comment
+// in pattern-picker.tsx) -- reported directly: a student clicking "MCQ"
+// (routed through /v1/topic-exercises/generate) got a visibly different
+// number of new questions per click than clicking "Numerical" here, with
+// no reason for the two to differ.
+const CONCEPT_EXERCISE_COUNT = 2;
 
 app.post(
   "/v1/topic-exercises/generate-for-concept",

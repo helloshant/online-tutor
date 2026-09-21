@@ -62,6 +62,12 @@ type Pattern = {
 // Sentinel `generating` key for "Generate another" (no specific pattern),
 // distinct from any real archetypeId.
 const GENERATING_RANDOM = "__random__";
+// How many new questions one click here produces -- kept equal to the
+// concept path's own CONCEPT_EXERCISE_COUNT in server.ts (see its own
+// comment); this route itself only ever generates one exercise per call
+// (see handleGenerate's own comment on why this fires that many parallel
+// requests rather than asking the route for more at once).
+const ON_DEMAND_EXERCISE_COUNT = 2;
 const DIFFICULTY_LEVELS: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 
 // The single most-observed level for this pattern's real mined questions,
@@ -234,35 +240,69 @@ export function PatternPicker({
     setGenerateError(null);
     setActive(selection);
     try {
-      const res = await fetch(`/api/topics/${topicId}/exercises/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(selection.pattern
-            ? {
-                archetypeId: selection.pattern.archetypeId,
-                archetypeRunId: selection.pattern.runId,
-              }
-            : {}),
-          ...(selection.difficulty
-            ? { requestedDifficulty: selection.difficulty }
-            : {}),
-          ...(selection.type ? { requestedType: selection.type } : {}),
-          ...(subTopic ? { subTopic } : {}),
-          preferEnglish,
-        }),
+      const requestBody = JSON.stringify({
+        ...(selection.pattern
+          ? {
+              archetypeId: selection.pattern.archetypeId,
+              archetypeRunId: selection.pattern.runId,
+            }
+          : {}),
+        ...(selection.difficulty
+          ? { requestedDifficulty: selection.difficulty }
+          : {}),
+        ...(selection.type ? { requestedType: selection.type } : {}),
+        ...(subTopic ? { subTopic } : {}),
+        preferEnglish,
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        setGenerateError(
-          body?.error ?? "Could not generate a question right now.",
-        );
-        return;
+      // This route only ever generates ONE exercise per call -- fired
+      // ON_DEMAND_EXERCISE_COUNT times in parallel instead of asking the
+      // route itself for more, so its response shape (and every other
+      // caller of it) stays untouched. Reported directly: a click here
+      // produced a visibly different number of new questions than a click
+      // on the concept path's own "Generate more exercises" (see
+      // CONCEPT_EXERCISE_COUNT in server.ts, kept equal to this). Fired
+      // with an unspecific archetypeId (the "Generate another" pick), each
+      // call independently random-picks its own archetype -- acceptable
+      // variety, not a bug; with a specific pattern, all calls target the
+      // exact same one, since archetypeId/archetypeRunId are pinned in the
+      // shared request body.
+      const results = await Promise.allSettled(
+        Array.from({ length: ON_DEMAND_EXERCISE_COUNT }, () =>
+          fetch(`/api/topics/${topicId}/exercises/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: requestBody,
+          }).then(async (res) => ({
+            ok: res.ok,
+            body: await res.json().catch(() => null),
+          })),
+        ),
+      );
+
+      let addedAny = false;
+      let lastError: string | null = null;
+      for (const result of results) {
+        if (result.status !== "fulfilled") {
+          lastError = "Could not generate a question right now.";
+          continue;
+        }
+        if (result.value.ok && result.value.body?.exercise) {
+          onExerciseGenerated(
+            result.value.body.exercise as PatternPickerExercise,
+          );
+          addedAny = true;
+        } else {
+          lastError =
+            result.value.body?.error ??
+            "Could not generate a question right now.";
+        }
       }
-      if (body?.exercise) {
-        onExerciseGenerated(body.exercise as PatternPickerExercise);
-      } else {
-        setGenerateError("Could not generate a question right now.");
+      // A partial success (e.g. 1 of 2) is still real progress -- only
+      // surfaced as an error when NOTHING came back at all.
+      if (!addedAny) {
+        setGenerateError(
+          lastError ?? "Could not generate a question right now.",
+        );
       }
     } catch {
       setGenerateError("Could not generate a question right now.");
