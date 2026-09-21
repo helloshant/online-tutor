@@ -417,20 +417,28 @@ export function PatternPicker({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => void handleGenerate(active, "refine")}
-              disabled={generating !== null}
-              className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              {generating !== null && generatingTrigger === "refine"
-                ? "Generating…"
-                : active.pattern
-                  ? "Try another like this"
-                  : "Generate another"}
-            </button>
+            {/* Only for a specific pattern -- for the random pick
+                (active.pattern === null), this button and the top row's
+                own "Generate another" pill did the EXACT same thing with
+                the exact same label, which just read as two redundant
+                buttons once both said "Generate another" (reported
+                directly). The top pill already covers repeating the
+                random pick with the current type carried over (see its
+                own onClick), so nothing is lost by not duplicating it
+                here -- the type pills below still work for a random pick
+                too. */}
             {active.pattern && (
               <>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerate(active, "refine")}
+                  disabled={generating !== null}
+                  className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                >
+                  {generating !== null && generatingTrigger === "refine"
+                    ? "Generating…"
+                    : "Try another like this"}
+                </button>
                 <span className="text-xs text-foreground/40">
                   {describeDifficultyHint(
                     active.pattern.difficultyDistribution,
