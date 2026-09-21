@@ -194,6 +194,20 @@ export function PatternPicker({
   // a busy state -- not a single shared boolean that would grey out every
   // button in the row at once.
   const [generating, setGenerating] = useState<string | null>(null);
+  // Which ROW triggered the in-flight request -- the top pill row, or the
+  // refinement panel's own "Try another like this"/"Another random one"
+  // button. Reported directly: clicking "Try another like this" showed
+  // "Generating…" on BOTH that button AND the matching pattern pill above
+  // it at once, reading like two separate things were happening, when it
+  // was really the same one request `generating` alone can't distinguish
+  // (a pill's own label only checks `generating === p.archetypeId`, which
+  // is equally true whether the PILL or the PANEL button was what was
+  // actually clicked). Only the row that was actually clicked shows the
+  // "Generating…" text now; the other's `disabled` state alone still
+  // reflects the in-flight request, without duplicating the label.
+  const [generatingTrigger, setGeneratingTrigger] = useState<
+    "pill" | "refine" | null
+  >(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   // No manual reset of loaded/patterns/active/generateError here on a
@@ -233,10 +247,14 @@ export function PatternPicker({
     };
   }, [topicId, preferEnglish, subTopic]);
 
-  async function handleGenerate(selection: ActiveSelection) {
+  async function handleGenerate(
+    selection: ActiveSelection,
+    trigger: "pill" | "refine",
+  ) {
     if (generating !== null) return;
     const key = selection.pattern?.archetypeId ?? GENERATING_RANDOM;
     setGenerating(key);
+    setGeneratingTrigger(trigger);
     setGenerateError(null);
     setActive(selection);
     try {
@@ -308,6 +326,7 @@ export function PatternPicker({
       setGenerateError("Could not generate a question right now.");
     } finally {
       setGenerating(null);
+      setGeneratingTrigger(null);
     }
   }
 
@@ -329,11 +348,14 @@ export function PatternPicker({
               key={`${p.runId}:${p.archetypeId}`}
               type="button"
               onClick={() =>
-                void handleGenerate({
-                  pattern: p,
-                  difficulty: topDifficulty(p.difficultyDistribution),
-                  type: active?.type,
-                })
+                void handleGenerate(
+                  {
+                    pattern: p,
+                    difficulty: topDifficulty(p.difficultyDistribution),
+                    type: active?.type,
+                  },
+                  "pill",
+                )
               }
               disabled={generating !== null}
               className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
@@ -342,7 +364,7 @@ export function PatternPicker({
                   : "bg-brand/10 text-brand hover:bg-brand/20"
               }`}
             >
-              {generating === p.archetypeId
+              {generating === p.archetypeId && generatingTrigger === "pill"
                 ? "Generating…"
                 : `${p.name}${describeYearsSuffix(p.yearsObserved, p.questionCountByYear)}`}
             </button>
@@ -351,11 +373,14 @@ export function PatternPicker({
         <button
           type="button"
           onClick={() =>
-            void handleGenerate({
-              pattern: null,
-              difficulty: undefined,
-              type: active?.type,
-            })
+            void handleGenerate(
+              {
+                pattern: null,
+                difficulty: undefined,
+                type: active?.type,
+              },
+              "pill",
+            )
           }
           disabled={generating !== null}
           className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
@@ -364,7 +389,7 @@ export function PatternPicker({
               : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
           }`}
         >
-          {generating === GENERATING_RANDOM
+          {generating === GENERATING_RANDOM && generatingTrigger === "pill"
             ? "Generating…"
             : "Generate another"}
         </button>
@@ -385,11 +410,11 @@ export function PatternPicker({
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => void handleGenerate(active)}
+              onClick={() => void handleGenerate(active, "refine")}
               disabled={generating !== null}
               className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
-              {generating !== null
+              {generating !== null && generatingTrigger === "refine"
                 ? "Generating…"
                 : active.pattern
                   ? "Try another like this"
@@ -408,11 +433,14 @@ export function PatternPicker({
                     key={level}
                     type="button"
                     onClick={() =>
-                      void handleGenerate({
-                        pattern: active.pattern,
-                        difficulty: level,
-                        type: active.type,
-                      })
+                      void handleGenerate(
+                        {
+                          pattern: active.pattern,
+                          difficulty: level,
+                          type: active.type,
+                        },
+                        "refine",
+                      )
                     }
                     disabled={
                       generating !== null || active.difficulty === level
@@ -426,11 +454,14 @@ export function PatternPicker({
                 <button
                   type="button"
                   onClick={() =>
-                    void handleGenerate({
-                      pattern: active.pattern,
-                      difficulty: undefined,
-                      type: active.type,
-                    })
+                    void handleGenerate(
+                      {
+                        pattern: active.pattern,
+                        difficulty: undefined,
+                        type: active.type,
+                      },
+                      "refine",
+                    )
                   }
                   disabled={
                     generating !== null || active.difficulty === undefined
@@ -455,11 +486,14 @@ export function PatternPicker({
                 key={t}
                 type="button"
                 onClick={() =>
-                  void handleGenerate({
-                    pattern: active.pattern,
-                    difficulty: active.difficulty,
-                    type: t,
-                  })
+                  void handleGenerate(
+                    {
+                      pattern: active.pattern,
+                      difficulty: active.difficulty,
+                      type: t,
+                    },
+                    "refine",
+                  )
                 }
                 disabled={generating !== null || active.type === t}
                 title={`Generate another, ${EXERCISE_TYPE_LABELS[t]}`}
@@ -471,11 +505,14 @@ export function PatternPicker({
             <button
               type="button"
               onClick={() =>
-                void handleGenerate({
-                  pattern: active.pattern,
-                  difficulty: active.difficulty,
-                  type: undefined,
-                })
+                void handleGenerate(
+                  {
+                    pattern: active.pattern,
+                    difficulty: active.difficulty,
+                    type: undefined,
+                  },
+                  "refine",
+                )
               }
               disabled={generating !== null || active.type === undefined}
               title="Generate another, any type"
