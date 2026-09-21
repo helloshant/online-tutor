@@ -506,6 +506,34 @@ export function ChatPanel({
     scrollToBottom();
   }, [timeline, scrollToBottom]);
 
+  // Tracks whether the student was sitting at the bottom BEFORE the next
+  // resize happens -- updated on every real scroll event, not recomputed
+  // inside the ResizeObserver callback below. That distinction matters: by
+  // the time a resize callback fires, the content has ALREADY grown, so
+  // measuring "distance from bottom" at that point checks the NEW,
+  // post-growth gap -- which any real chunk of new content (an exercise
+  // batch is easily taller than a small pixel threshold) makes look "far
+  // from the bottom" even though the student was pinned right at it the
+  // moment before. Confirmed directly: that was silently defeating the
+  // auto-follow fix below for exactly the case it exists to handle.
+  // scrollTo's own scroll event keeps this ref true across a fast-follow
+  // sequence (its own scroll re-fires this handler, which re-measures
+  // against the already-caught-up position).
+  const isNearBottomRef = useRef(true);
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const NEAR_BOTTOM_PX = 120;
+    const handleScroll = () => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      isNearBottomRef.current = distanceFromBottom < NEAR_BOTTOM_PX;
+    };
+    handleScroll();
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
   // General follow-up to the two triggers above, which only cover a new
   // timeline entry and a topic bubble's own initial summary settling.
   // Reported directly: content that grows a topic bubble well AFTER its
@@ -518,8 +546,8 @@ export function ChatPanel({
   // future one), this watches `contentRef`'s own rendered height directly
   // -- ResizeObserver fires on ANY layout growth inside it, regardless of
   // which component or async action caused it. Only auto-follows when
-  // already within a small threshold of the bottom, so a student who
-  // scrolled up to reread earlier content never gets yanked back down by
+  // isNearBottomRef says the student WAS there before this growth, so
+  // scrolling up to reread earlier content never gets interrupted by
   // something unrelated finishing below. `instant`, same reasoning as
   // handleRevealProgress below -- this can fire in quick bursts during a
   // multi-step fetch, and fighting a still-in-flight smooth scroll from
@@ -529,11 +557,8 @@ export function ChatPanel({
     const content = contentRef.current;
     if (!container || !content) return;
 
-    const NEAR_BOTTOM_PX = 120;
     const observer = new ResizeObserver(() => {
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (distanceFromBottom < NEAR_BOTTOM_PX) {
+      if (isNearBottomRef.current) {
         container.scrollTo({
           top: container.scrollHeight,
           behavior: "instant",
