@@ -238,35 +238,30 @@ export function TopicSummaryMessage({
       // `chapter` doubles as two different things depending on the
       // subject, and only one of them is worth a sibling picker. For
       // subjects with real books/chapters (Bengali's "Sahitya Onushilon",
-      // English's "Realm", Maths' "Ganit Prakash"...), `chapter` genuinely
-      // groups several distinct lesson-topics, and browsing siblings is
-      // useful. But for Physics/Chemistry/Maths/Biology-style subjects,
-      // every topic instead carries `chapter` equal to the SUBJECT's own
-      // name (confirmed directly against the data: this is a deliberate,
-      // board-wide convention for subjects whose syllabus has no separate
-      // book/chapter layer -- each `topic` row already IS one full
-      // textbook chapter, the finest grain that exists). Grouping "by
-      // chapter" there would just re-list the entire subject's topic
-      // index right back at the student -- observed directly as
-      // confusing, not narrowing anything. So this checks the subject's
-      // own name first and, on a match, skips the picker list entirely
-      // and goes straight to this topic's own exercises, same as the
-      // original single-topic behavior.
-      const { data: subjectRow } = await supabase
-        .from("subjects")
-        .select("name")
-        .eq("id", topic.subject_id)
-        .maybeSingle();
-
-      if (
-        subjectRow?.name &&
-        subjectRow.name.toLowerCase() === topic.chapter.toLowerCase()
-      ) {
-        setChapterTopics([topic]);
-        handleSelectExerciseTopic(topic);
-        return;
-      }
-
+      // English's "Realm", Maths' "Ganit Prakash" in grades where it
+      // genuinely spans several books...), `chapter` groups several
+      // distinct lesson-topics UNDER MORE THAN ONE chapter value for the
+      // subject, and browsing siblings within just one of them is useful.
+      // But plenty of subjects instead give EVERY topic in the whole
+      // subject the exact same `chapter` value -- most of CBSE/ICSE's own
+      // Physics/Chemistry/Maths/Biology (that value equal to the subject's
+      // own name), but also, confirmed directly against the data, WBBSE
+      // Grade 10's entire catalogue across every subject, STEM and
+      // humanities alike (that value instead a romanized book title, e.g.
+      // Physical Science's "Bhoutobigyan O Poribesh") -- there `chapter`
+      // is really just a board-wide catalogue tag, not a real narrowing
+      // dimension, and grouping "by chapter" would just re-list the
+      // entire subject's topic index right back at the student, exactly
+      // the "displaying the same set of chapters doesn't make any sense"
+      // bug already fixed once for CBSE Biology. A literal subject-name
+      // string comparison (the original fix) only ever caught the first
+      // of these two conventions -- this checks the real, board-agnostic
+      // signal instead: does this subject have more than one DISTINCT
+      // chapter value at all? A "no" is the useless case either way, so
+      // this skips the picker list entirely and goes straight to this
+      // topic's own exercises, same as the original single-topic
+      // behavior; a "yes" narrows down to just this topic's own chapter,
+      // same as before.
       const { data, error } = await supabase
         .from("syllabus_topics")
         .select("*")
@@ -274,13 +269,20 @@ export function TopicSummaryMessage({
         .eq("grade_id", topic.grade_id)
         .eq("subject_id", topic.subject_id)
         .eq("medium", topic.medium)
-        .eq("chapter", topic.chapter)
         .order("sort_order");
       if (error || !data) {
         setChapterTopicsError("Could not load topics for this chapter.");
         return;
       }
-      setChapterTopics(data);
+
+      const distinctChapters = new Set(data.map((t) => t.chapter.toLowerCase()));
+      if (distinctChapters.size <= 1) {
+        setChapterTopics([topic]);
+        handleSelectExerciseTopic(topic);
+        return;
+      }
+
+      setChapterTopics(data.filter((t) => t.chapter === topic.chapter));
     } catch {
       setChapterTopicsError("Could not load topics for this chapter.");
     } finally {
