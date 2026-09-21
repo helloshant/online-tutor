@@ -764,6 +764,23 @@ export function TopicSummaryMessage({
                         )}
                       </>
                     )}
+                    {/* Repeats the top-of-panel back link (see above) once
+                        more below the exercise list AND the pattern picker
+                        -- without this, going back to a different sub-topic
+                        after generating a few on-demand patterns meant
+                        scrolling all the way back up past everything just
+                        shown, the exact "no way back" report this fixes.
+                        Same condition, same handler, just a second place to
+                        reach it from. */}
+                    {subtopics.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleBackToSubtopics}
+                        className="mt-3 text-xs text-foreground/40 hover:underline"
+                      >
+                        ← Different sub-topic
+                      </button>
+                    )}
                   </>
                 )}
               </>
