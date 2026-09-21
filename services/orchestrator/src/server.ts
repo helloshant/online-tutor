@@ -111,7 +111,20 @@ const EMPHASIS_CHUNK_CHARS = 4000;
 // for a script that tokenizes less efficiently than English, not room for
 // genuinely new content the way SUMMARY_TRANSLATION_MAX_TOKENS needs.
 const EMPHASIS_MAX_TOKENS = 4000;
-const EXERCISE_MAX_TOKENS = 2048;
+// Shared by every exercise-generation call (batch, on-demand single, and
+// concept-scoped multi) regardless of how many exercises that call asks
+// for. Raised from the original 2048: reported directly with real WBBSE
+// Bengali content -- a worked solution "showing steps" for a numerical or
+// long-answer physics problem, in Bengali (which tokenizes less
+// efficiently than English, see EMPHASIS_MAX_TOKENS's own comment on the
+// same point), is verbose enough that 2-3 of them in one response could
+// plausibly hit 2048 and get cut off mid-generation -- the LLM call would
+// still return 200 OK with whatever it managed to write so far, but the
+// parser correctly finds only the exercises that finished cleanly,
+// silently dropping a truncated trailing one rather than erroring.
+// Raising the ceiling costs nothing when a response was already well
+// under it, and removes this as a cause when it wasn't.
+const EXERCISE_MAX_TOKENS = 4096;
 const EXERCISE_GENERATION_COUNT = 5;
 // findArchetypesForTopic's own default limit (5, matching
 // EXERCISE_GENERATION_COUNT above) is right for grounding a batch of

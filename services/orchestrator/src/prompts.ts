@@ -318,16 +318,43 @@ Separate exercises with a line containing only ---. Output nothing else: no prea
 // ungrounded. MCQ is the one type that changes the QUESTION's own shape
 // (real lettered options, not just tone/length), so it gets the most
 // explicit instruction of the four.
-function describeTypeAsk(type: ExerciseType): string {
+//
+// Takes `count` and states it explicitly ("All N questions...") rather
+// than a singular "Write it as..." -- reported directly: a request for a
+// specific type reliably came back with only ONE question even when count
+// was 2 or more, while an unscoped request for the same count never had
+// this problem. The singular phrasing here, sitting right after "Generate
+// exactly N practice questions," was the likely cause -- ambiguous
+// between "every one of these N" and "one example," and the model
+// consistently read it as the latter. Naming the count directly in every
+// branch removes that ambiguity instead of leaving it to inference.
+// Repeats the count requirement right before the format instructions --
+// the closest text to where generation actually starts -- rather than
+// trusting the single mention already made earlier in the task
+// instruction. Reported directly: a request for N questions (with or
+// without a specific type asked for) sometimes came back with only ONE
+// exercise actually parsed out, both a shorter, plainer plural count
+// statement (batch paths) and this session's own type-ask addition both
+// implicated. A second, blunt restatement immediately before the format
+// rules is a standard mitigation for a model under-producing a requested
+// count -- cheap, and harmless when it already would have produced the
+// right number anyway.
+function describeCountReminder(count: number): string {
+  if (count === 1) return "";
+  return `\n\nProduce all ${count} exercises, not fewer -- each its own separate Q:/A: block below, in the exact format that follows.`;
+}
+
+function describeTypeAsk(type: ExerciseType, count: number): string {
+  const plural = count === 1 ? "This question" : `All ${count} questions`;
   switch (type) {
     case "MCQ":
-      return "Write it as a multiple-choice question: state the question, then exactly four lettered options (A, B, C, D) as part of the question text, with only one option correct. State the correct letter and full reasoning in the solution.";
+      return `${plural} must be a multiple-choice question: state the question, then exactly four lettered options (A, B, C, D) as part of the question text, with only one option correct. State the correct letter and full reasoning in the solution. Every one of the ${count} must independently follow this shape -- do not collapse them into fewer questions.`;
     case "short_answer":
-      return "Write it as a short-answer question -- answerable in a few sentences, not a multi-step derivation.";
+      return `${plural} must be a short-answer question -- answerable in a few sentences, not a multi-step derivation.`;
     case "long_answer":
-      return "Write it as a long-answer / descriptive question -- expects a full paragraph or a multi-step explanation that covers the concept in real depth.";
+      return `${plural} must be a long-answer / descriptive question -- expecting a full paragraph or a multi-step explanation that covers the concept in real depth.`;
     case "numerical":
-      return "Write it as a numerical problem -- give concrete values and require an actual calculation with a specific numeric result.";
+      return `${plural} must be a numerical problem -- giving concrete values and requiring an actual calculation with a specific numeric result.`;
   }
 }
 
@@ -491,7 +518,9 @@ export function buildExerciseGenerationPrompt(params: {
     requestedDifficulty && archetypes.length === 1
       ? `\n\n${describeDifficultyAsk(archetypes[0], requestedDifficulty)}`
       : "";
-  const typeAsk = requestedType ? `\n\n${describeTypeAsk(requestedType)}` : "";
+  const typeAsk = requestedType
+    ? `\n\n${describeTypeAsk(requestedType, count)}`
+    : "";
 
   const taskInstruction =
     archetypes.length > 0
@@ -505,7 +534,7 @@ ${archetypes.map(describeArchetype).join("\n")}${difficultyAsk}${typeAsk}`
 Chapter: "${chapter}"
 Topic: "${topic}"
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. ${taskInstruction}
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. ${taskInstruction}${describeCountReminder(count)}
 
 ${archetypes.length > 0 ? EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN : EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
@@ -554,7 +583,9 @@ export function buildConceptExerciseGenerationPrompt(params: {
     count,
     requestedType,
   } = params;
-  const typeAsk = requestedType ? `\n\n${describeTypeAsk(requestedType)}` : "";
+  const typeAsk = requestedType
+    ? `\n\n${describeTypeAsk(requestedType, count)}`
+    : "";
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
@@ -567,7 +598,7 @@ Here is the chapter's own material on this specific concept, to ground your ques
 ${conceptContent}
 """
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.${typeAsk}
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.${typeAsk}${describeCountReminder(count)}
 
 ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
