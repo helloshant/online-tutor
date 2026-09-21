@@ -376,6 +376,22 @@ export function TopicSummaryMessage({
         setExercisesError(body?.error ?? "Could not load exercises.");
         return;
       }
+      // An empty array is a legitimate response (see generate-for-concept's
+      // own comment: a stale picker, or a parse failure on this specific
+      // attempt) rather than an error -- but silently leaving `exercises`
+      // unchanged on `append` gave a student clicking "Generate more" NO
+      // feedback at all: the button just went back to normal with nothing
+      // added and nothing explained, indistinguishable from the click not
+      // having registered. Surfaced explicitly so a real "nothing new this
+      // time" reads as exactly that, not as a broken button.
+      if (body.exercises.length === 0) {
+        setExercisesError(
+          append
+            ? "Could not generate a new question this time -- try again."
+            : "Could not load exercises.",
+        );
+        return;
+      }
       setExercises((prev) =>
         append ? [...(prev ?? []), ...body.exercises] : body.exercises,
       );
@@ -851,6 +867,17 @@ export function TopicSummaryMessage({
                           </button>
                         )}
                       </div>
+                    )}
+                    {/* Repeats the top-of-panel error too (see the
+                        exercisesError block near the top of this branch)
+                        -- an error from THIS action needs to be visible
+                        right next to the button that triggered it, not
+                        only above a possibly long, already-scrolled-past
+                        exercise list. */}
+                    {exercisesError && (
+                      <p className="mt-2 text-xs text-red-600">
+                        {exercisesError}
+                      </p>
                     )}
                   </>
                 )}
