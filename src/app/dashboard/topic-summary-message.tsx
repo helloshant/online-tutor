@@ -843,6 +843,18 @@ export function TopicSummaryMessage({
                                 ? selectedSubtopic.name
                                 : undefined
                             }
+                            // Reported directly: for a concept pick,
+                            // PatternPicker's own patterns are mined at the
+                            // CHAPTER level, not the concept level -- there
+                            // was no subTopic to scope it to (see the prop
+                            // just above), so it showed every pattern for
+                            // the whole chapter regardless of which concept
+                            // was actually picked, stacked confusingly on
+                            // top of that concept's own, correctly-scoped
+                            // "More practice on this concept" + Type picker.
+                            suppressPatternPicker={
+                              selectedSubtopic?.kind === "concept"
+                            }
                             initialExercises={exercises}
                             emptyLabel="No exercises available for this topic yet."
                           />

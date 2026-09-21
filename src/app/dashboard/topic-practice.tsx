@@ -66,6 +66,7 @@ export function TopicPractice({
   topic,
   preferEnglish,
   subTopic,
+  suppressPatternPicker,
   initialExercises,
   emptyLabel,
 }: {
@@ -80,6 +81,18 @@ export function TopicPractice({
   // its own comment. Omitted for an ordinary chat reply, which has no
   // sub-topic concept at all.
   subTopic?: string;
+  // Set only when TopicSummaryMessage's own selected sub-topic is a
+  // CONCEPT pick (the WBBSE/ICSE content-chunk fallback, kind:"concept"
+  // -- see its own SubtopicOption comment), never for an ordinary chat
+  // reply. Reported directly: PatternPicker has no way to scope itself to
+  // one concept -- its own patterns are mined at the CHAPTER level, so it
+  // was showing every pattern for the whole chapter regardless of which
+  // concept a student had actually picked, unrelated to what they were
+  // practicing and stacked on top of that concept's own, correctly-scoped
+  // "More practice on this concept" + Type picker. Suppressing it
+  // entirely here, rather than trying to scope it to something it has no
+  // way to be scoped to.
+  suppressPatternPicker?: boolean;
   // Present only for TopicSummaryMessage's own "Relevant Exercises"
   // click-to-load batch -- omitted for an ordinary chat reply, which has
   // no such batch and starts with nothing but the pattern picker.
@@ -285,14 +298,18 @@ export function TopicPractice({
           lifetime today -- TopicSummaryMessage keeps the same
           TopicPractice mounted across a "different sub-topic" pick, so
           without this in the key the picker would keep showing patterns
-          for whichever sub-topic it first loaded. */}
-      <PatternPicker
-        key={`${topicId}:${preferEnglish}:${subTopic ?? ""}`}
-        topicId={topicId}
-        preferEnglish={preferEnglish}
-        subTopic={subTopic}
-        onExerciseGenerated={handleExerciseGenerated}
-      />
+          for whichever sub-topic it first loaded. Suppressed entirely for
+          a concept pick -- see suppressPatternPicker's own comment on why
+          scoping it to a concept isn't possible, only hiding it is. */}
+      {!suppressPatternPicker && (
+        <PatternPicker
+          key={`${topicId}:${preferEnglish}:${subTopic ?? ""}`}
+          topicId={topicId}
+          preferEnglish={preferEnglish}
+          subTopic={subTopic}
+          onExerciseGenerated={handleExerciseGenerated}
+        />
+      )}
     </div>
   );
 }
