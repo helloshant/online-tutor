@@ -15,7 +15,7 @@ import { WorkedSteps } from "@/components/worked-steps";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicSummaryMessage } from "./topic-summary-message";
-import { TopicPractice } from "./topic-practice";
+import { TopicPractice, type PracticeExerciseItem } from "./topic-practice";
 import {
   buildRevealUnits,
   buildRevealedText,
@@ -160,6 +160,19 @@ interface SubjectSummary {
 // persisted to chat_messages, so a reloaded conversation's older replies
 // don't get one retroactively -- an accepted scope trim, not an oversight
 // (see MessageBubble's own comment on this).
+// Trimmed down from PracticeExerciseItem -- only question/answer text ever
+// reaches the tutor as context (see performSend's exerciseContext below and
+// /api/chat/route.ts's parseExerciseContext), so there's no reason to carry
+// each exercise's id/type through the timeline too.
+type ExerciseContextItem = { question: string; answer: string };
+
+// exercises on either variant mirrors the summary field just above it --
+// filled in (and kept live) once TopicPractice reports its own currently-
+// shown list (see handleTopicExercisesChanged/handleMessageExercisesChanged
+// below), undefined until then. Gives a follow-up like "I don't understand
+// question 2" something real to resolve against, the same way summary
+// already does for "what does that mean?" right after a topic summary --
+// see performSend's own exerciseContext-building logic.
 type TimelineEntry =
   | {
       kind: "message";
@@ -167,6 +180,7 @@ type TimelineEntry =
       previewImageUrl?: string;
       revealOnMount?: boolean;
       matchedTopic?: { id: string; chapter: string; topic: string } | null;
+      exercises?: ExerciseContextItem[];
     }
   | {
       kind: "topic";
@@ -174,6 +188,7 @@ type TimelineEntry =
       topic: SyllabusTopic;
       preferEnglish: boolean;
       summary?: string;
+      exercises?: ExerciseContextItem[];
     };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/lib/studentScope.ts, which is the
@@ -247,6 +262,7 @@ const MessageBubble = memo(function MessageBubble({
   isRegenerating,
   onRevealProgress,
   preferEnglish,
+  onExercisesChanged,
 }: {
   entry: Extract<TimelineEntry, { kind: "message" }>;
   subjectId: string;
@@ -259,6 +275,17 @@ const MessageBubble = memo(function MessageBubble({
   // click time, unlike a topic bubble's summary text, which only re-
   // fetches for the toggle while it's still the last thing shown.
   preferEnglish: boolean;
+  // Stable (useCallback) at ChatPanel -- required by memo() here, same
+  // reasoning as onRevealProgress above. Takes the message id explicitly
+  // rather than being pre-bound per entry, since an inline
+  // `(exercises) => onExercisesChanged(entry.message.id, exercises)`
+  // wrapper built fresh below (passed to TopicPractice, which isn't
+  // memoized) is cheap, while a fresh top-level prop identity every
+  // ChatPanel render would defeat this component's own memo().
+  onExercisesChanged: (
+    messageId: string,
+    exercises: PracticeExerciseItem[],
+  ) => void;
 }) {
   const { message, previewImageUrl } = entry;
   return (
@@ -345,6 +372,9 @@ const MessageBubble = memo(function MessageBubble({
               chapter={entry.matchedTopic.chapter}
               topic={entry.matchedTopic.topic}
               preferEnglish={preferEnglish}
+              onExercisesChanged={(exercises) =>
+                onExercisesChanged(message.id, exercises)
+              }
             />
           </div>
         )}
@@ -601,6 +631,54 @@ export function ChatPanel({
     [scrollToBottom],
   );
 
+  // Keeps a topic bubble's own `exercises` field mirroring whatever
+  // TopicPractice currently has on screen underneath it -- see
+  // TimelineEntry's own comment and performSend's exerciseContext below.
+  // Trims each item down to question/answer only (ExerciseContextItem),
+  // dropping id/type, since nothing past this point needs them.
+  const handleTopicExercisesChanged = useCallback(
+    (entryId: string, exercises: PracticeExerciseItem[]) => {
+      setTimeline((prev) =>
+        prev.map((entry) =>
+          entry.kind === "topic" && entry.entryId === entryId
+            ? {
+                ...entry,
+                exercises: exercises.map((e) => ({
+                  question: e.question,
+                  answer: e.answer,
+                })),
+              }
+            : entry,
+        ),
+      );
+    },
+    [],
+  );
+
+  // Same as handleTopicExercisesChanged above, but for a "message"-kind
+  // entry's own matchedTopic-driven TopicPractice mount (see MessageBubble)
+  // -- kept as a separate handler since the two entry kinds are matched by
+  // different keys (entryId vs. message id) and TypeScript can't narrow a
+  // single combined signature across the TimelineEntry union cleanly here.
+  const handleMessageExercisesChanged = useCallback(
+    (messageId: string, exercises: PracticeExerciseItem[]) => {
+      setTimeline((prev) =>
+        prev.map((entry) =>
+          entry.kind === "message" && entry.message.id === messageId
+            ? {
+                ...entry,
+                exercises: exercises.map((e) => ({
+                  question: e.question,
+                  answer: e.answer,
+                })),
+              }
+            : entry,
+        ),
+      );
+    },
+    [],
+  );
+
   // Called by the form's Send button below. useCallback (rather than a
   // plain function) since it's read by other effects/callbacks elsewhere
   // in this component that depend on its identity staying stable.
@@ -632,6 +710,30 @@ export function ChatPanel({
               topic: lastEntry.topic.topic,
               summary: lastEntry.summary,
             }
+          : undefined;
+
+      // Same "still the last thing shown" criterion as topicContext above,
+      // built from whichever TopicPractice mount was last on screen (see
+      // handleTopicExercisesChanged/handleMessageExercisesChanged) -- lets
+      // a follow-up like "I don't understand question 2" resolve against
+      // real exercise text instead of nothing. Sent alongside topicContext,
+      // not instead of it: a topic bubble can show BOTH a summary and its
+      // own exercises, and a follow-up might reference either.
+      const exerciseContext =
+        lastEntry?.exercises && lastEntry.exercises.length > 0
+          ? lastEntry.kind === "topic"
+            ? {
+                chapter: lastEntry.topic.chapter,
+                topic: lastEntry.topic.topic,
+                exercises: lastEntry.exercises,
+              }
+            : lastEntry.matchedTopic
+              ? {
+                  chapter: lastEntry.matchedTopic.chapter,
+                  topic: lastEntry.matchedTopic.topic,
+                  exercises: lastEntry.exercises,
+                }
+              : undefined
           : undefined;
 
       const optimisticMessage: ChatMessage = {
@@ -676,6 +778,7 @@ export function ChatPanel({
             previewGradeId: gradeId ?? undefined,
             previewMedium: medium ?? undefined,
             topicContext,
+            exerciseContext,
           }),
         });
         const body = await res.json();
@@ -990,6 +1093,9 @@ export function ChatPanel({
                 onSummaryLoaded={(summary) =>
                   handleTopicSummaryLoaded(entry.entryId, summary)
                 }
+                onExercisesChanged={(exercises) =>
+                  handleTopicExercisesChanged(entry.entryId, exercises)
+                }
               />
             ) : (
               <MessageBubble
@@ -999,6 +1105,7 @@ export function ChatPanel({
                 isRegenerating={entry.message.id === regeneratingMessageId}
                 onRevealProgress={handleRevealProgress}
                 preferEnglish={effectivePreferEnglish}
+                onExercisesChanged={handleMessageExercisesChanged}
               />
             ),
           )}

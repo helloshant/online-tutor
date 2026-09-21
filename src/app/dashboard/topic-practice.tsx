@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MathText } from "@/components/math-text";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { PatternPicker, type PatternPickerExercise } from "./pattern-picker";
@@ -69,6 +69,7 @@ export function TopicPractice({
   suppressPatternPicker,
   initialExercises,
   emptyLabel,
+  onExercisesChanged,
 }: {
   topicId: string;
   subjectId: string;
@@ -103,6 +104,12 @@ export function TopicPractice({
   // starting with zero exercises is the normal, unremarkable state, not
   // a failure worth a message.
   emptyLabel?: string;
+  // Fired whenever the combined exercise list (below) changes -- lets a
+  // parent that also owns a chat follow-up mechanism (see chat-panel.tsx's
+  // topicContext/exerciseContext) keep a live copy of "what's currently
+  // shown here" without reaching into this component's own state. Omitted
+  // by callers that don't need it.
+  onExercisesChanged?: (exercises: PracticeExerciseItem[]) => void;
 }) {
   // Two genuinely separate sources, combined below rather than copied into
   // one state on mount: `initialExercises` is PARENT-owned (TopicSummary
@@ -129,6 +136,15 @@ export function TopicPractice({
       return true;
     });
   }, [initialExercises, pickerAdded]);
+
+  useEffect(() => {
+    onExercisesChanged?.(exercises);
+    // onExercisesChanged is expected to be stable (useCallback) at the
+    // caller -- omitting it here avoids re-firing on every parent render
+    // and matches the existing convention elsewhere in this codebase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exercises]);
+
   const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>(
     {},
   );

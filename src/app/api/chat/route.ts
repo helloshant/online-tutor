@@ -4,8 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { resolveStaffPreviewScope } from "@/lib/staffPreview";
-import { resolveContentMedium, resolveResponseLanguage } from "@/lib/studentScope";
-import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
+import {
+  resolveContentMedium,
+  resolveResponseLanguage,
+} from "@/lib/studentScope";
+import {
+  resolveMonthlyTokenLimit,
+  startOfCurrentMonthIso,
+} from "@/lib/usageLimits";
 import {
   getOrchestratedReply,
   type ChatOrchestrationRequest,
@@ -20,7 +26,12 @@ const MAX_MESSAGE_LENGTH = 2000;
 // Mirrors the orchestrator's own caps (services/orchestrator/src/server.ts)
 // so an oversized/unsupported image is rejected here, before it's even sent
 // over the wire.
-const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
 
 // Placeholder stored in chat_messages.content (NOT NULL) when a message is
@@ -28,13 +39,25 @@ const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
 // this keeps history legible without claiming to store the image.
 const IMAGE_ONLY_PLACEHOLDER = "[Image]";
 
-function parseImageField(raw: unknown): { image?: ImageAttachment; error?: string } {
+function parseImageField(raw: unknown): {
+  image?: ImageAttachment;
+  error?: string;
+} {
   if (raw === undefined || raw === null) return {};
   if (typeof raw !== "object") return { error: "image must be an object" };
 
-  const { mediaType, base64 } = raw as { mediaType?: unknown; base64?: unknown };
-  if (typeof mediaType !== "string" || !ALLOWED_IMAGE_TYPES.has(mediaType as ImageMediaType)) {
-    return { error: "image.mediaType must be one of image/jpeg, image/png, image/gif, image/webp" };
+  const { mediaType, base64 } = raw as {
+    mediaType?: unknown;
+    base64?: unknown;
+  };
+  if (
+    typeof mediaType !== "string" ||
+    !ALLOWED_IMAGE_TYPES.has(mediaType as ImageMediaType)
+  ) {
+    return {
+      error:
+        "image.mediaType must be one of image/jpeg, image/png, image/gif, image/webp",
+    };
   }
   if (typeof base64 !== "string" || !base64) {
     return { error: "image.base64 is required" };
@@ -64,9 +87,15 @@ const MAX_TOPIC_SUMMARY_LENGTH = 4000;
 // Soft-validated (a malformed/oversized value is just dropped, not a 400)
 // since this only ever enriches context a request would otherwise work
 // fine without.
-function parseTopicContext(raw: unknown): { chapter: string; topic: string; summary: string } | undefined {
+function parseTopicContext(
+  raw: unknown,
+): { chapter: string; topic: string; summary: string } | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
-  const { chapter, topic, summary } = raw as { chapter?: unknown; topic?: unknown; summary?: unknown };
+  const { chapter, topic, summary } = raw as {
+    chapter?: unknown;
+    topic?: unknown;
+    summary?: unknown;
+  };
   if (
     typeof chapter !== "string" ||
     typeof topic !== "string" ||
@@ -81,6 +110,67 @@ function parseTopicContext(raw: unknown): { chapter: string; topic: string; summ
     return undefined;
   }
   return { chapter, topic, summary };
+}
+
+const MAX_EXERCISE_COUNT = 20;
+const MAX_EXERCISE_FIELD_LENGTH = 2000;
+
+type ExerciseContext = {
+  chapter: string;
+  topic: string;
+  exercises: { question: string; answer: string }[];
+};
+
+// Same fix as parseTopicContext above, extended to the exercises shown
+// under a topic bubble/reply (see chat-panel.tsx's own exerciseContext-
+// building comment in performSend) -- a follow-up like "I don't understand
+// question 2" had nothing to resolve "question 2" against, since exercises
+// generated on demand are never persisted to chat_messages either. Soft-
+// validated the same way: a malformed/oversized value is dropped, never a
+// 400, since this only ever enriches context a request would otherwise
+// work fine without.
+function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { chapter, topic, exercises } = raw as {
+    chapter?: unknown;
+    topic?: unknown;
+    exercises?: unknown;
+  };
+  if (
+    typeof chapter !== "string" ||
+    typeof topic !== "string" ||
+    !chapter.trim() ||
+    !topic.trim() ||
+    chapter.length > MAX_TOPIC_LABEL_LENGTH ||
+    topic.length > MAX_TOPIC_LABEL_LENGTH ||
+    !Array.isArray(exercises) ||
+    exercises.length === 0 ||
+    exercises.length > MAX_EXERCISE_COUNT
+  ) {
+    return undefined;
+  }
+
+  const parsedExercises: { question: string; answer: string }[] = [];
+  for (const item of exercises) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const { question, answer } = item as {
+      question?: unknown;
+      answer?: unknown;
+    };
+    if (
+      typeof question !== "string" ||
+      typeof answer !== "string" ||
+      !question.trim() ||
+      !answer.trim() ||
+      question.length > MAX_EXERCISE_FIELD_LENGTH ||
+      answer.length > MAX_EXERCISE_FIELD_LENGTH
+    ) {
+      return undefined;
+    }
+    parsedExercises.push({ question, answer });
+  }
+
+  return { chapter, topic, exercises: parsedExercises };
 }
 
 // One row of the syllabus this request's topics were drawn from, WITH its
@@ -110,8 +200,11 @@ async function buildStudentOrchestrationRequest(
     preferEnglish: boolean;
     message: string;
     image?: ImageAttachment;
-  }
-): Promise<{ request: ChatOrchestrationRequest; topicsWithIds: SyllabusTopicWithId[] }> {
+  },
+): Promise<{
+  request: ChatOrchestrationRequest;
+  topicsWithIds: SyllabusTopicWithId[];
+}> {
   // board's own name is needed BEFORE contentMedium can be computed (see
   // resolveContentMedium's own comment -- English's own rule is
   // board-dependent), so this can't join the topics/grade fetch below in
@@ -142,8 +235,16 @@ async function buildStudentOrchestrationRequest(
   // reimplemented here as its own narrower English-only formula, the same
   // gap resolveContentMedium already had for Hindi/Bengali before it was
   // centralized.
-  const contentMedium: Medium = resolveContentMedium(params.subjectCode, board?.name ?? "", params.medium);
-  const responseLanguage: Medium = resolveResponseLanguage(params.subjectCode, params.medium, params.preferEnglish);
+  const contentMedium: Medium = resolveContentMedium(
+    params.subjectCode,
+    board?.name ?? "",
+    params.medium,
+  );
+  const responseLanguage: Medium = resolveResponseLanguage(
+    params.subjectCode,
+    params.medium,
+    params.preferEnglish,
+  );
 
   const { data: topics } = await supabase
     .from("syllabus_topics")
@@ -186,7 +287,10 @@ export async function POST(request: Request) {
     return await handleChatRequest(request);
   } catch (err) {
     console.error("Unexpected error in /api/chat:", err);
-    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Something went wrong. Please try again." },
+      { status: 500 },
+    );
   }
 }
 
@@ -217,12 +321,19 @@ async function handleChatRequest(request: Request) {
   // (this user, this subject/subscription, role='assistant') is verified
   // below rather than trusted from the client, same reasoning as every
   // other id a client passes into a mutating endpoint.
-  const regenerateMessageId = typeof body?.regenerateMessageId === "string" ? body.regenerateMessageId : "";
+  const regenerateMessageId =
+    typeof body?.regenerateMessageId === "string"
+      ? body.regenerateMessageId
+      : "";
   const { image, error: imageError } = parseImageField(body?.image);
   const topicContext = parseTopicContext(body?.topicContext);
+  const exerciseContext = parseExerciseContext(body?.exerciseContext);
 
   if (!subjectId) {
-    return NextResponse.json({ error: "subjectId is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "subjectId is required" },
+      { status: 400 },
+    );
   }
   if (imageError) {
     return NextResponse.json({ error: imageError }, { status: 400 });
@@ -230,13 +341,20 @@ async function handleChatRequest(request: Request) {
   // A screenshot/photo carries its own question -- an empty typed message is
   // only invalid when there's nothing else attached.
   if (!message && !image) {
-    return NextResponse.json({ error: "message or image is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "message or image is required" },
+      { status: 400 },
+    );
   }
   if (message.length > MAX_MESSAGE_LENGTH) {
     return NextResponse.json({ error: "Message is too long" }, { status: 400 });
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
 
   let subscriptionId: string | null = null;
   // Set only for a staff member actively previewing a specific
@@ -258,7 +376,11 @@ async function handleChatRequest(request: Request) {
 
   if (isStaff(profile?.role)) {
     // Staff never subscribe: only requirement is that the subject exists.
-    const { data: subject } = await supabase.from("subjects").select("name, code").eq("id", subjectId).single();
+    const { data: subject } = await supabase
+      .from("subjects")
+      .select("name, code")
+      .eq("id", subjectId)
+      .single();
     if (!subject) {
       return NextResponse.json({ error: "Unknown subject" }, { status: 404 });
     }
@@ -279,9 +401,8 @@ async function handleChatRequest(request: Request) {
       previewBoardId = preview.boardId;
       previewGradeId = preview.gradeId;
       previewMedium = preview.medium;
-      ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } = await buildStudentOrchestrationRequest(
-        supabase,
-        {
+      ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } =
+        await buildStudentOrchestrationRequest(supabase, {
           userId: user.id,
           subjectId,
           subjectName: subject.name,
@@ -292,8 +413,7 @@ async function handleChatRequest(request: Request) {
           preferEnglish,
           message,
           image,
-        }
-      ));
+        }));
     } else {
       orchestrationRequest = {
         mode: "staff",
@@ -314,7 +434,10 @@ async function handleChatRequest(request: Request) {
       .maybeSingle();
 
     if (!subscription) {
-      return NextResponse.json({ error: "No active subscription" }, { status: 403 });
+      return NextResponse.json(
+        { error: "No active subscription" },
+        { status: 403 },
+      );
     }
 
     const { data: subjectLink } = await supabase
@@ -327,16 +450,19 @@ async function handleChatRequest(request: Request) {
     if (!subjectLink) {
       return NextResponse.json(
         { error: "That subject is not part of your subscription" },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
-    const subjectRow = (subjectLink as unknown as { subjects: { name: string; code: string } | null }).subjects;
+    const subjectRow = (
+      subjectLink as unknown as {
+        subjects: { name: string; code: string } | null;
+      }
+    ).subjects;
 
     subscriptionId = subscription.id;
-    ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } = await buildStudentOrchestrationRequest(
-      supabase,
-      {
+    ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } =
+      await buildStudentOrchestrationRequest(supabase, {
         userId: user.id,
         subjectId,
         subjectName: subjectRow?.name ?? "the subject",
@@ -347,8 +473,7 @@ async function handleChatRequest(request: Request) {
         preferEnglish,
         message,
         image,
-      }
-    ));
+      }));
   }
 
   // Written with the service-role client: RLS deliberately allows no
@@ -379,20 +504,29 @@ async function handleChatRequest(request: Request) {
     const { unlimited, limit } = resolveMonthlyTokenLimit(override);
 
     if (!unlimited) {
-      const { data: usedTokens, error: usageError } = await admin.rpc("monthly_llm_tokens_for_user", {
-        p_user_id: user.id,
-        p_since: startOfCurrentMonthIso(),
-      });
+      const { data: usedTokens, error: usageError } = await admin.rpc(
+        "monthly_llm_tokens_for_user",
+        {
+          p_user_id: user.id,
+          p_since: startOfCurrentMonthIso(),
+        },
+      );
       if (usageError) {
         // Fail OPEN on a metering error (e.g. a transient DB issue):
         // blocking every student's ability to ask a question because the
         // usage lookup itself failed would be a far worse outage than
         // occasionally under-enforcing a cap for one request.
-        console.error("Failed to check monthly token usage, allowing the request:", usageError);
+        console.error(
+          "Failed to check monthly token usage, allowing the request:",
+          usageError,
+        );
       } else if ((usedTokens ?? 0) >= limit) {
         return NextResponse.json(
-          { error: "You've reached this month's AI tutoring usage limit. It resets at the start of next month." },
-          { status: 429 }
+          {
+            error:
+              "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
+          },
+          { status: 429 },
         );
       }
     }
@@ -432,11 +566,17 @@ async function handleChatRequest(request: Request) {
         .eq("grade_id", previewGradeId as string)
         .eq("medium", previewMedium as Medium);
     } else {
-      targetQuery = targetQuery.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+      targetQuery = targetQuery
+        .is("subscription_id", null)
+        .is("board_id", null)
+        .is("grade_id", null);
     }
     const { data: target } = await targetQuery.maybeSingle();
     if (!target) {
-      return NextResponse.json({ error: "That message can't be regenerated." }, { status: 404 });
+      return NextResponse.json(
+        { error: "That message can't be regenerated." },
+        { status: 404 },
+      );
     }
     regenerateCutoff = target.created_at;
   }
@@ -455,10 +595,16 @@ async function handleChatRequest(request: Request) {
       .eq("grade_id", previewGradeId as string)
       .eq("medium", previewMedium as Medium);
   } else {
-    historyQuery = historyQuery.is("subscription_id", null).is("board_id", null).is("grade_id", null);
+    historyQuery = historyQuery
+      .is("subscription_id", null)
+      .is("board_id", null)
+      .is("grade_id", null);
   }
-  if (regenerateCutoff) historyQuery = historyQuery.lt("created_at", regenerateCutoff);
-  const { data: history } = await historyQuery.order("created_at", { ascending: false }).limit(HISTORY_LIMIT);
+  if (regenerateCutoff)
+    historyQuery = historyQuery.lt("created_at", regenerateCutoff);
+  const { data: history } = await historyQuery
+    .order("created_at", { ascending: false })
+    .limit(HISTORY_LIMIT);
 
   orchestrationRequest.history = (history ?? [])
     .slice()
@@ -480,19 +626,51 @@ async function handleChatRequest(request: Request) {
         role: "user",
         content: `Please give me a summary of the topic "${topicContext.topic}" from the chapter "${topicContext.chapter}".`,
       },
-      { role: "assistant", content: topicContext.summary }
+      { role: "assistant", content: topicContext.summary },
+    );
+  }
+
+  // Same splice, for the exercises currently shown alongside/under that
+  // topic (see parseExerciseContext's own comment) -- pushed AFTER
+  // topicContext above so it lands as the MORE RECENT prior turn, matching
+  // the real chronological order a student experiences: summary shown
+  // first, exercises attempted after, this follow-up now. Bundled into one
+  // synthetic exchange (a numbered list of every question, then a matching
+  // numbered list of every answer) rather than one exchange per exercise --
+  // keeps a student's "question 2" reference resolvable without ballooning
+  // history by up to MAX_EXERCISE_COUNT extra turns.
+  if (exerciseContext && orchestrationRequest.mode === "student") {
+    const questionsList = exerciseContext.exercises
+      .map((e, i) => `${i + 1}. ${e.question}`)
+      .join("\n");
+    const answersList = exerciseContext.exercises
+      .map((e, i) => `${i + 1}. ${e.answer}`)
+      .join("\n");
+    orchestrationRequest.history.push(
+      {
+        role: "user",
+        content: `Please give me some practice exercises for the topic "${exerciseContext.topic}" from the chapter "${exerciseContext.chapter}".`,
+      },
+      {
+        role: "assistant",
+        content: `Here are the questions:\n${questionsList}\n\nHere are the corresponding answers:\n${answersList}`,
+      },
     );
   }
 
   let assistantText: string;
   let matchedTopic: { chapter: string; topic: string } | null | undefined;
   try {
-    ({ reply: assistantText, matchedTopic } = await getOrchestratedReply(orchestrationRequest));
+    ({ reply: assistantText, matchedTopic } =
+      await getOrchestratedReply(orchestrationRequest));
   } catch (err) {
     console.error("Orchestrator chat request failed:", err);
     return NextResponse.json(
-      { error: "The tutor is temporarily unavailable. Please try again shortly." },
-      { status: 502 }
+      {
+        error:
+          "The tutor is temporarily unavailable. Please try again shortly.",
+      },
+      { status: 502 },
     );
   }
 
@@ -511,7 +689,11 @@ async function handleChatRequest(request: Request) {
   // FeedbackButtons), and this route already has them right here.
   const resolvedMatchedTopic =
     matchedTopic != null
-      ? (syllabusTopicsWithIds.find((t) => t.chapter === matchedTopic!.chapter && t.topic === matchedTopic!.topic) ?? null)
+      ? (syllabusTopicsWithIds.find(
+          (t) =>
+            t.chapter === matchedTopic!.chapter &&
+            t.topic === matchedTopic!.topic,
+        ) ?? null)
       : null;
 
   if (regenerateMessageId) {
@@ -528,11 +710,20 @@ async function handleChatRequest(request: Request) {
       .single();
 
     if (updateError || !updated) {
-      console.error("Failed to persist regenerated chat_messages row:", updateError);
-      return NextResponse.json({ error: "Could not save the conversation" }, { status: 500 });
+      console.error(
+        "Failed to persist regenerated chat_messages row:",
+        updateError,
+      );
+      return NextResponse.json(
+        { error: "Could not save the conversation" },
+        { status: 500 },
+      );
     }
 
-    return NextResponse.json({ assistantMessage: updated as ChatMessage, matchedTopic: resolvedMatchedTopic });
+    return NextResponse.json({
+      assistantMessage: updated as ChatMessage,
+      matchedTopic: resolvedMatchedTopic,
+    });
   }
 
   // Null for a real student (subscription_id already identifies their
@@ -575,7 +766,10 @@ async function handleChatRequest(request: Request) {
 
   if (insertError || !inserted) {
     console.error("Failed to persist chat_messages:", insertError);
-    return NextResponse.json({ error: "Could not save the conversation" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not save the conversation" },
+      { status: 500 },
+    );
   }
 
   const rows = inserted as ChatMessage[];

@@ -72,6 +72,7 @@ export function TopicSummaryMessage({
   topic,
   preferEnglish,
   onSummaryLoaded,
+  onExercisesChanged,
 }: {
   topic: SyllabusTopic;
   preferEnglish: boolean;
@@ -92,6 +93,15 @@ export function TopicSummaryMessage({
   // shown (see chat-panel.tsx's handleTopicSummaryLoaded and
   // /api/chat/route.ts's parseTopicContext).
   onSummaryLoaded?: (summary: string | null) => void;
+  // Passed straight through to TopicPractice's own prop of the same name
+  // below (see its comment) -- lets ChatPanel keep a live copy of this
+  // bubble's currently-shown exercises for a chat follow-up's own context
+  // (see chat-panel.tsx's handleTopicExercisesChanged and
+  // /api/chat/route.ts's parseExerciseContext). Sourced from TopicPractice
+  // rather than this component's own `exercises` state above: only
+  // TopicPractice sees the FULL combined list (this component's initial
+  // batch plus whatever PatternPicker adds on demand underneath it).
+  onExercisesChanged?: (exercises: PracticeExerciseItem[]) => void;
 }) {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -857,6 +867,7 @@ export function TopicSummaryMessage({
                             }
                             initialExercises={exercises}
                             emptyLabel="No exercises available for this topic yet."
+                            onExercisesChanged={onExercisesChanged}
                           />
                         )}
                       </>
