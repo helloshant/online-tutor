@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MathText } from "@/components/math-text";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { PatternPicker, type PatternPickerExercise } from "./pattern-picker";
@@ -68,7 +68,31 @@ export function TopicPractice({
   // a failure worth a message.
   emptyLabel?: string;
 }) {
-  const [exercises, setExercises] = useState<PracticeExerciseItem[]>(initialExercises ?? []);
+  // Two genuinely separate sources, combined below rather than copied into
+  // one state on mount: `initialExercises` is PARENT-owned (TopicSummary
+  // Message's own click-to-load batch, and -- critically -- any LATER
+  // growth of it, like "Generate more exercises" appending a fresh batch
+  // to that same parent state); `pickerAdded` is THIS component's own,
+  // for whatever PatternPicker generates on demand below, which the
+  // parent never learns about. A single `useState(initialExercises ?? [])`
+  // used to copy the prop in only at mount, so a later parent-side append
+  // was silently invisible here -- confirmed directly: the backend was
+  // genuinely generating and storing fresh questions on each "Generate
+  // more" click, but this component kept rendering its own stale mount-
+  // time snapshot instead of ever looking at the prop again. Deriving the
+  // shown list fresh every render, from both sources, means either one
+  // growing is picked up automatically, with no effect and no risk of the
+  // two ever drifting out of sync.
+  const [pickerAdded, setPickerAdded] = useState<PracticeExerciseItem[]>([]);
+  const exercises = useMemo(() => {
+    const combined = [...(initialExercises ?? []), ...pickerAdded];
+    const seen = new Set<string>();
+    return combined.filter((e) => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [initialExercises, pickerAdded]);
   const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>({});
 
   function getGradeState(exerciseId: string): GradeState {
@@ -108,7 +132,7 @@ export function TopicPractice({
   }
 
   function handleExerciseGenerated(exercise: PatternPickerExercise) {
-    setExercises((prev) => [...prev, exercise]);
+    setPickerAdded((prev) => [...prev, exercise]);
   }
 
   return (
