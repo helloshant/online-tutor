@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateConceptExercises } from "@/lib/orchestratorClient";
+import {
+  generateConceptExercises,
+  type ExerciseType,
+} from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
+
+const VALID_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
 
 // On-demand generation scoped to ONE concept a student picked from the
 // sub-topic pill row (see /api/topics/[id]/exercises/subtopics and
@@ -11,12 +21,21 @@ import type { Medium } from "@/lib/supabase/types";
 // /api/topics/[id]/exercises?subTopic=... for chapters with real archetype
 // mining. Same "resolve topicId -> board/grade/subject, then call the
 // orchestrator" shape as /api/topics/[id]/exercises/route.ts.
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   try {
     return await handleGet(request, await params);
   } catch (err) {
-    console.error("Unexpected error in GET /api/topics/[id]/exercises/generate-for-concept:", err);
-    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+    console.error(
+      "Unexpected error in GET /api/topics/[id]/exercises/generate-for-concept:",
+      err,
+    );
+    return NextResponse.json(
+      { error: "Something went wrong. Please try again." },
+      { status: 500 },
+    );
   }
 }
 
@@ -34,8 +53,17 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
   const preferEnglish = url.searchParams.get("preferEnglish") === "true";
   const conceptId = url.searchParams.get("conceptId");
   if (!conceptId) {
-    return NextResponse.json({ error: "conceptId is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "conceptId is required" },
+      { status: 400 },
+    );
   }
+  // Invalid/absent just means "Any type" -- never a 400, same posture as
+  // the generate route's own requestedDifficulty.
+  const requestedTypeParam = url.searchParams.get("requestedType");
+  const requestedType = VALID_TYPES.includes(requestedTypeParam as ExerciseType)
+    ? (requestedTypeParam as ExerciseType)
+    : undefined;
 
   const { data: topicRow } = await supabase
     .from("syllabus_topics")
@@ -47,16 +75,35 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }, { data: subscription }] = await Promise.all([
+  const [
+    { data: board },
+    { data: grade },
+    { data: subject },
+    { data: subscription },
+  ] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
-    supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
-    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
+    supabase
+      .from("subjects")
+      .select("name, code")
+      .eq("id", topicRow.subject_id)
+      .single(),
+    supabase
+      .from("subscriptions")
+      .select("medium")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .maybeSingle(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;
-  const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
-  const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
+  const nativeMedium: Medium =
+    (subscription?.medium as Medium | undefined) ?? topicMedium;
+  const responseLanguage: Medium = resolveResponseLanguage(
+    subject?.code ?? "",
+    nativeMedium,
+    preferEnglish,
+  );
 
   try {
     const { exercises } = await generateConceptExercises({
@@ -73,10 +120,14 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
       chapter: topicRow.chapter,
       topic: topicRow.topic,
       conceptId,
+      requestedType,
     });
     return NextResponse.json({ exercises });
   } catch (err) {
     console.error("Concept exercises request failed:", err);
-    return NextResponse.json({ error: "Could not load exercises. Please try again shortly." }, { status: 502 });
+    return NextResponse.json(
+      { error: "Could not load exercises. Please try again shortly." },
+      { status: 502 },
+    );
   }
 }

@@ -2,13 +2,26 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
-import { generateTopicExercise, type DifficultyLevel } from "@/lib/orchestratorClient";
+import {
+  resolveMonthlyTokenLimit,
+  startOfCurrentMonthIso,
+} from "@/lib/usageLimits";
+import {
+  generateTopicExercise,
+  type DifficultyLevel,
+  type ExerciseType,
+} from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
 
 const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
+const VALID_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
 
 // On-demand generation for ONE specific pattern (Tier C's "Generate" on a
 // picked pattern, or "Generate another" with no pattern specified) --
@@ -16,12 +29,21 @@ const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 // topic-open), this can be clicked repeatedly, so it's the one exercise-
 // generation endpoint that actually needs the same monthly-token-usage
 // gate /api/chat already enforces -- see the usage-quota block below.
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   try {
     return await handlePost(request, await params);
   } catch (err) {
-    console.error("Unexpected error in POST /api/topics/[id]/exercises/generate:", err);
-    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+    console.error(
+      "Unexpected error in POST /api/topics/[id]/exercises/generate:",
+      err,
+    );
+    return NextResponse.json(
+      { error: "Something went wrong. Please try again." },
+      { status: 500 },
+    );
   }
 }
 
@@ -36,21 +58,35 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
   }
 
   const body = await request.json().catch(() => null);
-  const archetypeId = typeof body?.archetypeId === "string" ? body.archetypeId : undefined;
-  const archetypeRunId = typeof body?.archetypeRunId === "string" ? body.archetypeRunId : undefined;
+  const archetypeId =
+    typeof body?.archetypeId === "string" ? body.archetypeId : undefined;
+  const archetypeRunId =
+    typeof body?.archetypeRunId === "string" ? body.archetypeRunId : undefined;
   const preferEnglish = body?.preferEnglish === true;
   // Set only when this "Generate"/"Generate another" click happened
   // underneath an already-selected sub-topic pill -- see
   // GenerateTopicExerciseRequest.subTopic's own comment for why this has
   // to be threaded through here too, not just the initial exercises list.
-  const subTopic = typeof body?.subTopic === "string" ? body.subTopic : undefined;
+  const subTopic =
+    typeof body?.subTopic === "string" ? body.subTopic : undefined;
   // Invalid/absent just means "Any difficulty" -- never a 400, this is
   // the one optional refinement on an otherwise already-valid request.
-  const requestedDifficulty = VALID_DIFFICULTIES.includes(body?.requestedDifficulty)
+  const requestedDifficulty = VALID_DIFFICULTIES.includes(
+    body?.requestedDifficulty,
+  )
     ? (body.requestedDifficulty as DifficultyLevel)
     : undefined;
+  // Invalid/absent just means "Any type" -- same posture as
+  // requestedDifficulty above.
+  const requestedType = VALID_TYPES.includes(body?.requestedType)
+    ? (body.requestedType as ExerciseType)
+    : undefined;
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
 
   // Usage-based pricing enforcement -- staff stay unmetered (same posture
   // every other route with a quota check already gives them), a real
@@ -68,19 +104,28 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     const { unlimited, limit } = resolveMonthlyTokenLimit(override);
 
     if (!unlimited) {
-      const { data: usedTokens, error: usageError } = await admin.rpc("monthly_llm_tokens_for_user", {
-        p_user_id: user.id,
-        p_since: startOfCurrentMonthIso(),
-      });
+      const { data: usedTokens, error: usageError } = await admin.rpc(
+        "monthly_llm_tokens_for_user",
+        {
+          p_user_id: user.id,
+          p_since: startOfCurrentMonthIso(),
+        },
+      );
       if (usageError) {
         // Fail OPEN on a metering error, same reasoning as /api/chat --
         // blocking every request because the usage lookup itself failed
         // would be a worse outage than occasionally under-enforcing a cap.
-        console.error("Failed to check monthly token usage, allowing the request:", usageError);
+        console.error(
+          "Failed to check monthly token usage, allowing the request:",
+          usageError,
+        );
       } else if ((usedTokens ?? 0) >= limit) {
         return NextResponse.json(
-          { error: "You've reached this month's AI tutoring usage limit. It resets at the start of next month." },
-          { status: 429 }
+          {
+            error:
+              "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
+          },
+          { status: 429 },
         );
       }
     }
@@ -96,19 +141,38 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }, { data: subscription }] = await Promise.all([
+  const [
+    { data: board },
+    { data: grade },
+    { data: subject },
+    { data: subscription },
+  ] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
-    supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
-    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
+    supabase
+      .from("subjects")
+      .select("name, code")
+      .eq("id", topicRow.subject_id)
+      .single(),
+    supabase
+      .from("subscriptions")
+      .select("medium")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .maybeSingle(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;
-  const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
+  const nativeMedium: Medium =
+    (subscription?.medium as Medium | undefined) ?? topicMedium;
 
   // Same responseLanguage resolution as GET /api/topics/[id]/exercises --
   // see that route's own comment.
-  const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
+  const responseLanguage: Medium = resolveResponseLanguage(
+    subject?.code ?? "",
+    nativeMedium,
+    preferEnglish,
+  );
 
   try {
     const { exercise } = await generateTopicExercise({
@@ -131,10 +195,17 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       archetypeId,
       archetypeRunId,
       requestedDifficulty,
+      requestedType,
     });
     return NextResponse.json({ exercise });
   } catch (err) {
     console.error("On-demand topic exercise generation request failed:", err);
-    return NextResponse.json({ error: "Could not generate a question right now. Please try again shortly." }, { status: 502 });
+    return NextResponse.json(
+      {
+        error:
+          "Could not generate a question right now. Please try again shortly.",
+      },
+      { status: 502 },
+    );
   }
 }

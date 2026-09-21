@@ -1,3 +1,5 @@
+import type { ExerciseType } from "./types.js";
+
 // Parses the LLM's generated exercises (see EXERCISE_FORMAT_INSTRUCTIONS /
 // EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN in prompts.ts) into
 // question/solution pairs: exercises are separated by a line of three or
@@ -19,7 +21,33 @@ const EXERCISE_BLOCK_PATTERN = /^Q:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*)$/im;
 // keeps the original, already-correct greedy Q/A pattern untouched.
 const PATTERN_LINE = /\n^Pattern:\s*(\d+)\s*$/im;
 
-export type ParsedExercise = { question: string; answer: string; patternIndex?: number };
+// Present on EVERY exercise now (see EXERCISE_FORMAT_INSTRUCTIONS' own
+// comment) -- always the LAST line of the block, after Pattern: when both
+// are present, so it's stripped first (see the stripping order below).
+// Same "strip before the greedy Q/A match runs" reasoning as PATTERN_LINE.
+const TYPE_LINE = /\n^Type:\s*(\S+)\s*$/im;
+const VALID_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
+
+// Case-insensitive match against the four real values -- anything else
+// (the model drifting from the requested label, e.g. "Multiple Choice"
+// instead of "MCQ") is simply left unclassified rather than guessed at;
+// an exercise with no recognizable type is never dropped over this, only
+// its own type badge stays absent.
+function normalizeType(raw: string): ExerciseType | undefined {
+  return VALID_TYPES.find((t) => t.toLowerCase() === raw.toLowerCase());
+}
+
+export type ParsedExercise = {
+  question: string;
+  answer: string;
+  patternIndex?: number;
+  type?: ExerciseType;
+};
 
 export function parseGeneratedExercises(text: string): ParsedExercise[] {
   // Normalize CRLF/CR up front -- see the identical fix and reasoning in
@@ -33,6 +61,17 @@ export function parseGeneratedExercises(text: string): ParsedExercise[] {
     let block = rawBlock.trim();
     if (!block) continue;
 
+    // Type: is stripped FIRST -- it's always the trailing-most special
+    // line in the format (after Pattern: when both are present), so
+    // removing it first leaves Pattern: as the new trailing-most line for
+    // the strip below, regardless of which combination this block has.
+    let type: ExerciseType | undefined;
+    const typeMatch = block.match(TYPE_LINE);
+    if (typeMatch) {
+      type = normalizeType(typeMatch[1]);
+      block = block.slice(0, typeMatch.index).trim();
+    }
+
     let patternIndex: number | undefined;
     const patternMatch = block.match(PATTERN_LINE);
     if (patternMatch) {
@@ -45,9 +84,14 @@ export function parseGeneratedExercises(text: string): ParsedExercise[] {
     const question = match[1].trim();
     const answer = match[2].trim();
     if (!question || !answer) continue;
-    rows.push(
-      patternIndex !== undefined && Number.isFinite(patternIndex) ? { question, answer, patternIndex } : { question, answer }
-    );
+    rows.push({
+      question,
+      answer,
+      ...(patternIndex !== undefined && Number.isFinite(patternIndex)
+        ? { patternIndex }
+        : {}),
+      ...(type ? { type } : {}),
+    });
   }
 
   return rows;

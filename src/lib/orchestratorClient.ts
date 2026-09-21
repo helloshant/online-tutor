@@ -7,7 +7,11 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 // Mirrors the orchestrator's ImageMediaType/ImageAttachment exactly (see
 // services/orchestrator/src/types.ts) -- kept in sync by hand, same as
 // every other request/response shape duplicated in this file.
-export type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+export type ImageMediaType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/webp";
 export type ImageAttachment = { mediaType: ImageMediaType; base64: string };
 
 // Everything the orchestration service needs to build a system prompt and
@@ -68,8 +72,12 @@ function getOrchestratorUrl(): string {
 }
 
 export async function getOrchestratedReply(
-  request: ChatOrchestrationRequest
-): Promise<{ reply: string; source?: ChatOrchestrationSource; matchedTopic?: { chapter: string; topic: string } | null }> {
+  request: ChatOrchestrationRequest,
+): Promise<{
+  reply: string;
+  source?: ChatOrchestrationSource;
+  matchedTopic?: { chapter: string; topic: string } | null;
+}> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chat`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -85,12 +93,18 @@ export async function getOrchestratedReply(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || typeof body.reply !== "string") {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
-  return { reply: body.reply, source: body.source, matchedTopic: body.matchedTopic };
+  return {
+    reply: body.reply,
+    source: body.source,
+    matchedTopic: body.matchedTopic,
+  };
 }
 
 export type TopicSummaryRequest = {
@@ -107,7 +121,9 @@ export type TopicSummaryRequest = {
   topic: string;
 };
 
-export async function getTopicSummary(request: TopicSummaryRequest): Promise<{ summary: string }> {
+export async function getTopicSummary(
+  request: TopicSummaryRequest,
+): Promise<{ summary: string }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-summary`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -123,7 +139,9 @@ export async function getTopicSummary(request: TopicSummaryRequest): Promise<{ s
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || typeof body.summary !== "string") {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -164,10 +182,14 @@ export type ExerciseItem = {
   answer: string;
   archetypeRunId?: string | null;
   archetypeId?: string | null;
+  // See the orchestrator's own ExerciseItem.type comment -- generation-
+  // time-only metadata, null for anything served from the answer bank
+  // rather than just-generated.
+  type?: ExerciseType | null;
 };
 
 export async function getTopicExercises(
-  request: TopicExercisesRequest
+  request: TopicExercisesRequest,
 ): Promise<{ exercises: ExerciseItem[] }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -184,7 +206,9 @@ export async function getTopicExercises(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || !Array.isArray(body.exercises)) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -193,6 +217,11 @@ export async function getTopicExercises(
 }
 
 export type DifficultyLevel = "Easy" | "Medium" | "Hard";
+
+// See the orchestrator's own ExerciseType comment -- a small, curated,
+// app-facing set a student can actually request, distinct from the
+// archetype-miner's much larger internal QuestionFormat taxonomy.
+export type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
 
 // One curated, real exam pattern this exact chapter/topic has mined
 // archetypes for -- powers the on-demand "practice a specific pattern"
@@ -245,7 +274,9 @@ export type TopicSubtopicsRequest = {
   topic: string;
 };
 
-export async function getTopicSubtopics(request: TopicSubtopicsRequest): Promise<{ subtopics: TopicSubtopic[] }> {
+export async function getTopicSubtopics(
+  request: TopicSubtopicsRequest,
+): Promise<{ subtopics: TopicSubtopic[] }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/subtopics`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -261,7 +292,9 @@ export async function getTopicSubtopics(request: TopicSubtopicsRequest): Promise
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || !Array.isArray(body.subtopics)) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -278,7 +311,9 @@ export type TopicConcept = {
   term: string;
 };
 
-export async function getTopicConcepts(topicId: string): Promise<{ concepts: TopicConcept[] }> {
+export async function getTopicConcepts(
+  topicId: string,
+): Promise<{ concepts: TopicConcept[] }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/concepts`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -294,7 +329,9 @@ export async function getTopicConcepts(topicId: string): Promise<{ concepts: Top
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || !Array.isArray(body.concepts)) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -321,10 +358,13 @@ export type GenerateConceptExercisesRequest = {
   chapter: string;
   topic: string;
   conceptId: string;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment.
+  requestedType?: ExerciseType;
 };
 
 export async function generateConceptExercises(
-  request: GenerateConceptExercisesRequest
+  request: GenerateConceptExercisesRequest,
 ): Promise<{ exercises: ExerciseItem[] }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/generate-for-concept`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -341,7 +381,9 @@ export async function generateConceptExercises(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || !Array.isArray(body.exercises)) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -360,7 +402,9 @@ export type TopicPatternsRequest = {
   subTopic?: string;
 };
 
-export async function getTopicPatterns(request: TopicPatternsRequest): Promise<{ patterns: TopicPattern[] }> {
+export async function getTopicPatterns(
+  request: TopicPatternsRequest,
+): Promise<{ patterns: TopicPattern[] }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/patterns`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -376,7 +420,9 @@ export async function getTopicPatterns(request: TopicPatternsRequest): Promise<{
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || !Array.isArray(body.patterns)) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -394,10 +440,13 @@ export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
   // Tier D: set only when the student picked a specific level rather than
   // "Any difficulty."
   requestedDifficulty?: DifficultyLevel;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment.
+  requestedType?: ExerciseType;
 };
 
 export async function generateTopicExercise(
-  request: GenerateTopicExerciseRequest
+  request: GenerateTopicExerciseRequest,
 ): Promise<{ exercise: ExerciseItem | null }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/generate`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -414,7 +463,9 @@ export async function generateTopicExercise(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (!body || (body.exercise !== null && typeof body.exercise !== "object")) {
     throw new Error("Orchestrator returned an unexpected response shape");
@@ -442,7 +493,9 @@ export type GradeTopicExerciseResponse = {
   answer: string;
 };
 
-export async function gradeTopicExercise(request: GradeTopicExerciseRequest): Promise<GradeTopicExerciseResponse> {
+export async function gradeTopicExercise(
+  request: GradeTopicExerciseRequest,
+): Promise<GradeTopicExerciseResponse> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/grade`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -458,9 +511,16 @@ export async function gradeTopicExercise(request: GradeTopicExerciseRequest): Pr
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
-  if (!body || typeof body.verdict !== "string" || typeof body.feedback !== "string" || typeof body.answer !== "string") {
+  if (
+    !body ||
+    typeof body.verdict !== "string" ||
+    typeof body.feedback !== "string" ||
+    typeof body.answer !== "string"
+  ) {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
   return body as GradeTopicExerciseResponse;
@@ -485,7 +545,7 @@ export type ChapterDocumentEmbedRequest = {
 // saved but invisible to retrieval, which the admin action surfaces back to
 // whoever just saved it rather than silently swallowing.
 export async function embedChapterDocument(
-  request: ChapterDocumentEmbedRequest
+  request: ChapterDocumentEmbedRequest,
 ): Promise<{ chunkCount: number; embedded: boolean }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/embed`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -502,9 +562,15 @@ export async function embedChapterDocument(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
-  if (!body || typeof body.chunkCount !== "number" || typeof body.embedded !== "boolean") {
+  if (
+    !body ||
+    typeof body.chunkCount !== "number" ||
+    typeof body.embedded !== "boolean"
+  ) {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
   return { chunkCount: body.chunkCount, embedded: body.embedded };
@@ -526,7 +592,7 @@ export type ChapterDocumentImportChunksRequest = {
 // import-chunks-form.tsx), so the orchestrator embeds them as given rather
 // than re-splitting with its own naive chunker.
 export async function importChapterChunks(
-  request: ChapterDocumentImportChunksRequest
+  request: ChapterDocumentImportChunksRequest,
 ): Promise<{ chunkCount: number; embedded: boolean }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/import-chunks`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -543,9 +609,15 @@ export async function importChapterChunks(
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
-  if (!body || typeof body.chunkCount !== "number" || typeof body.embedded !== "boolean") {
+  if (
+    !body ||
+    typeof body.chunkCount !== "number" ||
+    typeof body.embedded !== "boolean"
+  ) {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
   return { chunkCount: body.chunkCount, embedded: body.embedded };
@@ -572,7 +644,9 @@ export type ChapterDocumentEmphasisResponse = {
 // change on its own. Not best-effort like invalidateCachedAnswer below:
 // the caller decides what to do with a failure (surface it, leave the
 // document as it was), same reasoning as embedChapterDocument above.
-export async function addChapterDocumentEmphasis(content: string): Promise<ChapterDocumentEmphasisResponse> {
+export async function addChapterDocumentEmphasis(
+  content: string,
+): Promise<ChapterDocumentEmphasisResponse> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chapter-documents/add-emphasis`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -588,7 +662,9 @@ export async function addChapterDocumentEmphasis(content: string): Promise<Chapt
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(body?.error ?? `Orchestrator request failed with status ${res.status}`);
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
   }
   if (
     !body ||
@@ -598,7 +674,11 @@ export async function addChapterDocumentEmphasis(content: string): Promise<Chapt
   ) {
     throw new Error("Orchestrator returned an unexpected response shape");
   }
-  return { content: body.content, verifiedChunks: body.verifiedChunks, failedChunks: body.failedChunks };
+  return {
+    content: body.content,
+    verifiedChunks: body.verifiedChunks,
+    failedChunks: body.failedChunks,
+  };
 }
 
 export type CacheInvalidationScope = {
@@ -615,7 +695,9 @@ export type CacheInvalidationScope = {
 // TTL runs out. Never throws -- the Postgres update/delete is the source of
 // truth and must still succeed even if the orchestrator or Redis is
 // unreachable; worst case is a stale cache entry for up to the TTL.
-export async function invalidateCachedAnswer(scope: CacheInvalidationScope): Promise<void> {
+export async function invalidateCachedAnswer(
+  scope: CacheInvalidationScope,
+): Promise<void> {
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
   try {
     const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/cache/invalidate`;
@@ -628,7 +710,9 @@ export async function invalidateCachedAnswer(scope: CacheInvalidationScope): Pro
       body: JSON.stringify(scope),
     });
     if (!res.ok) {
-      console.error(`Cache invalidation request failed with status ${res.status}`);
+      console.error(
+        `Cache invalidation request failed with status ${res.status}`,
+      );
     }
   } catch (err) {
     console.error("Cache invalidation request failed:", err);
@@ -638,7 +722,10 @@ export async function invalidateCachedAnswer(scope: CacheInvalidationScope): Pro
 // Same best-effort reasoning as invalidateCachedAnswer above, for the
 // topic-summary cache namespace instead -- called after an admin rejects or
 // deletes a topic summary in /admin/topic-summaries.
-export async function invalidateCachedTopicSummary(topicId: string, language: Medium): Promise<void> {
+export async function invalidateCachedTopicSummary(
+  topicId: string,
+  language: Medium,
+): Promise<void> {
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
   try {
     const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-summary-cache/invalidate`;
@@ -651,7 +738,9 @@ export async function invalidateCachedTopicSummary(topicId: string, language: Me
       body: JSON.stringify({ topicId, language }),
     });
     if (!res.ok) {
-      console.error(`Topic-summary cache invalidation request failed with status ${res.status}`);
+      console.error(
+        `Topic-summary cache invalidation request failed with status ${res.status}`,
+      );
     }
   } catch (err) {
     console.error("Topic-summary cache invalidation request failed:", err);

@@ -19,6 +19,25 @@ import type { SyllabusTopic } from "@/lib/supabase/types";
 // branch below.
 type SearchExercise = { question: string; answer: string };
 
+// Same local-mirror convention as SubtopicOption below -- see the
+// orchestrator's own ExerciseType comment for the full reasoning. Powers
+// the type picker shown next to the concept path's own "Generate more
+// exercises" action (a real mined sub-topic gets an equivalent through
+// PatternPicker's own type picker instead, see pattern-picker.tsx).
+type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
+const EXERCISE_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
+const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
+  MCQ: "MCQ",
+  short_answer: "Short answer",
+  long_answer: "Long answer",
+  numerical: "Numerical",
+};
+
 // Mirrors /api/topics/[id]/exercises/subtopics' own SubtopicOption shape --
 // same "define a local mirror type on the client side" convention
 // pattern-picker.tsx's own Pattern type already follows, rather than
@@ -134,6 +153,17 @@ export function TopicSummaryMessage({
   // only checks `exercises === null` and would never see this since
   // exercises is already populated by the time this action is reachable.
   const [loadingMoreExercises, setLoadingMoreExercises] = useState(false);
+  // Which type the concept path's own "Generate more exercises" button
+  // should ask for next -- undefined means "Any" (today's mixed
+  // behavior). Reported directly: there was no way to request a specific
+  // type at all. Only meaningful once selectedSubtopic.kind === "concept"
+  // (a real mined sub-topic gets the equivalent through PatternPicker's
+  // own type picker instead), but kept as one piece of state regardless
+  // rather than nested inside the subtopic union -- simpler to reset
+  // alongside the other per-subtopic state below.
+  const [conceptType, setConceptType] = useState<ExerciseType | undefined>(
+    undefined,
+  );
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -232,6 +262,7 @@ export function TopicSummaryMessage({
     setExercises(null);
     setExercisesError(null);
     setLoadingMoreExercises(false);
+    setConceptType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -283,7 +314,9 @@ export function TopicSummaryMessage({
         return;
       }
 
-      const distinctChapters = new Set(data.map((t) => t.chapter.toLowerCase()));
+      const distinctChapters = new Set(
+        data.map((t) => t.chapter.toLowerCase()),
+      );
       if (distinctChapters.size <= 1) {
         setChapterTopics([topic]);
         handleSelectExerciseTopic(topic);
@@ -359,6 +392,11 @@ export function TopicSummaryMessage({
     target: SyllabusTopic,
     conceptId: string,
     append = false,
+    // Only ever passed on an append call -- see the "Generate more
+    // exercises" button's own comment for why this isn't offered on the
+    // initial pill-click batch (mixed types there, same as before this
+    // feature existed).
+    requestedType?: ExerciseType,
   ) {
     if (append) setLoadingMoreExercises(true);
     else setLoadingExercises(true);
@@ -367,6 +405,7 @@ export function TopicSummaryMessage({
       const params = new URLSearchParams({
         preferEnglish: String(preferEnglish),
         conceptId,
+        ...(requestedType ? { requestedType } : {}),
       });
       const res = await fetch(
         `/api/topics/${target.id}/exercises/generate-for-concept?${params}`,
@@ -416,6 +455,7 @@ export function TopicSummaryMessage({
     setExercises(null);
     setExercisesError(null);
     setLoadingMoreExercises(false);
+    setConceptType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -448,6 +488,7 @@ export function TopicSummaryMessage({
     setExercises(null);
     setExercisesError(null);
     setLoadingMoreExercises(false);
+    setConceptType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -467,6 +508,7 @@ export function TopicSummaryMessage({
     setExercises(null);
     setExercisesError(null);
     setLoadingMoreExercises(false);
+    setConceptType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -484,6 +526,7 @@ export function TopicSummaryMessage({
     setExercises(null);
     setExercisesError(null);
     setLoadingMoreExercises(false);
+    setConceptType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -847,24 +890,78 @@ export function TopicSummaryMessage({
                             questions -- and any answers already typed into
                             them -- stay put. */}
                         {selectedSubtopic?.kind === "concept" && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              selectedExerciseTopic &&
-                              selectedSubtopic.kind === "concept" &&
-                              void handleLoadConceptExercises(
-                                selectedExerciseTopic,
-                                selectedSubtopic.id,
-                                true,
-                              )
-                            }
-                            disabled={loadingMoreExercises}
-                            className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
-                          >
-                            {loadingMoreExercises
-                              ? "Generating…"
-                              : "Generate more exercises"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                selectedExerciseTopic &&
+                                selectedSubtopic.kind === "concept" &&
+                                void handleLoadConceptExercises(
+                                  selectedExerciseTopic,
+                                  selectedSubtopic.id,
+                                  true,
+                                  conceptType,
+                                )
+                              }
+                              disabled={loadingMoreExercises}
+                              className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
+                            >
+                              {loadingMoreExercises
+                                ? "Generating…"
+                                : "Generate more exercises"}
+                            </button>
+                            {/* Reported directly: no way to ask for a
+                                specific question type at all. Mirrors
+                                PatternPicker's own type picker (see its own
+                                comment) -- clicking a pill both sets it as
+                                the sticky preference for the plain button
+                                above AND immediately generates one more
+                                batch at that type, same one-click feel. */}
+                            <span className="self-center text-xs text-foreground/40">
+                              Type:
+                            </span>
+                            {EXERCISE_TYPES.map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setConceptType(t);
+                                  if (
+                                    selectedExerciseTopic &&
+                                    selectedSubtopic.kind === "concept"
+                                  ) {
+                                    void handleLoadConceptExercises(
+                                      selectedExerciseTopic,
+                                      selectedSubtopic.id,
+                                      true,
+                                      t,
+                                    );
+                                  }
+                                }}
+                                disabled={loadingMoreExercises}
+                                title={`Generate more, ${EXERCISE_TYPE_LABELS[t]}`}
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium transition disabled:opacity-40 ${
+                                  conceptType === t
+                                    ? "bg-brand text-white"
+                                    : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+                                }`}
+                              >
+                                {EXERCISE_TYPE_LABELS[t]}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setConceptType(undefined)}
+                              disabled={
+                                loadingMoreExercises ||
+                                conceptType === undefined
+                              }
+                              title="Any type"
+                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 transition hover:bg-foreground/20 disabled:opacity-40"
+                            >
+                              Any
+                            </button>
+                          </>
                         )}
                       </div>
                     )}

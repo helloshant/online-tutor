@@ -1,6 +1,11 @@
 import type { RetrievedChunk } from "./chapterRag.js";
 import { selectRelevantTopics } from "./syllabusFilter.js";
-import type { DifficultyLevel, Medium, SyllabusTopic } from "./types.js";
+import type {
+  DifficultyLevel,
+  ExerciseType,
+  Medium,
+  SyllabusTopic,
+} from "./types.js";
 
 // Reported directly: a reply laying out data as a table (standard trig
 // ratios across several angles) came back "jumbled" in the chat window --
@@ -23,7 +28,7 @@ const TABLE_FORMAT_RULE =
 // reference card, exactly the shape emphasis earns its keep in, unlike an
 // ordinary back-and-forth chat reply.
 const SUMMARY_EMPHASIS_RULE =
-  'Use markdown emphasis so this reads as a scannable reference card, not a wall of prose: **bold** each sub-topic/concept name you introduce (e.g. "**Newton\'s First Law**"), and *italicize* key terms, named formulas/rules, and other words worth the student\'s particular attention the first time each appears. This renders as real bold/italic text, not literal asterisks -- use it to mark real structure and vocabulary, not on every other word.';
+  "Use markdown emphasis so this reads as a scannable reference card, not a wall of prose: **bold** each sub-topic/concept name you introduce (e.g. \"**Newton's First Law**\"), and *italicize* key terms, named formulas/rules, and other words worth the student's particular attention the first time each appears. This renders as real bold/italic text, not literal asterisks -- use it to mark real structure and vocabulary, not on every other word.";
 
 export function buildTutorSystemPrompt(params: {
   subjectName: string;
@@ -100,7 +105,9 @@ export function buildTutorSystemPrompt(params: {
       ? `\n\nReference material from this subject's chapter notes, possibly relevant to the current question:\n${referenceChunks
           .map((chunk, i) => {
             const label = chunk.fieldType ? `[${chunk.fieldType}] ` : "";
-            const source = chunk.citation ? `\n(Source: ${chunk.citation})` : "";
+            const source = chunk.citation
+              ? `\n(Source: ${chunk.citation})`
+              : "";
             return `[${i + 1}] ${label}${chunk.content}${source}`;
           })
           .join("\n\n")}`
@@ -159,7 +166,15 @@ export function buildTopicSummaryPrompt(params: {
   chapter: string;
   topic: string;
 }): string {
-  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic } = params;
+  const {
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    responseLanguage = medium,
+    chapter,
+    topic,
+  } = params;
   return `You are writing a quick-reference study summary for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
 Chapter: "${chapter}"
@@ -208,7 +223,15 @@ export function buildTopicSummaryTranslationPrompt(params: {
   topic: string;
   sourceContent: string;
 }): string {
-  const { subjectName, boardName, gradeName, responseLanguage, chapter, topic, sourceContent } = params;
+  const {
+    subjectName,
+    boardName,
+    gradeName,
+    responseLanguage,
+    chapter,
+    topic,
+    sourceContent,
+  } = params;
   return `You are adapting an existing study summary, written by this app's own subject-matter admins, into a different language for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
 Chapter: "${chapter}"
@@ -257,9 +280,17 @@ STRICT RULES -- follow every one of these exactly:
 If you are ever unsure whether adding emphasis somewhere would require rephrasing anything, leave that part exactly as it was rather than risk it.`;
 }
 
+// "Type: <...>" is required on EVERY exercise, not only when a student
+// asked for a specific one -- self-classification this cheap (the model
+// already knows what it just wrote) is what lets the UI show a type badge
+// on an exercise even from an unscoped ungrounded/batch generation call
+// that never requested one, and is what exerciseParser.ts needs to
+// extract ExerciseItem.type at all. See ExerciseType's own comment for
+// the four values this must be one of.
 const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
 Q: <question>
 A: <complete worked solution, showing steps>
+Type: <one of MCQ, short_answer, long_answer, numerical -- whichever this question actually is>
 
 Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
 
@@ -274,8 +305,31 @@ const EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN = `Format each exercise exactly 
 Q: <question>
 A: <complete worked solution, showing steps>
 Pattern: <the number of the pattern above this exercise instantiates>
+Type: <one of MCQ, short_answer, long_answer, numerical -- whichever this question actually is>
 
 Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
+
+// A student-requested type (see ExerciseType's own comment) is an
+// instruction for WHAT TO WRITE, kept fully separate from the "Type: ..."
+// self-classification tag above (an instruction the model follows vs. a
+// label it reports back) -- appended to the task instruction the same way
+// describeDifficultyAsk's own output is, regardless of whether this
+// generation call is archetype-grounded, concept-grounded, or fully
+// ungrounded. MCQ is the one type that changes the QUESTION's own shape
+// (real lettered options, not just tone/length), so it gets the most
+// explicit instruction of the four.
+function describeTypeAsk(type: ExerciseType): string {
+  switch (type) {
+    case "MCQ":
+      return "Write it as a multiple-choice question: state the question, then exactly four lettered options (A, B, C, D) as part of the question text, with only one option correct. State the correct letter and full reasoning in the solution.";
+    case "short_answer":
+      return "Write it as a short-answer question -- answerable in a few sentences, not a multi-step derivation.";
+    case "long_answer":
+      return "Write it as a long-answer / descriptive question -- expects a full paragraph or a multi-step explanation that covers the concept in real depth.";
+    case "numerical":
+      return "Write it as a numerical problem -- give concrete values and require an actual calculation with a specific numeric result.";
+  }
+}
 
 // One real, historically-mined reasoning pattern for this exact chapter/
 // topic (see archetypeExercises.ts) -- grounds a generated exercise in a
@@ -341,8 +395,12 @@ export type ExerciseArchetype = {
 
 function describeArchetype(a: ExerciseArchetype, index: number): string {
   const variationNote =
-    a.variationDescriptions.length > 0 ? ` Known variations: ${a.variationDescriptions.join("; ")}.` : "";
-  const difficultyNote = a.difficulty ? ` Typically ${a.difficulty} difficulty at this level.` : "";
+    a.variationDescriptions.length > 0
+      ? ` Known variations: ${a.variationDescriptions.join("; ")}.`
+      : "";
+  const difficultyNote = a.difficulty
+    ? ` Typically ${a.difficulty} difficulty at this level.`
+    : "";
   return `${index + 1}. "${a.name}" -- ${a.invariantReasoningStructure}${variationNote}${difficultyNote}`;
 }
 
@@ -362,7 +420,10 @@ function describeArchetype(a: ExerciseArchetype, index: number): string {
 // numbers rather than inventing something unrelated, is the honest
 // middle ground between silently refusing the request and silently
 // fabricating it.
-function describeDifficultyAsk(a: ExerciseArchetype, requested: DifficultyLevel): string {
+function describeDifficultyAsk(
+  a: ExerciseArchetype,
+  requested: DifficultyLevel,
+): string {
   const dist = a.difficultyDistribution;
   const total = dist ? dist.Easy + dist.Medium + dist.Hard : 0;
 
@@ -403,6 +464,14 @@ export function buildExerciseGenerationPrompt(params: {
   // (and ignored) for the batch path or an ungrounded generation, since
   // there's no single archetype to calibrate the ask against.
   requestedDifficulty?: DifficultyLevel;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment and describeTypeAsk. Unlike
+  // requestedDifficulty, this applies regardless of archetype count (an
+  // "any type" request needs no per-archetype historical calibration the
+  // way a difficulty ask does), so it's honored on the batch path too,
+  // not only the single-pattern one -- every exercise in the batch gets
+  // written as this type.
+  requestedType?: ExerciseType;
 }): string {
   const {
     subjectName,
@@ -415,17 +484,21 @@ export function buildExerciseGenerationPrompt(params: {
     count,
     archetypes = [],
     requestedDifficulty,
+    requestedType,
   } = params;
 
   const difficultyAsk =
-    requestedDifficulty && archetypes.length === 1 ? `\n\n${describeDifficultyAsk(archetypes[0], requestedDifficulty)}` : "";
+    requestedDifficulty && archetypes.length === 1
+      ? `\n\n${describeDifficultyAsk(archetypes[0], requestedDifficulty)}`
+      : "";
+  const typeAsk = requestedType ? `\n\n${describeTypeAsk(requestedType)}` : "";
 
   const taskInstruction =
     archetypes.length > 0
       ? `Generate exactly ${count} practice questions by instantiating the reasoning patterns below with FRESH numbers, names, and context of your own choosing -- never reuse or lightly reword a historical question, only the underlying reasoning structure. Cycle through the patterns (repeat some if there are fewer than ${count}) so the set as a whole reflects the mix of patterns and difficulty this chapter/topic actually gets tested on, not an arbitrary spread:
 
-${archetypes.map(describeArchetype).join("\n")}${difficultyAsk}`
-      : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.`;
+${archetypes.map(describeArchetype).join("\n")}${difficultyAsk}${typeAsk}`
+      : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.${typeAsk}`;
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
@@ -464,9 +537,24 @@ export function buildConceptExerciseGenerationPrompt(params: {
   // grounding for what to ask about and what facts/formulas are fair game.
   conceptContent: string;
   count: number;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment and describeTypeAsk.
+  requestedType?: ExerciseType;
 }): string {
-  const { subjectName, boardName, gradeName, medium, responseLanguage = medium, chapter, topic, conceptTerm, conceptContent, count } =
-    params;
+  const {
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    responseLanguage = medium,
+    chapter,
+    topic,
+    conceptTerm,
+    conceptContent,
+    count,
+    requestedType,
+  } = params;
+  const typeAsk = requestedType ? `\n\n${describeTypeAsk(requestedType)}` : "";
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
@@ -479,7 +567,7 @@ Here is the chapter's own material on this specific concept, to ground your ques
 ${conceptContent}
 """
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.${typeAsk}
 
 ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }
@@ -514,7 +602,10 @@ Rules:
 // subscribe, so their chat isn't locked to one board/grade/syllabus/medium --
 // this is deliberately the "all privileges" unrestricted mode, mainly for
 // platform staff to explore and QA subject coverage.
-export function buildStaffSystemPrompt(subjectName: string, hasImage?: boolean): string {
+export function buildStaffSystemPrompt(
+  subjectName: string,
+  hasImage?: boolean,
+): string {
   const imageNote = hasImage
     ? "\n\nThey've attached a screenshot or photo. Read whatever text, problem, or working is shown in it and treat that as their question, even if their typed message is empty or just a short caption."
     : "";
@@ -546,7 +637,14 @@ export function buildGradingPrompt(params: {
   expectedAnswer: string;
   studentAnswer: string;
 }): string {
-  const { subjectName, medium, responseLanguage = medium, question, expectedAnswer, studentAnswer } = params;
+  const {
+    subjectName,
+    medium,
+    responseLanguage = medium,
+    question,
+    expectedAnswer,
+    studentAnswer,
+  } = params;
 
   return `You are grading one student's own attempt at a ${subjectName} practice question, before showing them the worked solution.
 

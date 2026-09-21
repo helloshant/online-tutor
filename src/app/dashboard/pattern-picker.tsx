@@ -4,9 +4,32 @@ import { useEffect, useState } from "react";
 
 // Kept intentionally minimal -- callers only ever need to append this to
 // their own exercise list, never anything else about it.
-export type PatternPickerExercise = { id: string; question: string; answer: string };
+export type PatternPickerExercise = {
+  id: string;
+  question: string;
+  answer: string;
+  type?: ExerciseType | null;
+};
 
 type DifficultyLevel = "Easy" | "Medium" | "Hard";
+// A small, curated, app-facing set -- see the orchestrator's own
+// ExerciseType comment for why this is deliberately narrower than the
+// archetype-miner's internal QuestionFormat taxonomy. Reported directly:
+// there was no way to ask for a specific one at all, only "whatever the
+// model produced."
+type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
+const EXERCISE_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
+const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
+  MCQ: "MCQ",
+  short_answer: "Short answer",
+  long_answer: "Long answer",
+  numerical: "Numerical",
+};
 
 // A curated, real exam pattern mined for a topic -- see the endpoint's own
 // comment (/api/topics/[id]/exercises/patterns) for the full shape.
@@ -46,22 +69,30 @@ const DIFFICULTY_LEVELS: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 // no reason to make them choose a difficulty before they've even seen one
 // question of this pattern. null (no data, or nothing classified) falls
 // back to requesting no particular difficulty at all, same as "Any".
-function topDifficulty(dist: Record<DifficultyLevel, number> | null): DifficultyLevel | undefined {
+function topDifficulty(
+  dist: Record<DifficultyLevel, number> | null,
+): DifficultyLevel | undefined {
   if (!dist) return undefined;
   const total = dist.Easy + dist.Medium + dist.Hard;
   if (total === 0) return undefined;
-  return DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0][0];
+  return DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort(
+    (a, b) => b[1] - a[1],
+  )[0][0];
 }
 
 // "Usually Hard (7 of 10 mined)" -- raw counts, not a percentage, so this
 // stays honest about how little data some patterns have (a percentage of
 // 1 question would read as false precision) and never claims anything
 // about a pattern with nothing classified at all.
-function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): string | null {
+function describeDifficultyHint(
+  dist: Record<DifficultyLevel, number> | null,
+): string | null {
   if (!dist) return null;
   const total = dist.Easy + dist.Medium + dist.Hard;
   if (total === 0) return null;
-  const [top, topCount] = DIFFICULTY_LEVELS.map((level) => [level, dist[level]] as const).sort((a, b) => b[1] - a[1])[0];
+  const [top, topCount] = DIFFICULTY_LEVELS.map(
+    (level) => [level, dist[level]] as const,
+  ).sort((a, b) => b[1] - a[1])[0];
   return `Usually ${top} (${topCount} of ${total} mined)`;
 }
 
@@ -71,7 +102,10 @@ function describeDifficultyHint(dist: Record<DifficultyLevel, number> | null): s
 // back to the bare year rather than hiding it. Empty string (no suffix at
 // all) when nothing's classified, rather than an empty "()" hanging off
 // the name.
-function describeYearsSuffix(years: number[], countByYear: Record<string, number>): string {
+function describeYearsSuffix(
+  years: number[],
+  countByYear: Record<string, number>,
+): string {
   if (years.length === 0) return "";
   const parts = years.map((year) => {
     const count = countByYear[String(year)];
@@ -81,11 +115,21 @@ function describeYearsSuffix(years: number[], countByYear: Record<string, number
 }
 
 // Which pattern (or, with pattern: null, the random "Generate another")
-// most recently generated a question, and at which difficulty -- drives
-// the repeat panel below the pill row. Distinct from `generating` (which
-// tracks an in-flight request): this stays set across requests so
-// "Try another like this" always knows what to repeat.
-type ActiveSelection = { pattern: Pattern | null; difficulty: DifficultyLevel | undefined };
+// most recently generated a question, and at which difficulty/type --
+// drives the repeat panel below the pill row. Distinct from `generating`
+// (which tracks an in-flight request): this stays set across requests so
+// "Try another like this" always knows what to repeat. Unlike difficulty
+// (reset to each pattern's OWN historically-common level on every new
+// pattern click, see topDifficulty), a chosen type carries over across
+// pattern switches -- there's no per-pattern "natural" type the way
+// there's a per-pattern natural difficulty, so a student who picked MCQ
+// once most likely wants MCQ from the NEXT pattern too, not silently back
+// to "Any."
+type ActiveSelection = {
+  pattern: Pattern | null;
+  difficulty: DifficultyLevel | undefined;
+  type: ExerciseType | undefined;
+};
 
 // Curated "practice a specific mined pattern" picker (Tier C/D) --
 // self-contained: fetches its own pattern list for `topicId` on mount
@@ -160,8 +204,12 @@ export function PatternPicker({
 
     (async () => {
       try {
-        const query = subTopic ? `?subTopic=${encodeURIComponent(subTopic)}` : "";
-        const res = await fetch(`/api/topics/${topicId}/exercises/patterns${query}`);
+        const query = subTopic
+          ? `?subTopic=${encodeURIComponent(subTopic)}`
+          : "";
+        const res = await fetch(
+          `/api/topics/${topicId}/exercises/patterns${query}`,
+        );
         const body = await res.json().catch(() => null);
         if (!cancelled && res.ok && Array.isArray(body?.patterns)) {
           setPatterns(body.patterns);
@@ -190,15 +238,25 @@ export function PatternPicker({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(selection.pattern ? { archetypeId: selection.pattern.archetypeId, archetypeRunId: selection.pattern.runId } : {}),
-          ...(selection.difficulty ? { requestedDifficulty: selection.difficulty } : {}),
+          ...(selection.pattern
+            ? {
+                archetypeId: selection.pattern.archetypeId,
+                archetypeRunId: selection.pattern.runId,
+              }
+            : {}),
+          ...(selection.difficulty
+            ? { requestedDifficulty: selection.difficulty }
+            : {}),
+          ...(selection.type ? { requestedType: selection.type } : {}),
           ...(subTopic ? { subTopic } : {}),
           preferEnglish,
         }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setGenerateError(body?.error ?? "Could not generate a question right now.");
+        setGenerateError(
+          body?.error ?? "Could not generate a question right now.",
+        );
         return;
       }
       if (body?.exercise) {
@@ -217,8 +275,12 @@ export function PatternPicker({
 
   return (
     <div className="mt-4 border-t border-border pt-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">Practice a specific pattern</p>
-      {generateError && <p className="mb-2 text-xs text-red-600">{generateError}</p>}
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+        Practice a specific pattern
+      </p>
+      {generateError && (
+        <p className="mb-2 text-xs text-red-600">{generateError}</p>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {patterns.map((p) => {
           const isActive = active?.pattern?.archetypeId === p.archetypeId;
@@ -226,25 +288,45 @@ export function PatternPicker({
             <button
               key={`${p.runId}:${p.archetypeId}`}
               type="button"
-              onClick={() => void handleGenerate({ pattern: p, difficulty: topDifficulty(p.difficultyDistribution) })}
+              onClick={() =>
+                void handleGenerate({
+                  pattern: p,
+                  difficulty: topDifficulty(p.difficultyDistribution),
+                  type: active?.type,
+                })
+              }
               disabled={generating !== null}
               className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-                isActive ? "bg-brand text-white" : "bg-brand/10 text-brand hover:bg-brand/20"
+                isActive
+                  ? "bg-brand text-white"
+                  : "bg-brand/10 text-brand hover:bg-brand/20"
               }`}
             >
-              {generating === p.archetypeId ? "Generating…" : `${p.name}${describeYearsSuffix(p.yearsObserved, p.questionCountByYear)}`}
+              {generating === p.archetypeId
+                ? "Generating…"
+                : `${p.name}${describeYearsSuffix(p.yearsObserved, p.questionCountByYear)}`}
             </button>
           );
         })}
         <button
           type="button"
-          onClick={() => void handleGenerate({ pattern: null, difficulty: undefined })}
+          onClick={() =>
+            void handleGenerate({
+              pattern: null,
+              difficulty: undefined,
+              type: active?.type,
+            })
+          }
           disabled={generating !== null}
           className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
-            active && !active.pattern ? "bg-foreground/70 text-white" : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+            active && !active.pattern
+              ? "bg-foreground/70 text-white"
+              : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
           }`}
         >
-          {generating === GENERATING_RANDOM ? "Generating…" : "Generate another"}
+          {generating === GENERATING_RANDOM
+            ? "Generating…"
+            : "Generate another"}
         </button>
       </div>
 
@@ -255,7 +337,11 @@ export function PatternPicker({
           question the way the old pre-generation gate did. */}
       {active && (
         <div className="mt-2 rounded-lg bg-background p-2">
-          {active.pattern?.studentExplanation && <p className="mb-2 text-xs text-foreground/70">{active.pattern.studentExplanation}</p>}
+          {active.pattern?.studentExplanation && (
+            <p className="mb-2 text-xs text-foreground/70">
+              {active.pattern.studentExplanation}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
@@ -263,20 +349,34 @@ export function PatternPicker({
               disabled={generating !== null}
               className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
-              {generating !== null ? "Generating…" : active.pattern ? "Try another like this" : "Another random one"}
+              {generating !== null
+                ? "Generating…"
+                : active.pattern
+                  ? "Try another like this"
+                  : "Another random one"}
             </button>
             {active.pattern && (
               <>
                 <span className="text-xs text-foreground/40">
-                  {describeDifficultyHint(active.pattern.difficultyDistribution) ?? "No difficulty data yet"}
+                  {describeDifficultyHint(
+                    active.pattern.difficultyDistribution,
+                  ) ?? "No difficulty data yet"}
                   {active.difficulty ? ` — now on ${active.difficulty}` : ""}
                 </span>
                 {DIFFICULTY_LEVELS.map((level) => (
                   <button
                     key={level}
                     type="button"
-                    onClick={() => void handleGenerate({ pattern: active.pattern, difficulty: level })}
-                    disabled={generating !== null || active.difficulty === level}
+                    onClick={() =>
+                      void handleGenerate({
+                        pattern: active.pattern,
+                        difficulty: level,
+                        type: active.type,
+                      })
+                    }
+                    disabled={
+                      generating !== null || active.difficulty === level
+                    }
                     title={`Generate another, ${level}`}
                     className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
                   >
@@ -285,8 +385,16 @@ export function PatternPicker({
                 ))}
                 <button
                   type="button"
-                  onClick={() => void handleGenerate({ pattern: active.pattern, difficulty: undefined })}
-                  disabled={generating !== null || active.difficulty === undefined}
+                  onClick={() =>
+                    void handleGenerate({
+                      pattern: active.pattern,
+                      difficulty: undefined,
+                      type: active.type,
+                    })
+                  }
+                  disabled={
+                    generating !== null || active.difficulty === undefined
+                  }
                   title="Generate another, unconstrained difficulty"
                   className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
                 >
@@ -294,6 +402,47 @@ export function PatternPicker({
                 </button>
               </>
             )}
+            {/* Type refinement, unlike difficulty above, isn't gated on
+                active.pattern -- there's no per-pattern historical type
+                distribution to calibrate against (see ActiveSelection's
+                own comment), so it applies just as well to the random
+                "Generate another" pick as to a specific pattern. */}
+            <span className="text-xs text-foreground/40">
+              Type: {active.type ? EXERCISE_TYPE_LABELS[active.type] : "Any"}
+            </span>
+            {EXERCISE_TYPES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() =>
+                  void handleGenerate({
+                    pattern: active.pattern,
+                    difficulty: active.difficulty,
+                    type: t,
+                  })
+                }
+                disabled={generating !== null || active.type === t}
+                title={`Generate another, ${EXERCISE_TYPE_LABELS[t]}`}
+                className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+              >
+                {EXERCISE_TYPE_LABELS[t]}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                void handleGenerate({
+                  pattern: active.pattern,
+                  difficulty: active.difficulty,
+                  type: undefined,
+                })
+              }
+              disabled={generating !== null || active.type === undefined}
+              title="Generate another, any type"
+              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+            >
+              Any type
+            </button>
             <button
               type="button"
               onClick={() => setActive(null)}

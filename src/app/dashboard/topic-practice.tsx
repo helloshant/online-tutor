@@ -5,7 +5,26 @@ import { MathText } from "@/components/math-text";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { PatternPicker, type PatternPickerExercise } from "./pattern-picker";
 
-export type PracticeExerciseItem = { id: string; question: string; answer: string };
+// See the orchestrator's own ExerciseType comment -- a small, curated,
+// app-facing set a student can request via PatternPicker's own type
+// picker (see its own local copy of this type). Optional/nullable: only
+// ever populated on a freshly-generated exercise (see ExerciseItem.type's
+// own comment in orchestratorClient.ts) -- a bank-served exercise simply
+// has no badge to show, not an error.
+type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
+const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
+  MCQ: "MCQ",
+  short_answer: "Short answer",
+  long_answer: "Long answer",
+  numerical: "Numerical",
+};
+
+export type PracticeExerciseItem = {
+  id: string;
+  question: string;
+  answer: string;
+  type?: ExerciseType | null;
+};
 type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
 
 // Per-exercise submission/grading state, keyed by exercise id -- a
@@ -22,11 +41,15 @@ type GradeState = {
   error?: string;
 };
 
-const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> = {
-  correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
-  partially_correct: { box: "bg-yellow-50 text-yellow-800", label: "Partially correct." },
-  incorrect: { box: "bg-red-50 text-red-800", label: "Not quite." },
-};
+const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> =
+  {
+    correct: { box: "bg-green-50 text-green-800", label: "Correct!" },
+    partially_correct: {
+      box: "bg-yellow-50 text-yellow-800",
+      label: "Partially correct.",
+    },
+    incorrect: { box: "bg-red-50 text-red-800", label: "Not quite." },
+  };
 
 // Combines the generated-exercise list (hide-until-submitted grading UI)
 // with the on-demand pattern picker underneath it -- kept as ONE unit
@@ -93,7 +116,9 @@ export function TopicPractice({
       return true;
     });
   }, [initialExercises, pickerAdded]);
-  const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>({});
+  const [gradeStates, setGradeStates] = useState<Record<string, GradeState>>(
+    {},
+  );
 
   function getGradeState(exerciseId: string): GradeState {
     return gradeStates[exerciseId] ?? { draft: "", status: "idle" };
@@ -107,7 +132,11 @@ export function TopicPractice({
     const state = getGradeState(exerciseId);
     if (!state.draft.trim() || state.status === "submitting") return;
 
-    setGradeState(exerciseId, { ...state, status: "submitting", error: undefined });
+    setGradeState(exerciseId, {
+      ...state,
+      status: "submitting",
+      error: undefined,
+    });
     try {
       const res = await fetch(`/api/exercises/${exerciseId}/grade`, {
         method: "POST",
@@ -116,7 +145,11 @@ export function TopicPractice({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || typeof body?.verdict !== "string") {
-        setGradeState(exerciseId, { ...state, status: "idle", error: body?.error ?? "Could not grade this attempt." });
+        setGradeState(exerciseId, {
+          ...state,
+          status: "idle",
+          error: body?.error ?? "Could not grade this attempt.",
+        });
         return;
       }
       setGradeState(exerciseId, {
@@ -127,7 +160,11 @@ export function TopicPractice({
         revealedAnswer: body.answer,
       });
     } catch {
-      setGradeState(exerciseId, { ...state, status: "idle", error: "Could not grade this attempt." });
+      setGradeState(exerciseId, {
+        ...state,
+        status: "idle",
+        error: "Could not grade this attempt.",
+      });
     }
   }
 
@@ -141,9 +178,12 @@ export function TopicPractice({
         emptyLabel && <p className="text-foreground/50">{emptyLabel}</p>
       ) : (
         <>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">Relevant exercises</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+            Relevant exercises
+          </p>
           <p className="mb-3 text-xs text-foreground/40">
-            Try each one yourself first -- the worked solution shows once you check your answer.
+            Try each one yourself first -- the worked solution shows once you
+            check your answer.
           </p>
           <ol className="space-y-4">
             {exercises.map((ex, i) => {
@@ -151,17 +191,32 @@ export function TopicPractice({
               return (
                 <li key={ex.id}>
                   <p className="whitespace-pre-wrap font-medium">
-                    {i + 1}. <MathText text={ex.question} />
+                    {i + 1}.{" "}
+                    {ex.type && (
+                      <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/50">
+                        {EXERCISE_TYPE_LABELS[ex.type]}
+                      </span>
+                    )}
+                    <MathText text={ex.question} />
                   </p>
 
                   {state.status === "graded" ? (
                     <div className="mt-1.5 space-y-2">
-                      <p className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}>
-                        <span className="font-semibold">{VERDICT_STYLES[state.verdict as ExerciseVerdict].label}</span>{" "}
+                      <p
+                        className={`rounded-lg p-3 ${VERDICT_STYLES[state.verdict as ExerciseVerdict].box}`}
+                      >
+                        <span className="font-semibold">
+                          {
+                            VERDICT_STYLES[state.verdict as ExerciseVerdict]
+                              .label
+                          }
+                        </span>{" "}
                         {state.feedback}
                       </p>
                       <div className="rounded-lg bg-background p-3 text-foreground/80">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">Solution</p>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                          Solution
+                        </p>
                         <p className="whitespace-pre-wrap">
                           <MathText text={state.revealedAnswer ?? ""} />
                         </p>
@@ -171,20 +226,31 @@ export function TopicPractice({
                     <div className="mt-1.5 space-y-1.5">
                       <textarea
                         value={state.draft}
-                        onChange={(e) => setGradeState(ex.id, { ...state, draft: e.target.value })}
+                        onChange={(e) =>
+                          setGradeState(ex.id, {
+                            ...state,
+                            draft: e.target.value,
+                          })
+                        }
                         placeholder="Type your answer here…"
                         rows={2}
                         disabled={state.status === "submitting"}
                         className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground disabled:opacity-60"
                       />
-                      {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+                      {state.error && (
+                        <p className="text-xs text-red-600">{state.error}</p>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleSubmitAnswer(ex.id)}
-                        disabled={state.status === "submitting" || !state.draft.trim()}
+                        disabled={
+                          state.status === "submitting" || !state.draft.trim()
+                        }
                         className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                       >
-                        {state.status === "submitting" ? "Checking…" : "Check my answer"}
+                        {state.status === "submitting"
+                          ? "Checking…"
+                          : "Check my answer"}
                       </button>
                     </div>
                   )}

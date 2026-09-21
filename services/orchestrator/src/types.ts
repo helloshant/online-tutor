@@ -4,7 +4,11 @@ export type SyllabusTopic = { chapter: string; topic: string };
 
 // Matches Anthropic's Base64ImageSource media_type union exactly, so no
 // runtime cast is needed when building the content block.
-export type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+export type ImageMediaType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/webp";
 export type ImageAttachment = { mediaType: ImageMediaType; base64: string };
 
 // What the web app sends. `mode: "student"` requires board/grade/medium/
@@ -55,7 +59,12 @@ export type ChatOrchestrationRequest =
 // ordinary chat reply never has admin-authored chapter content as its
 // *whole* answer the way a topic summary can, only as retrieved context
 // augmenting an LLM call (see chapterRag.ts), which still reports as "llm".
-export type ChatOrchestrationSource = "cache" | "database" | "llm" | "rejected" | "chapter_notes";
+export type ChatOrchestrationSource =
+  | "cache"
+  | "database"
+  | "llm"
+  | "rejected"
+  | "chapter_notes";
 
 export type ChatOrchestrationResponse = {
   reply: string;
@@ -150,6 +159,17 @@ export type ExerciseItem = {
   answer: string;
   archetypeRunId?: string | null;
   archetypeId?: string | null;
+  // The model's own self-reported format for this exercise (see
+  // ExerciseType's own comment and EXERCISE_FORMAT_INSTRUCTIONS in
+  // prompts.ts) -- generation-time metadata only, never persisted to
+  // answered_questions (no schema change for this), so it's only ever
+  // populated on the two ALWAYS-fresh on-demand generation paths
+  // (/v1/topic-exercises/generate, /v1/topic-exercises/generate-for-concept)
+  // that return an exercise in the same response it was just parsed from.
+  // A bank-served exercise (the batch /v1/topic-exercises route, or a
+  // reused row from search_topic_exercises) has no way to know this and
+  // always carries null here -- never guessed at.
+  type?: ExerciseType | null;
 };
 
 export type TopicExercisesResponse = {
@@ -167,6 +187,15 @@ export type TopicExercisesResponse = {
 // WITHIN a run -- /v1/topic-exercises/generate needs both back to
 // identify which pattern was actually picked.
 export type DifficultyLevel = "Easy" | "Medium" | "Hard";
+
+// A small, curated, app-facing set -- deliberately narrower than the
+// archetype-miner's own QuestionFormat taxonomy (19 values, covering
+// everything from case_based to thesis_excerpt, meant for classifying
+// REAL mined exam questions) -- these four are what a student can
+// actually ask this app to generate. Reported directly: there was no way
+// to request a specific type at all, every generated exercise was
+// whatever the model happened to produce.
+export type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
 
 export type TopicPattern = {
   runId: string;
@@ -299,6 +328,9 @@ export type GenerateConceptExercisesRequest = {
   chapter: string;
   topic: string;
   conceptId: string;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment and buildConceptExerciseGenerationPrompt.
+  requestedType?: ExerciseType;
 };
 
 export type GenerateConceptExercisesResponse = {
@@ -320,6 +352,9 @@ export type GenerateTopicExerciseRequest = TopicExercisesRequest & {
   // this gets calibrated against the pattern's own real
   // difficultyDistribution rather than trusted to just work.
   requestedDifficulty?: DifficultyLevel;
+  // Set only when the student picked a specific type rather than "Any" --
+  // see ExerciseType's own comment.
+  requestedType?: ExerciseType;
 };
 
 export type GenerateTopicExerciseResponse = {
