@@ -698,3 +698,54 @@ Return ONLY, in exactly this format, no markdown, no other text:
 Verdict: correct | partially_correct | incorrect
 Feedback: <your feedback>`;
 }
+
+// Grades an entire practice paper at once, from one or more photographs of
+// the student's own handwritten answer sheet -- see
+// practicePaperGrading.ts for how the response is parsed. Genuinely
+// different from buildGradingPrompt above: multi-question (not one), reads
+// handwriting from an image (not typed text), and produces a NUMERIC mark
+// out of each question's own worth rather than a 3-way verdict, since the
+// whole point here is to "generate marks," not just a correct/incorrect
+// judgment.
+export function buildPracticePaperGradingPrompt(params: {
+  subjectName: string;
+  medium: Medium;
+  questions: {
+    id: string;
+    question: string;
+    expectedAnswer: string;
+    type: ExerciseType;
+    marks: number;
+  }[];
+}): string {
+  const { subjectName, medium, questions } = params;
+
+  const questionsBlock = questions
+    .map(
+      (
+        q,
+        i,
+      ) => `${i + 1}. [Q ID: ${q.id}] (${q.type}, ${q.marks} mark${q.marks === 1 ? "" : "s"})
+Question: ${q.question}
+Expected answer (the student has NOT seen this): ${q.expectedAnswer}`,
+    )
+    .join("\n\n");
+
+  return `You are grading a student's own photographed, handwritten answer sheet for a ${subjectName} practice paper, worth ${questions.length} questions in total.
+
+QUESTIONS
+${questionsBlock}
+
+TASK
+First, read the attached image(s) and transcribe what the student actually wrote for each question, matching their handwriting to the question numbers above -- their numbering may not exactly match the order given here, so match by the question's own content, not position alone. A question the student left blank or never attempted scores 0.
+
+For each MCQ question: score is either the FULL marks (their chosen option exactly matches the expected answer) or 0 -- no partial credit for a multiple-choice question.
+
+For every short_answer/long_answer/numerical question: judge by whether their final result and reasoning are sound, NOT by whether their wording, method, or level of detail matches the expected answer exactly -- the same principle as grading any other open-ended answer. A different valid method reaching the same correct result earns full marks. Partial credit (including half-marks) is expected and appropriate for a right final answer reached through incomplete or flawed reasoning, or a partially correct answer -- never more than that question's own max, never negative.
+
+Write each question's feedback ONLY in ${medium}, regardless of what language this prompt is in -- one short sentence, pointing at the specific thing that was right or wrong. Also write one 1-2 sentence overall summary of how the student did across the whole paper, also in ${medium}.
+
+OUTPUT
+Return ONLY strict JSON, no markdown code fences, no other text, in exactly this shape -- one entry in "results" for EVERY question id listed above, in any order:
+{"results":[{"id":"<Q ID>","score":<number>,"feedback":"<one sentence>"}],"overallFeedback":"<1-2 sentences>"}`;
+}

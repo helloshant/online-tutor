@@ -4,7 +4,8 @@ import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
 const DEFAULT_DEPLOYMENT = "gpt-4o";
 const DEFAULT_API_VERSION = "2024-08-01-preview";
 
-export const AZURE_OPENAI_DEPLOYMENT = process.env.AZURE_OPENAI_CHAT_DEPLOYMENT || DEFAULT_DEPLOYMENT;
+export const AZURE_OPENAI_DEPLOYMENT =
+  process.env.AZURE_OPENAI_CHAT_DEPLOYMENT || DEFAULT_DEPLOYMENT;
 
 let cachedClient: AzureOpenAI | null = null;
 
@@ -12,8 +13,10 @@ function getClient(): AzureOpenAI {
   if (!cachedClient) {
     const apiKey = process.env.AZURE_OPENAI_API_KEY;
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    if (!apiKey) throw new Error("Missing AZURE_OPENAI_API_KEY environment variable");
-    if (!endpoint) throw new Error("Missing AZURE_OPENAI_ENDPOINT environment variable");
+    if (!apiKey)
+      throw new Error("Missing AZURE_OPENAI_API_KEY environment variable");
+    if (!endpoint)
+      throw new Error("Missing AZURE_OPENAI_ENDPOINT environment variable");
 
     cachedClient = new AzureOpenAI({
       apiKey,
@@ -25,7 +28,8 @@ function getClient(): AzureOpenAI {
   return cachedClient;
 }
 
-const FALLBACK_TEXT = "Sorry, I couldn't come up with an answer. Please try rephrasing your question.";
+const FALLBACK_TEXT =
+  "Sorry, I couldn't come up with an answer. Please try rephrasing your question.";
 
 export async function getAzureOpenAIReply(params: {
   systemPrompt: string;
@@ -42,7 +46,10 @@ export async function getAzureOpenAIReply(params: {
   // provider's text-part omission when there's no caption.
   const userContent = image
     ? [
-        { type: "image_url" as const, image_url: { url: `data:${image.mediaType};base64,${image.base64}` } },
+        {
+          type: "image_url" as const,
+          image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+        },
         ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
       ]
     : message;
@@ -61,6 +68,52 @@ export async function getAzureOpenAIReply(params: {
     // The deployment name, not the underlying base model -- Azure bills and
     // rate-limits against the deployment, so that's the identifier the
     // observability service's pricing lookup needs.
+    model: AZURE_OPENAI_DEPLOYMENT,
+    usage: {
+      promptTokens: completion.usage?.prompt_tokens ?? 0,
+      completionTokens: completion.usage?.completion_tokens ?? 0,
+    },
+  };
+}
+
+// Sibling of getAzureOpenAIReply above, for the practice-paper "evaluate"
+// route only -- see getAnthropicGradingReply's own comment for why this
+// exists as a separate function rather than widening the one above. Adds
+// response_format: json_object, a free reliability win specific to this
+// provider (Anthropic has no equivalent to reach for) -- the model still
+// gets the exact JSON shape spelled out in the prompt itself.
+const GRADING_FALLBACK_TEXT = '{"results":[],"overallFeedback":""}';
+
+export async function getAzureOpenAIGradingReply(params: {
+  systemPrompt: string;
+  images: ImageAttachment[];
+  maxTokens: number;
+}): Promise<LlmReply> {
+  const { systemPrompt, images, maxTokens } = params;
+  const client = getClient();
+
+  const userContent = [
+    ...images.map((image) => ({
+      type: "image_url" as const,
+      image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+    })),
+    {
+      type: "text" as const,
+      text: "Grade this submission now, following the JSON output format specified.",
+    },
+  ];
+
+  const completion = await client.chat.completions.create({
+    model: AZURE_OPENAI_DEPLOYMENT,
+    max_tokens: maxTokens,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user" as const, content: userContent },
+    ],
+  });
+  return {
+    text: completion.choices[0]?.message?.content ?? GRADING_FALLBACK_TEXT,
     model: AZURE_OPENAI_DEPLOYMENT,
     usage: {
       promptTokens: completion.usage?.prompt_tokens ?? 0,
