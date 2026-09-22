@@ -469,3 +469,78 @@ export type LlmReply = {
   model: string;
   usage: TokenUsage;
 };
+
+// One syllabus_topics row under a chapter the student selected -- the web
+// app pre-resolves every topic under every selected chapter (same "caller
+// resolves scope, orchestrator just uses it" convention as
+// ChatOrchestrationRequest.topics), and /v1/practice-paper/generate rotates
+// through these when deciding which topic to ground each blueprint
+// question in.
+export type PracticePaperTopic = { id: string; chapter: string; topic: string };
+
+// gradeName must already be run through toArchetypeGradeOrYear by the
+// caller (see src/lib/archetypeGradeName.ts and its existing call site in
+// exercises/generate/route.ts) -- this service never does that itself, same
+// as every other request type here that takes a gradeName.
+export type GeneratePracticePaperRequest = {
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  topics: PracticePaperTopic[];
+};
+
+export type PracticePaperQuestion = {
+  answeredQuestionId: string;
+  question: string;
+  type: ExerciseType;
+  marks: number;
+  sortOrder: number;
+};
+
+export type GeneratePracticePaperResponse = {
+  questions: PracticePaperQuestion[];
+  totalMarks: number;
+};
+
+// Deliberately no `expectedAnswer` field on any question here -- the
+// orchestrator re-derives each one from answered_questions by
+// answeredQuestionId itself (see server.ts's evaluate handler), never
+// trusting the caller with it, exactly the same trust boundary
+// GradeExerciseRequest already draws for single-exercise grading.
+export type EvaluatePracticePaperRequest = {
+  userId: string;
+  subjectName: string;
+  medium: Medium;
+  questions: {
+    id: string;
+    answeredQuestionId: string;
+    type: ExerciseType;
+    marks: number;
+  }[];
+  // One or more photographed answer-sheet pages -- see
+  // practicePaperGrading.ts and server.ts's MAX_IMAGES_PER_SUBMISSION. This
+  // is the one place in the whole orchestrator that takes more than one
+  // image in a single request; every other image-taking request type above
+  // (ChatOrchestrationRequest) stays singular and untouched.
+  images: ImageAttachment[];
+};
+
+// id here is the caller's own practice_paper_questions.id, echoed back so
+// the web app can map a result onto its own row without a second lookup.
+export type PracticePaperQuestionResult = {
+  id: string;
+  score: number;
+  feedback: string;
+};
+
+export type EvaluatePracticePaperResponse = {
+  results: PracticePaperQuestionResult[];
+  totalScore: number;
+  maxPossibleScore: number;
+  overallFeedback: string;
+};
