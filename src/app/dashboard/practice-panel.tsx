@@ -17,10 +17,6 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   numerical: "Numerical",
 };
 
-// Kept in sync by hand with the orchestrator's own
-// practiceBlueprint.ts:MAX_TOPICS_PER_PAPER and
-// /api/practice-papers/route.ts's own copy of the same cap.
-const MAX_TOPICS_PER_PAPER = 4;
 // Same allow-list/caps as /api/practice-papers/[id]/submit/route.ts --
 // checked here too so a student finds out about an unsupported file
 // before spending time uploading it.
@@ -67,22 +63,15 @@ type HistoryPaper = {
   createdAt: string;
 };
 
-// One selectable unit in the picker below -- named "topic" throughout
-// (rather than "chapter") because a syllabus_topics.chapter value is NOT a
-// reliable pick-one-of-these-N unit: for a literature-style subject (e.g.
-// WBBSE Bengali), every story/poem in a book shares the SAME chapter value
-// (the book's own title, e.g. "Bengali"), with each individual selectable
-// story/poem actually living in that row's own `topic` field instead.
-// Reported directly: the picker showed a single "Bengali" checkbox with no
-// way to choose which story to generate a paper from. Grouping by chapter
-// for DISPLAY (a heading) while selecting by individual topic id underneath
-// it works for both shapes: a subject where chapter and topic are already
-// distinct units (most subjects) just shows one topic per chapter heading,
-// changing nothing about what a student sees or picks there.
-type ChapterGroup = {
-  chapter: string;
-  topics: { id: string; topic: string }[];
-};
+// The selectable unit in the picker below is the CHAPTER, not the
+// individual sub-topics under it -- reported directly: a per-topic picker
+// exposed every fine-grained learning point as its own checkbox, which
+// asked for a level of manual curation nobody wanted ("I don't want to let
+// the student choose sub-topics"). Selection is also uncapped -- a student
+// can tick as many chapters as they like, up to the whole syllabus (see
+// the orchestrator's own MAX_BLUEPRINT_SCALE_CHAPTERS for why a large
+// selection still produces one reasonably-sized paper rather than an
+// ever-growing one).
 
 // A full mock question paper a student generates on demand for their own
 // chosen chapter(s) -- mixing MCQ/short/long questions from a fixed
@@ -101,10 +90,8 @@ export function PracticePanel({
   subjectId: string;
   medium: Medium;
 }) {
-  const [chapterGroups, setChapterGroups] = useState<ChapterGroup[] | null>(
-    null,
-  );
-  const [selectedTopicIds, setSelectedTopicIds] = useState<Set<string>>(
+  const [chapters, setChapters] = useState<string[] | null>(null);
+  const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
     new Set(),
   );
   const [history, setHistory] = useState<HistoryPaper[] | null>(null);
@@ -121,38 +108,25 @@ export function PracticePanel({
   const [submitting, setSubmitting] = useState(false);
   const [submitFailed, setSubmitFailed] = useState(false);
 
-  // Chapter/topic list + paper history both reset on a subject/scope switch
-  // -- this component is remounted per subject anyway (see
-  // dashboard-shell.tsx's key on the subject id one level up for ChatPanel;
-  // PracticePanel follows the same pattern), but this effect also covers a
-  // staff preview's own board/grade/medium changing under an otherwise-
-  // stable subject. Same query TopicList already runs, grouped the same
-  // way (see ChapterGroup's own comment on why topic, not chapter, is the
-  // actual selectable unit here).
+  // Chapter list + paper history both reset on a subject/scope switch --
+  // this component is remounted per subject anyway (see dashboard-shell.tsx's
+  // key on the subject id one level up for ChatPanel; PracticePanel follows
+  // the same pattern), but this effect also covers a staff preview's own
+  // board/grade/medium changing under an otherwise-stable subject.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const supabase = createClient();
       const { data } = await supabase
         .from("syllabus_topics")
-        .select("id, chapter, topic")
+        .select("chapter")
         .eq("board_id", boardId)
         .eq("grade_id", gradeId)
         .eq("subject_id", subjectId)
         .eq("medium", medium)
         .order("sort_order");
       if (cancelled) return;
-      const groups: ChapterGroup[] = [];
-      for (const row of data ?? []) {
-        const group = groups.find((g) => g.chapter === row.chapter);
-        if (group) group.topics.push({ id: row.id, topic: row.topic });
-        else
-          groups.push({
-            chapter: row.chapter,
-            topics: [{ id: row.id, topic: row.topic }],
-          });
-      }
-      setChapterGroups(groups);
+      setChapters([...new Set((data ?? []).map((t) => t.chapter))]);
     })();
     return () => {
       cancelled = true;
@@ -188,14 +162,11 @@ export function PracticePanel({
     };
   }, [subjectId]);
 
-  function toggleTopic(topicId: string) {
-    setSelectedTopicIds((prev) => {
+  function toggleChapter(chapter: string) {
+    setSelectedChapters((prev) => {
       const next = new Set(prev);
-      if (next.has(topicId)) {
-        next.delete(topicId);
-      } else if (next.size < MAX_TOPICS_PER_PAPER) {
-        next.add(topicId);
-      }
+      if (next.has(chapter)) next.delete(chapter);
+      else next.add(chapter);
       return next;
     });
   }
@@ -206,11 +177,11 @@ export function PracticePanel({
     setSelectedFiles([]);
     setUploadError(null);
     setSubmitFailed(false);
-    setSelectedTopicIds(new Set());
+    setSelectedChapters(new Set());
   }
 
   async function handleGenerate() {
-    if (selectedTopicIds.size === 0 || generating) return;
+    if (selectedChapters.size === 0 || generating) return;
     setGenerating(true);
     setGenerateError(null);
     try {
@@ -219,7 +190,7 @@ export function PracticePanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subjectId,
-          topicIds: Array.from(selectedTopicIds),
+          chapters: Array.from(selectedChapters),
           // Only meaningful for a staff caller previewing a specific
           // board/grade (resolveStaffPreviewScope re-validates server-side
           // rather than trusting these) -- a real student's own scope
@@ -360,64 +331,39 @@ export function PracticePanel({
             Practice paper
           </p>
           <p className="mb-4 text-xs text-foreground/40">
-            Pick up to {MAX_TOPICS_PER_PAPER} topics to generate a mock question
-            paper -- write your answers on paper, photograph them, and get them
-            graded automatically.
+            Pick the chapters to generate a mock question paper from -- write
+            your answers on paper, photograph them, and get them graded
+            automatically.
           </p>
 
-          {chapterGroups === null ? (
+          {chapters === null ? (
             <p className="text-sm text-foreground/50">
               <LoadingIndicator label="Loading chapters…" />
             </p>
-          ) : chapterGroups.length === 0 ? (
+          ) : chapters.length === 0 ? (
             <p className="text-sm text-foreground/50">
               No syllabus entered yet for this subject.
             </p>
           ) : (
             <>
-              <div className="space-y-4">
-                {chapterGroups.map((group) => (
-                  <div key={group.chapter}>
-                    <h3 className="px-2 text-sm font-semibold text-foreground/80">
-                      {group.chapter}
-                    </h3>
-                    <ul className="mt-1 space-y-0.5">
-                      {group.topics.map((t) => {
-                        const checked = selectedTopicIds.has(t.id);
-                        const disabled =
-                          !checked &&
-                          selectedTopicIds.size >= MAX_TOPICS_PER_PAPER;
-                        return (
-                          <li key={t.id}>
-                            <label
-                              className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
-                                disabled
-                                  ? "opacity-40"
-                                  : "cursor-pointer hover:bg-brand/5"
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={disabled}
-                                onChange={() => toggleTopic(t.id)}
-                                className="shrink-0"
-                              />
-                              <span>{t.topic}</span>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-
-              {selectedTopicIds.size >= MAX_TOPICS_PER_PAPER && (
-                <p className="mt-2 text-xs text-foreground/40">
-                  Up to {MAX_TOPICS_PER_PAPER} topics per paper.
-                </p>
-              )}
+              <ul className="space-y-1">
+                {chapters.map((chapter) => {
+                  const checked = selectedChapters.has(chapter);
+                  return (
+                    <li key={chapter}>
+                      <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-brand/5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleChapter(chapter)}
+                          className="shrink-0"
+                        />
+                        <span>{chapter}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
 
               {generateError && (
                 <p className="mt-3 text-sm text-red-600">{generateError}</p>
@@ -426,7 +372,7 @@ export function PracticePanel({
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={selectedTopicIds.size === 0 || generating}
+                disabled={selectedChapters.size === 0 || generating}
                 className="mt-4 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
               >
                 {generating ? (

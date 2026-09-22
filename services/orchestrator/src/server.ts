@@ -171,8 +171,8 @@ const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>([
 const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
 // /v1/practice-paper/evaluate's own cap -- a photographed answer sheet
 // commonly spans a few pages. Kept in sync by hand with the web app's own
-// copy of this constant, same "mirrored constant" convention as
-// MAX_TOPICS_PER_PAPER.
+// copy of this constant, same "mirrored constant" convention used
+// throughout this file.
 const MAX_IMAGES_PER_SUBMISSION = 4;
 
 if (!SHARED_SECRET) {
@@ -2040,6 +2040,18 @@ app.post(
   },
 );
 
+// Fisher-Yates, in place on a shallow copy -- used by the practice-paper
+// generate route to randomize which topics its round-robin draws from
+// first, see that route's own comment on why.
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 // Generates ONE practice-paper question grounded in one topic, following
 // the same archetype -> concept -> ungrounded fallback chain
 // /v1/topic-exercises (archetype-grounded, falls back to ungrounded) and
@@ -2166,12 +2178,19 @@ async function generatePracticePaperQuestion(params: {
   return { id: stored.id, question: stored.question, type };
 }
 
-// A student picks up to MAX_TOPICS_PER_PAPER topics (see the web app's own
-// route for why the picker selects individual topics, not chapters); this
-// builds a full paper from the fixed blueprint (buildPracticeBlueprint --
-// see its own comment on why this isn't student-configurable), rotating
-// through every selected topic so a multi-topic paper draws from all of
-// them, not just the first.
+// A student can select any number of chapters, even the whole syllabus --
+// no cap on the request itself (reported directly: an earlier version
+// capped this at 4, which was unwanted). This builds a full paper from the
+// fixed blueprint (buildPracticeBlueprint -- see its own comment on why
+// this isn't student-configurable, and why a large selection still
+// produces one reasonably-sized paper rather than growing without bound).
+// topics is shuffled once up front so the round-robin below draws a
+// varied sample across a large selection instead of deterministically
+// only ever reaching the first few chapters in array order -- the
+// blueprint's own question count is capped regardless of selection size,
+// so without this, selecting the whole syllabus would silently only ever
+// generate questions from whichever chapter happened to be resolved
+// first.
 app.post(
   "/v1/practice-paper/generate",
   requireSharedSecret,
@@ -2207,7 +2226,11 @@ app.post(
     const boardName = body.boardName;
     const gradeName = body.gradeName;
     const medium = body.medium as Medium;
-    const topics = body.topics as PracticePaperTopic[];
+    // Shuffled (not the caller's own resolution order) -- see the route
+    // comment above on why: the round-robin below only ever draws
+    // `jobs.length` topics total, which is far fewer than a large/whole-
+    // syllabus selection can contain.
+    const topics = shuffle(body.topics as PracticePaperTopic[]);
     const scope = {
       boardId: body.boardId,
       gradeId: body.gradeId,

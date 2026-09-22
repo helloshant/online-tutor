@@ -8,18 +8,16 @@ import type { ExerciseType } from "./types.js";
 // generation cost and the number of photographed pages a student needs to
 // write bounded.
 //
-// Named MAX_TOPICS_PER_PAPER, not MAX_CHAPTERS_PER_PAPER: the web app's own
-// picker selects individual syllabus_topics rows, not distinct chapter
-// names -- a chapter value isn't a reliable "pick one of these" unit for
-// every subject (a literature-style subject can have many stories/poems
-// sharing one chapter/book name, each living in its own `topic` field
-// instead, see practice-panel.tsx's own ChapterGroup comment). `chapterCount`
-// below still means what it says -- the number of DISTINCT chapters among
-// the topics actually selected, which can be smaller than the number of
-// topics picked (e.g. 4 stories from the same book is chapterCount=1) --
-// this cap just also doubles as the ceiling on how many topics (and thus
-// LLM generation calls) one request can ask for at all.
-export const MAX_TOPICS_PER_PAPER = 4;
+// A student can select as many chapters as they want -- even the whole
+// syllabus -- with no cap on the selection itself (reported directly: an
+// earlier version capped the picker at 4 chapters, which was unwanted).
+// This constant is NOT that cap; it only bounds how much the paper's own
+// SIZE scales with a large selection, so picking 20 chapters still
+// produces one reasonably-sized mock paper (same LLM call count as
+// picking 4) rather than an enormous one -- see server.ts's own comment on
+// how a large selection still gets varied coverage despite this cap
+// (the topics drawn from are shuffled first, not just the first few).
+export const MAX_BLUEPRINT_SCALE_CHAPTERS = 4;
 
 export type BlueprintSection = {
   type: ExerciseType;
@@ -30,7 +28,10 @@ export type BlueprintSection = {
 export function buildPracticeBlueprint(
   chapterCount: number,
 ): BlueprintSection[] {
-  const extra = Math.max(0, Math.min(chapterCount, MAX_TOPICS_PER_PAPER) - 1);
+  const extra = Math.max(
+    0,
+    Math.min(chapterCount, MAX_BLUEPRINT_SCALE_CHAPTERS) - 1,
+  );
   return [
     { type: "MCQ", count: 5 + extra, marksEach: 1 },
     { type: "short_answer", count: 3 + extra, marksEach: 2 },
