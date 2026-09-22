@@ -28,6 +28,8 @@ const ALLOWED_IMAGE_TYPES = new Set([
 ]);
 const MAX_IMAGES_PER_SUBMISSION = 4;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+// See the chapter-list effect's own comment for what this decides.
+const FEW_CHAPTERS_THRESHOLD = 3;
 
 type PaperQuestion = {
   id: string;
@@ -114,22 +116,33 @@ export function PracticePanel({
   // the same pattern), but this effect also covers a staff preview's own
   // board/grade/medium changing under an otherwise-stable subject.
   //
-  // Reported directly, twice, for two different subjects (WBBSE Bengali,
-  // then WBBSE Geography): some subjects' syllabus_topics rows all share
-  // ONE chapter value (the book/subject's own title), with the real,
-  // chapter-sized divisions actually living in each row's own `topic`
-  // field instead -- the exact same board-agnostic ambiguity already
-  // handled elsewhere in this app (see archetypeExercises.ts). A picker
-  // grounded strictly in `chapter` degenerates to a single, useless
-  // checkbox for a subject shaped this way. Falls back to `topic` ONLY
-  // when `chapter` gives no real choice (a single distinct value) -- for
-  // every ordinary subject (e.g. Math, whose 8 numbered chapters already
-  // are the real unit), this changes nothing at all. The fallback topics
-  // are themselves full chapter-sized units here (confirmed directly:
-  // "Earth as a Planet", "Movements of the Earth", ...), not fine-grained
-  // sub-points, so this is NOT the sub-topic picker that was explicitly
-  // ruled out -- it's the same "pick a chapter" UI, just sourced from
-  // whichever column actually carries that granularity for this subject.
+  // Reported directly, three times, for three different subjects (WBBSE
+  // Bengali, WBBSE Geography, CBSE Hindi): some subjects' syllabus_topics
+  // rows are organized around a small number of BOOKS (e.g. "Sparsh",
+  // "Ganit Prakash", "Sahitya Onushilon") rather than real chapters -- the
+  // book's own title sits in `chapter`, with the real, chapter-sized
+  // divisions (each story/poem, or a grammar/writing-skills catch-all)
+  // actually living in each row's own `topic` field instead. A picker
+  // grounded strictly in `chapter` degenerates to one or two enormous,
+  // useless checkboxes for a subject shaped this way.
+  //
+  // Distinguishing this from an ordinary, well-structured subject can't be
+  // done by topic count alone -- confirmed directly against real data: a
+  // single genuine chapter can legitimately have up to 10 topics under it
+  // (e.g. WBBSE Grade 9 Bengali-medium Math's own numbered chapters), while
+  // a degenerate "book" bucket can have as few as 5. What DOES cleanly
+  // separate every real case checked: a well-structured subject has MANY
+  // distinct chapter values (Grade 9 Math has 20+; Grade 9 Geography's
+  // English medium has 5), while a book-organized one has only one or two
+  // (a single book, or a book plus a small grammar/skills catch-all).
+  // Falls back to `topic` (flattened, ungrouped) only when the whole
+  // subject has few distinct chapters -- for every ordinary subject, this
+  // changes nothing. The fallback topics are themselves full chapter-sized
+  // units (confirmed directly: "Earth as a Planet", "সাখী", "Reading
+  // Comprehension", ...), not fine-grained sub-points, so this is NOT the
+  // sub-topic picker that was explicitly ruled out -- it's the same "pick
+  // a chapter" UI, just sourced from whichever column actually carries
+  // that granularity for this subject.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -146,7 +159,7 @@ export function PracticePanel({
       const rows = data ?? [];
       const distinctChapters = [...new Set(rows.map((t) => t.chapter))];
       setChapters(
-        distinctChapters.length > 1
+        distinctChapters.length > FEW_CHAPTERS_THRESHOLD
           ? distinctChapters
           : [...new Set(rows.map((t) => t.topic))],
       );
