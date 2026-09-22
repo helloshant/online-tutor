@@ -291,7 +291,7 @@ export function DashboardShell({
           />
         )}
 
-        <main className="flex min-h-0 flex-1 flex-col">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           {mainTab === "subjects" ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
@@ -432,7 +432,7 @@ export function DashboardShell({
                 <div
                   className={
                     mainTab === "practice"
-                      ? "flex min-h-0 flex-1 flex-col"
+                      ? "flex min-h-0 min-w-0 flex-1 flex-col"
                       : "hidden"
                   }
                 >
