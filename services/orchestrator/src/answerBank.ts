@@ -11,7 +11,7 @@ import type { AnswerScope } from "./types.js";
 const MIN_RANK = 0.1;
 
 export async function findAnswerInBank(
-  scope: AnswerScope
+  scope: AnswerScope,
 ): Promise<{ id: string; answer: string } | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -37,7 +37,8 @@ export async function findAnswerInBank(
   supabase
     .rpc("bump_answer_bank_hit", { p_id: data.id })
     .then(({ error: bumpError }) => {
-      if (bumpError) console.error("Failed to bump answer bank hit count:", bumpError);
+      if (bumpError)
+        console.error("Failed to bump answer bank hit count:", bumpError);
     });
 
   return { id: data.id, answer: data.answer };
@@ -67,7 +68,7 @@ export type BankedExercise = {
 
 export async function findRelevantExercises(
   scope: Omit<AnswerScope, "question" | "topicId">,
-  topicId: string
+  topicId: string,
 ): Promise<BankedExercise[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -120,7 +121,7 @@ export async function recordAnswer(
   // (0043_exercise_grading.sql) so a LATER student reusing this exercise
   // from the bank (see findRelevantExercises above) still gets it credited
   // to the right pattern when they grade their own attempt at it.
-  archetypeAttribution?: { runId: string; archetypeId: string } | null
+  archetypeAttribution?: { runId: string; archetypeId: string } | null,
 ): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -175,13 +176,17 @@ export type ExerciseForGrading = {
   topic: string | null;
 };
 
-export async function getExerciseForGrading(exerciseId: string): Promise<ExerciseForGrading | null> {
+export async function getExerciseForGrading(
+  exerciseId: string,
+): Promise<ExerciseForGrading | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   const { data: row, error } = await supabase
     .from("answered_questions")
-    .select("question, answer, board_id, grade_id, subject_id, medium, archetype_run_id, archetype_id, topic_id")
+    .select(
+      "question, answer, board_id, grade_id, subject_id, medium, archetype_run_id, archetype_id, topic_id",
+    )
     .eq("id", exerciseId)
     .maybeSingle();
 
@@ -192,9 +197,17 @@ export async function getExerciseForGrading(exerciseId: string): Promise<Exercis
   if (!row) return null;
 
   const [{ data: subjectRow }, { data: topicRow }] = await Promise.all([
-    supabase.from("subjects").select("name").eq("id", row.subject_id).maybeSingle(),
+    supabase
+      .from("subjects")
+      .select("name")
+      .eq("id", row.subject_id)
+      .maybeSingle(),
     row.topic_id
-      ? supabase.from("syllabus_topics").select("chapter, topic").eq("id", row.topic_id).maybeSingle()
+      ? supabase
+          .from("syllabus_topics")
+          .select("chapter, topic")
+          .eq("id", row.topic_id)
+          .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -211,4 +224,40 @@ export async function getExerciseForGrading(exerciseId: string): Promise<Exercis
     chapter: topicRow?.chapter ?? null,
     topic: topicRow?.topic ?? null,
   };
+}
+
+// Sibling of getExerciseForGrading above, for the practice-paper evaluate
+// route -- a single batched lookup for every question on a paper (up to a
+// handful), rather than one join-heavy call per question. Deliberately just
+// question/answer, no subject/topic join: the caller already has its own
+// question/type/marks for each id from practice_paper_questions, this only
+// ever needs to fill in the one thing that table doesn't carry -- the real
+// expected answer, re-derived here rather than trusted from the request
+// body (see EvaluatePracticePaperRequest's own comment).
+export async function getAnswersForGrading(
+  ids: string[],
+): Promise<Map<string, { question: string; answer: string }>> {
+  const result = new Map<string, { question: string; answer: string }>();
+  if (ids.length === 0) return result;
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return result;
+
+  const { data: rows, error } = await supabase
+    .from("answered_questions")
+    .select("id, question, answer")
+    .in("id", ids);
+
+  if (error) {
+    console.error(
+      "Failed to batch-look-up answers for practice-paper grading:",
+      error,
+    );
+    return result;
+  }
+
+  for (const row of rows ?? []) {
+    result.set(row.id, { question: row.question, answer: row.answer });
+  }
+  return result;
 }

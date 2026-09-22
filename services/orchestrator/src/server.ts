@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import {
   findAnswerInBank,
   findRelevantExercises,
+  getAnswersForGrading,
   getExerciseForGrading,
   recordAnswer,
 } from "./answerBank.js";
@@ -31,13 +32,16 @@ import {
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
-import { getActiveLlmProvider, getChatReply } from "./llm.js";
+import { getActiveLlmProvider, getChatReply, getGradingReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
+import { buildPracticeBlueprint } from "./practiceBlueprint.js";
+import { parsePracticePaperGrading } from "./practicePaperGrading.js";
 import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
   buildChapterDocumentEmphasisPrompt,
   buildConceptExerciseGenerationPrompt,
   buildExerciseGenerationPrompt,
+  buildPracticePaperGradingPrompt,
   buildStaffSystemPrompt,
   buildTopicSummaryPrompt,
   buildTopicSummaryTranslationPrompt,
@@ -60,10 +64,14 @@ import type {
   ChatOrchestrationRequest,
   ChatOrchestrationResponse,
   DifficultyLevel,
+  EvaluatePracticePaperRequest,
+  EvaluatePracticePaperResponse,
   ExerciseItem,
   ExerciseType,
   GenerateConceptExercisesRequest,
   GenerateConceptExercisesResponse,
+  GeneratePracticePaperRequest,
+  GeneratePracticePaperResponse,
   GenerateTopicExerciseRequest,
   GenerateTopicExerciseResponse,
   GradeExerciseRequest,
@@ -71,6 +79,8 @@ import type {
   ImageAttachment,
   ImageMediaType,
   Medium,
+  PracticePaperQuestion,
+  PracticePaperTopic,
   TopicConceptsRequest,
   TopicConceptsResponse,
   TopicExercisesRequest,
@@ -159,6 +169,11 @@ const ALLOWED_IMAGE_TYPES = new Set<ImageMediaType>([
 // under the JSON body limit below, which also has to fit the rest of the
 // request (history, syllabus topics, etc).
 const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
+// /v1/practice-paper/evaluate's own cap -- a photographed answer sheet
+// commonly spans a few pages. Kept in sync by hand with the web app's own
+// copy of this constant, same "mirrored constant" convention as
+// MAX_CHAPTERS_PER_PAPER.
+const MAX_IMAGES_PER_SUBMISSION = 4;
 
 if (!SHARED_SECRET) {
   console.warn(
@@ -169,8 +184,17 @@ if (!SHARED_SECRET) {
 }
 
 const app = express();
-// Raised from the original 1mb to fit a base64-encoded screenshot/photo.
-app.use(express.json({ limit: "8mb" }));
+// Raised from the original 1mb (to fit a base64-encoded screenshot/photo),
+// then again from 8mb: /v1/practice-paper/evaluate can carry up to
+// MAX_IMAGES_PER_SUBMISSION images at up to MAX_IMAGE_BASE64_LENGTH each,
+// which alone can approach ~24mb of base64. Raising the one shared global
+// limit rather than trying to scope a bigger limit to just that route --
+// Express parses the body before a route handler ever runs, so a per-route
+// override only works if that route's own body-parser middleware is
+// registered ahead of this app-wide one in the file, which is fragile
+// (silently breaks if a future edit reorders routes) for no real benefit,
+// since a larger ceiling costs nothing for every other route.
+app.use(express.json({ limit: "26mb" }));
 
 // Returns `undefined` when no image was sent (valid -- most requests have
 // none), an ImageAttachment when one was and it's valid, or throws-shaped
@@ -2011,6 +2035,362 @@ app.post(
       res.status(502).json({
         error:
           "Could not grade this attempt right now. Please try again shortly.",
+      });
+    }
+  },
+);
+
+// Generates ONE practice-paper question grounded in one topic, following
+// the same archetype -> concept -> ungrounded fallback chain
+// /v1/topic-exercises (archetype-grounded, falls back to ungrounded) and
+// /v1/topic-exercises/generate-for-concept (concept-grounded, reached only
+// via its own separate picker) each cover HALF of on their own -- there is
+// no single existing function that chains all three, since a student
+// browsing the "Relevant Exercises" flow always resolves that choice
+// themselves by which picker they land in. Null only when generation or
+// storage genuinely failed for this one question -- the caller just skips
+// it rather than failing the whole paper over one bad slot.
+async function generatePracticePaperQuestion(params: {
+  userId: string;
+  scope: Omit<AnswerScope, "question" | "topicId">;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  topic: PracticePaperTopic;
+  type: ExerciseType;
+}): Promise<{ id: string; question: string; type: ExerciseType } | null> {
+  const {
+    userId,
+    scope,
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    topic,
+    type,
+  } = params;
+
+  const archetypes = await findArchetypesForTopic({
+    boardName,
+    gradeName,
+    subjectName,
+    chapter: topic.chapter,
+    topic: topic.topic,
+  });
+
+  let systemPrompt: string;
+  if (archetypes.length > 0) {
+    systemPrompt = buildExerciseGenerationPrompt({
+      subjectName,
+      boardName,
+      gradeName,
+      medium,
+      chapter: topic.chapter,
+      topic: topic.topic,
+      count: 1,
+      archetypes,
+      requestedType: type,
+    });
+  } else {
+    const concepts = await findConceptsForTopic(topic.id);
+    const concept =
+      concepts.length > 0
+        ? await findConceptContent(topic.id, concepts[0].id)
+        : null;
+    systemPrompt = concept
+      ? buildConceptExerciseGenerationPrompt({
+          subjectName,
+          boardName,
+          gradeName,
+          medium,
+          chapter: topic.chapter,
+          topic: topic.topic,
+          conceptTerm: concept.term,
+          conceptContent: concept.content,
+          count: 1,
+          requestedType: type,
+        })
+      : buildExerciseGenerationPrompt({
+          subjectName,
+          boardName,
+          gradeName,
+          medium,
+          chapter: topic.chapter,
+          topic: topic.topic,
+          count: 1,
+          archetypes: [],
+          requestedType: type,
+        });
+  }
+
+  const { text } = await getChatReply({
+    systemPrompt,
+    history: [],
+    message: "Generate the exercises now.",
+    maxTokens: EXERCISE_MAX_TOKENS,
+  });
+
+  const [exercise] = parseGeneratedExercises(text);
+  if (!exercise) return null;
+
+  // Same patternIndex -> archetype resolution as /v1/topic-exercises'
+  // batch handler above -- with count:1, a successfully-tagged exercise's
+  // patternIndex should be 1, but resolved the same defensive way rather
+  // than assumed.
+  const archetype =
+    typeof exercise.patternIndex === "number"
+      ? archetypes[exercise.patternIndex - 1]
+      : undefined;
+  const archetypeAttribution = archetype
+    ? { runId: archetype.runId, archetypeId: archetype.archetypeId }
+    : null;
+
+  // The requested type is always what every blueprint job asks for here
+  // (never "Any" -- unlike the student-facing pickers, a practice-paper
+  // job always has a specific type in mind), so it always wins over the
+  // model's own self-tag -- same reasoning as
+  // /v1/topic-exercises/generate-for-concept's identical override
+  // (confirmed directly: the model reliably WRITES the requested type's
+  // actual content, but its own self-classification tag is the less
+  // reliable of the two signals).
+  const stored = await storeGeneratedExercise(
+    scope,
+    topic.id,
+    userId,
+    { question: exercise.question, answer: exercise.answer, type },
+    archetypeAttribution,
+  );
+  if (!stored) return null;
+
+  return { id: stored.id, question: stored.question, type };
+}
+
+// A student picks up to MAX_CHAPTERS_PER_PAPER chapters; this builds a full
+// paper from the fixed blueprint (buildPracticeBlueprint -- see its own
+// comment on why this isn't student-configurable), rotating through every
+// topic under those chapters so a multi-chapter paper draws from all of
+// them, not just the first.
+app.post(
+  "/v1/practice-paper/generate",
+  requireSharedSecret,
+  async (req: Request, res: Response) => {
+    const body = req.body as Partial<GeneratePracticePaperRequest> | undefined;
+
+    if (
+      !body ||
+      typeof body.userId !== "string" ||
+      !body.userId ||
+      typeof body.boardId !== "string" ||
+      !body.boardId ||
+      typeof body.gradeId !== "string" ||
+      !body.gradeId ||
+      typeof body.subjectId !== "string" ||
+      !body.subjectId ||
+      typeof body.subjectName !== "string" ||
+      typeof body.boardName !== "string" ||
+      typeof body.gradeName !== "string" ||
+      typeof body.medium !== "string" ||
+      !Array.isArray(body.topics) ||
+      body.topics.length === 0
+    ) {
+      res.status(400).json({
+        error:
+          "userId, boardId, gradeId, subjectId, subjectName, boardName, gradeName, medium, and a non-empty topics array are required",
+      });
+      return;
+    }
+
+    const userId = body.userId;
+    const subjectName = body.subjectName;
+    const boardName = body.boardName;
+    const gradeName = body.gradeName;
+    const medium = body.medium as Medium;
+    const topics = body.topics as PracticePaperTopic[];
+    const scope = {
+      boardId: body.boardId,
+      gradeId: body.gradeId,
+      subjectId: body.subjectId,
+      medium,
+    };
+
+    const chapterCount = new Set(topics.map((t) => t.chapter)).size;
+    const blueprint = buildPracticeBlueprint(chapterCount);
+    const jobs: { type: ExerciseType; marks: number }[] = blueprint.flatMap(
+      (section) =>
+        Array.from({ length: section.count }, () => ({
+          type: section.type,
+          marks: section.marksEach,
+        })),
+    );
+
+    try {
+      const questions: PracticePaperQuestion[] = [];
+      let topicCursor = 0;
+      // Bounded concurrency -- not full parallelism (this can be 10-16+
+      // LLM calls for a 4-chapter paper, unnecessary load on the provider
+      // all at once) and not sequential (too slow for a student waiting on
+      // this request).
+      const CONCURRENCY = 5;
+      for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+        const chunk = jobs.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(
+          chunk.map((job) => {
+            const topic = topics[topicCursor % topics.length];
+            topicCursor += 1;
+            return generatePracticePaperQuestion({
+              userId,
+              scope,
+              subjectName,
+              boardName,
+              gradeName,
+              medium,
+              topic,
+              type: job.type,
+            }).then((result) =>
+              result ? { ...result, marks: job.marks } : null,
+            );
+          }),
+        );
+        for (const result of results) {
+          if (!result) continue;
+          questions.push({
+            answeredQuestionId: result.id,
+            question: result.question,
+            type: result.type,
+            marks: result.marks,
+            sortOrder: questions.length,
+          });
+        }
+      }
+
+      const response: GeneratePracticePaperResponse = {
+        questions,
+        totalMarks: questions.reduce((sum, q) => sum + q.marks, 0),
+      };
+      res.json(response);
+    } catch (err) {
+      console.error("Practice-paper generation failed:", err);
+      res.status(502).json({
+        error:
+          "Could not generate a practice paper right now. Please try again shortly.",
+      });
+    }
+  },
+);
+
+// Grades an entire submitted practice paper from one or more photographed
+// answer-sheet pages in a single vision call -- see
+// buildPracticePaperGradingPrompt/practicePaperGrading.ts. Deliberately
+// re-derives every question's own expected answer from answered_questions
+// here rather than trusting it from the request body -- see
+// EvaluatePracticePaperRequest's own comment on this trust boundary.
+app.post(
+  "/v1/practice-paper/evaluate",
+  requireSharedSecret,
+  async (req: Request, res: Response) => {
+    const body = req.body as Partial<EvaluatePracticePaperRequest> | undefined;
+
+    if (
+      !body ||
+      typeof body.userId !== "string" ||
+      !body.userId ||
+      typeof body.subjectName !== "string" ||
+      typeof body.medium !== "string" ||
+      !Array.isArray(body.questions) ||
+      body.questions.length === 0 ||
+      !Array.isArray(body.images) ||
+      body.images.length === 0 ||
+      body.images.length > MAX_IMAGES_PER_SUBMISSION
+    ) {
+      res.status(400).json({
+        error: `userId, subjectName, medium, a non-empty questions array, and 1-${MAX_IMAGES_PER_SUBMISSION} images are required`,
+      });
+      return;
+    }
+
+    const medium = body.medium as Medium;
+    const requestQuestions = body.questions;
+    const images = body.images as ImageAttachment[];
+    for (const image of images) {
+      if (
+        !image ||
+        typeof image.base64 !== "string" ||
+        !ALLOWED_IMAGE_TYPES.has(image.mediaType as ImageMediaType) ||
+        image.base64.length > MAX_IMAGE_BASE64_LENGTH
+      ) {
+        res
+          .status(400)
+          .json({ error: "One or more images were invalid or too large" });
+        return;
+      }
+    }
+
+    try {
+      const answers = await getAnswersForGrading(
+        requestQuestions.map((q) => q.answeredQuestionId),
+      );
+      const gradingQuestions = requestQuestions
+        .map((q) => {
+          const answer = answers.get(q.answeredQuestionId);
+          if (!answer) return null;
+          return {
+            id: q.id,
+            question: answer.question,
+            expectedAnswer: answer.answer,
+            type: q.type,
+            marks: q.marks,
+          };
+        })
+        .filter((q): q is NonNullable<typeof q> => q !== null);
+
+      if (gradingQuestions.length === 0) {
+        res
+          .status(502)
+          .json({
+            error: "Could not load this paper's own questions for grading.",
+          });
+        return;
+      }
+
+      const systemPrompt = buildPracticePaperGradingPrompt({
+        subjectName: body.subjectName as string,
+        medium,
+        questions: gradingQuestions,
+      });
+      const { text } = await getGradingReply({
+        systemPrompt,
+        images,
+        maxTokens: EXERCISE_MAX_TOKENS,
+      });
+
+      const parsed = parsePracticePaperGrading(
+        text,
+        gradingQuestions.map((q) => ({ id: q.id, marks: q.marks })),
+      );
+      if (!parsed) {
+        res
+          .status(502)
+          .json({
+            error:
+              "Could not grade this submission right now. Please try again shortly.",
+          });
+        return;
+      }
+
+      const results: EvaluatePracticePaperResponse["results"] = parsed.results;
+      const response: EvaluatePracticePaperResponse = {
+        results,
+        totalScore: results.reduce((sum, r) => sum + r.score, 0),
+        maxPossibleScore: gradingQuestions.reduce((sum, q) => sum + q.marks, 0),
+        overallFeedback: parsed.overallFeedback,
+      };
+      res.json(response);
+    } catch (err) {
+      console.error("Practice-paper evaluation failed:", err);
+      res.status(502).json({
+        error:
+          "Could not grade this submission right now. Please try again shortly.",
       });
     }
   },
