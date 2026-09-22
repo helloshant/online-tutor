@@ -295,6 +295,14 @@ async function handlePost(request: Request) {
               byAnsweredId.get(row.answered_question_id)?.question ?? "",
             type: row.question_type,
             marks: row.marks,
+            // A freshly generated paper has no submission yet -- explicit
+            // null (not an omitted field) matches GET /[id]'s own shape,
+            // which practice-panel.tsx relies on: it renders the graded
+            // feedback bar on `q.score !== null`, which is true for an
+            // omitted field too (undefined !== null), so leaving this out
+            // showed an empty graded-looking bar on every brand-new paper.
+            score: null,
+            feedback: null,
           })),
       },
     });
@@ -389,6 +397,8 @@ async function handleGet(request: Request) {
   });
 }
 
-// Paper generation fires up to ~16 sequential-ish LLM calls in bounded
-// chunks -- comfortably past the platform's default route timeout.
-export const maxDuration = 60;
+// Paper generation now fires a fixed 41 sequential-ish LLM calls in bounded
+// chunks (see practiceBlueprint.ts's move to a fixed 80-mark paper) --
+// raised from 60s to comfortably cover that larger batch count, well past
+// the platform's default route timeout either way.
+export const maxDuration = 180;

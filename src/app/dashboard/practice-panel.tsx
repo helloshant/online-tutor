@@ -492,6 +492,7 @@ export function PracticePanel({
             ← New paper
           </button>
 
+          <p className="text-lg font-bold">Mock Exam</p>
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
             {activePaper.chapters.join(", ")}
           </p>
