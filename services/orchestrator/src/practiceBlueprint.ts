@@ -7,7 +7,19 @@ import type { ExerciseType } from "./types.js";
 // paper never needs more than 2 deep-dive questions, keeping both
 // generation cost and the number of photographed pages a student needs to
 // write bounded.
-export const MAX_CHAPTERS_PER_PAPER = 4;
+//
+// Named MAX_TOPICS_PER_PAPER, not MAX_CHAPTERS_PER_PAPER: the web app's own
+// picker selects individual syllabus_topics rows, not distinct chapter
+// names -- a chapter value isn't a reliable "pick one of these" unit for
+// every subject (a literature-style subject can have many stories/poems
+// sharing one chapter/book name, each living in its own `topic` field
+// instead, see practice-panel.tsx's own ChapterGroup comment). `chapterCount`
+// below still means what it says -- the number of DISTINCT chapters among
+// the topics actually selected, which can be smaller than the number of
+// topics picked (e.g. 4 stories from the same book is chapterCount=1) --
+// this cap just also doubles as the ceiling on how many topics (and thus
+// LLM generation calls) one request can ask for at all.
+export const MAX_TOPICS_PER_PAPER = 4;
 
 export type BlueprintSection = {
   type: ExerciseType;
@@ -15,8 +27,10 @@ export type BlueprintSection = {
   marksEach: number;
 };
 
-export function buildPracticeBlueprint(chapterCount: number): BlueprintSection[] {
-  const extra = Math.max(0, Math.min(chapterCount, MAX_CHAPTERS_PER_PAPER) - 1);
+export function buildPracticeBlueprint(
+  chapterCount: number,
+): BlueprintSection[] {
+  const extra = Math.max(0, Math.min(chapterCount, MAX_TOPICS_PER_PAPER) - 1);
   return [
     { type: "MCQ", count: 5 + extra, marksEach: 1 },
     { type: "short_answer", count: 3 + extra, marksEach: 2 },

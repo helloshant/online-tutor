@@ -172,7 +172,7 @@ const MAX_IMAGE_BASE64_LENGTH = 6_000_000;
 // /v1/practice-paper/evaluate's own cap -- a photographed answer sheet
 // commonly spans a few pages. Kept in sync by hand with the web app's own
 // copy of this constant, same "mirrored constant" convention as
-// MAX_CHAPTERS_PER_PAPER.
+// MAX_TOPICS_PER_PAPER.
 const MAX_IMAGES_PER_SUBMISSION = 4;
 
 if (!SHARED_SECRET) {
@@ -2166,10 +2166,11 @@ async function generatePracticePaperQuestion(params: {
   return { id: stored.id, question: stored.question, type };
 }
 
-// A student picks up to MAX_CHAPTERS_PER_PAPER chapters; this builds a full
-// paper from the fixed blueprint (buildPracticeBlueprint -- see its own
-// comment on why this isn't student-configurable), rotating through every
-// topic under those chapters so a multi-chapter paper draws from all of
+// A student picks up to MAX_TOPICS_PER_PAPER topics (see the web app's own
+// route for why the picker selects individual topics, not chapters); this
+// builds a full paper from the fixed blueprint (buildPracticeBlueprint --
+// see its own comment on why this isn't student-configurable), rotating
+// through every selected topic so a multi-topic paper draws from all of
 // them, not just the first.
 app.post(
   "/v1/practice-paper/generate",
@@ -2345,11 +2346,9 @@ app.post(
         .filter((q): q is NonNullable<typeof q> => q !== null);
 
       if (gradingQuestions.length === 0) {
-        res
-          .status(502)
-          .json({
-            error: "Could not load this paper's own questions for grading.",
-          });
+        res.status(502).json({
+          error: "Could not load this paper's own questions for grading.",
+        });
         return;
       }
 
@@ -2369,12 +2368,10 @@ app.post(
         gradingQuestions.map((q) => ({ id: q.id, marks: q.marks })),
       );
       if (!parsed) {
-        res
-          .status(502)
-          .json({
-            error:
-              "Could not grade this submission right now. Please try again shortly.",
-          });
+        res.status(502).json({
+          error:
+            "Could not grade this submission right now. Please try again shortly.",
+        });
         return;
       }
 

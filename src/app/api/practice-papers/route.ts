@@ -16,9 +16,9 @@ import { generatePracticePaper } from "@/lib/orchestratorClient";
 import type { Medium } from "@/lib/supabase/types";
 
 // Kept in sync by hand with the orchestrator's own
-// practiceBlueprint.ts:MAX_CHAPTERS_PER_PAPER -- same "mirrored constant"
+// practiceBlueprint.ts:MAX_TOPICS_PER_PAPER -- same "mirrored constant"
 // convention as ExerciseType across this app's client/server boundary.
-const MAX_CHAPTERS_PER_PAPER = 4;
+const MAX_TOPICS_PER_PAPER = 4;
 
 // POST generates a fresh paper for one or more selected chapters; GET
 // lists the caller's own paper history. A real student's scope always
@@ -53,7 +53,7 @@ export async function GET() {
   }
 }
 
-// Up to MAX_CHAPTERS_PER_PAPER chapters' worth of exercise generation is
+// Up to MAX_TOPICS_PER_PAPER topics' worth of exercise generation is
 // genuinely more LLM spend than a single exercise click -- same quota gate
 // /api/topics/[id]/exercises/generate/route.ts already enforces for the
 // same reason (real, repeatable, on-demand token cost), applied here too
@@ -70,18 +70,21 @@ async function handlePost(request: Request) {
 
   const body = await request.json().catch(() => null);
   const subjectId = typeof body?.subjectId === "string" ? body.subjectId : "";
-  const chapters = Array.isArray(body?.chapters) ? body.chapters : null;
+  // Individual syllabus_topics row ids, not chapter names -- see
+  // practice-panel.tsx's own ChapterGroup comment on why a chapter value
+  // isn't a reliable pick-one-of-these-N unit for every subject.
+  const topicIds = Array.isArray(body?.topicIds) ? body.topicIds : null;
 
   if (
     !subjectId ||
-    !chapters ||
-    chapters.length === 0 ||
-    chapters.length > MAX_CHAPTERS_PER_PAPER ||
-    !chapters.every((c: unknown) => typeof c === "string" && c.trim())
+    !topicIds ||
+    topicIds.length === 0 ||
+    topicIds.length > MAX_TOPICS_PER_PAPER ||
+    !topicIds.every((t: unknown) => typeof t === "string" && t.trim())
   ) {
     return NextResponse.json(
       {
-        error: `subjectId and 1-${MAX_CHAPTERS_PER_PAPER} chapter names are required`,
+        error: `subjectId and 1-${MAX_TOPICS_PER_PAPER} topic ids are required`,
       },
       { status: 400 },
     );
@@ -172,6 +175,10 @@ async function handlePost(request: Request) {
     scope.medium,
   );
 
+  // Scoped by board/grade/subject/medium in addition to the requested ids
+  // -- never trusts a topicId alone, so a staff preview (or a compromised
+  // client) can't pull in a topic from a different board/grade/subject
+  // than the one actually being previewed/subscribed to.
   const { data: topicRows } = await supabase
     .from("syllabus_topics")
     .select("id, chapter, topic")
@@ -179,16 +186,19 @@ async function handlePost(request: Request) {
     .eq("grade_id", scope.gradeId)
     .eq("subject_id", subjectId)
     .eq("medium", contentMedium)
-    .in("chapter", chapters);
+    .in("id", topicIds);
 
-  const foundChapters = new Set((topicRows ?? []).map((t) => t.chapter));
-  const missingChapter = chapters.find((c: string) => !foundChapters.has(c));
-  if (missingChapter) {
+  if (!topicRows || topicRows.length !== topicIds.length) {
     return NextResponse.json(
-      { error: `No topics found for chapter "${missingChapter}".` },
+      { error: "One or more selected topics could not be found." },
       { status: 400 },
     );
   }
+  // Derived, not client-supplied -- the distinct chapter names actually
+  // covered by the topics picked, purely for storage/display (e.g. the
+  // paper history list). Can be fewer than topicIds.length (several
+  // topics sharing one chapter -- see the comment above).
+  const chapters = [...new Set(topicRows.map((t) => t.chapter))];
 
   try {
     const { questions, totalMarks } = await generatePracticePaper({
