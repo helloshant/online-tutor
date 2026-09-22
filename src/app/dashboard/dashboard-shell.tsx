@@ -163,10 +163,13 @@ export function DashboardShell({
       ? [{ tab: "trends" as const, icon: "📈", label: "Past years" }]
       : []),
     { tab: "chat", icon: "💬", label: "Chat" },
-    // No meaning for staff (no subscription/marks concept) or without
-    // syllabus scope to generate a paper's chapters/questions from --
-    // same gating hasSyllabusScope already applies to Topics/Past years.
-    ...(hasSyllabusScope && !isStaffUser
+    // Staff have no subscription/marks of their own, but -- same as
+    // Topics/Past years above -- they can still preview it against
+    // whatever board/grade they've selected, so this is gated on
+    // hasSyllabusScope alone, not staff status (unlike Inbox below, which
+    // really is student-only: a staff member has no broadcast inbox to
+    // preview, previewed or not).
+    ...(hasSyllabusScope
       ? [{ tab: "practice" as const, icon: "📝", label: "Practice" }]
       : []),
     ...(!isStaffUser
@@ -330,9 +333,11 @@ export function DashboardShell({
                       never meaningful for staff, preview or not, so it's
                       left off this row entirely for them rather than shown
                       and rendering nothing (see the !isStaffUser guard
-                      further down where its panel is actually rendered). */}
+                      further down where its panel is actually rendered).
+                      Practice, unlike Inbox, IS previewable by staff (same
+                      as Trends), so it stays in both branches. */}
                   {(isStaffUser
-                    ? (["chat", "trends"] as const)
+                    ? (["chat", "trends", "practice"] as const)
                     : (["chat", "trends", "practice", "inbox"] as const)
                   ).map((tab) => (
                     <button
@@ -416,13 +421,14 @@ export function DashboardShell({
                   topicClick={topicClick}
                 />
               </div>
-              {/* Same gating as the mobile nav entry above -- no meaning for
-                  staff or without syllabus scope. Wrapped like Chat/Inbox
-                  (flex flex-col, no padding/scroll classes of its own) since
-                  PracticePanel -- like ChatPanel/InboxPanel -- owns its own
-                  internal scroll region, unlike Topics/Past years, whose
-                  wrapper div supplies that instead. */}
-              {boardId && gradeId && medium && !isStaffUser && (
+              {/* Same gating as the mobile nav entry above -- staff CAN
+                  preview this (no !isStaffUser guard), just without syllabus
+                  scope to generate a paper's chapters/questions from. Wrapped
+                  like Chat/Inbox (flex flex-col, no padding/scroll classes of
+                  its own) since PracticePanel -- like ChatPanel/InboxPanel --
+                  owns its own internal scroll region, unlike Topics/Past
+                  years, whose wrapper div supplies that instead. */}
+              {boardId && gradeId && medium && (
                 <div
                   className={
                     mainTab === "practice"

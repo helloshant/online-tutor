@@ -188,6 +188,14 @@ export function PracticePanel({
         body: JSON.stringify({
           subjectId,
           chapters: Array.from(selectedChapters),
+          // Only meaningful for a staff caller previewing a specific
+          // board/grade (resolveStaffPreviewScope re-validates server-side
+          // rather than trusting these) -- a real student's own scope
+          // always comes from their subscription regardless of what's
+          // sent here, same as /api/chat's own previewBoardId/etc.
+          boardId,
+          gradeId,
+          medium,
         }),
       });
       const body = await res.json();

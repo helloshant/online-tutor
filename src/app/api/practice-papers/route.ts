@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
+import { resolveStaffPreviewScope } from "@/lib/staffPreview";
 import {
   resolveStudentSubjectScope,
   resolveContentMedium,
@@ -19,10 +20,15 @@ import type { Medium } from "@/lib/supabase/types";
 // convention as ExerciseType across this app's client/server boundary.
 const MAX_CHAPTERS_PER_PAPER = 4;
 
-// POST generates a fresh paper for one or more of the student's own
-// selected chapters; GET lists their own paper history. Both student-only
-// in v1 -- no staff-preview branch, matching the brief's scope (staff have
-// no subscription/marks concept for this to attach to).
+// POST generates a fresh paper for one or more selected chapters; GET
+// lists the caller's own paper history. A real student's scope always
+// comes from their own subscription (resolveStudentSubjectScope, ignoring
+// any board/grade/medium the client sends); staff have no subscription at
+// all, so they instead preview a specific board/grade/medium the same way
+// /api/chat/route.ts already lets them -- see handlePost below. Staff
+// never subscribe or have marks tracked, but they still need to be able to
+// see and try this feature (e.g. to demo or QA it), the same way they can
+// already preview Topics/Past years/chat.
 export async function POST(request: Request) {
   try {
     return await handlePost(request);
@@ -81,19 +87,36 @@ async function handlePost(request: Request) {
     );
   }
 
-  const scope = await resolveStudentSubjectScope(supabase, user.id, subjectId);
-  if (!scope) {
-    return NextResponse.json(
-      { error: "You don't have an active subscription for this subject." },
-      { status: 403 },
-    );
-  }
-
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single();
+
+  // Staff have no subscription for resolveStudentSubjectScope to find --
+  // they preview a specific board/grade/medium instead (the same one
+  // dashboard-shell.tsx already resolves for Topics/Past years/chat, sent
+  // through by PracticePanel), validated the same way
+  // /api/chat/route.ts's own staff branch validates it: the board must
+  // actually offer this subject/grade, or this is rejected rather than
+  // trusting an arbitrary client-supplied combination.
+  const scope = isStaff(profile?.role)
+    ? await resolveStaffPreviewScope(supabase, subjectId, {
+        boardId: body?.boardId,
+        gradeId: body?.gradeId,
+        medium: body?.medium,
+      })
+    : await resolveStudentSubjectScope(supabase, user.id, subjectId);
+  if (!scope) {
+    return NextResponse.json(
+      {
+        error: isStaff(profile?.role)
+          ? "Select a board and grade to preview practice papers for."
+          : "You don't have an active subscription for this subject.",
+      },
+      { status: isStaff(profile?.role) ? 400 : 403 },
+    );
+  }
 
   if (!isStaff(profile?.role)) {
     const admin = createAdminClient();
