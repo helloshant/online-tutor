@@ -746,3 +746,121 @@ export async function invalidateCachedTopicSummary(
     console.error("Topic-summary cache invalidation request failed:", err);
   }
 }
+
+// One syllabus_topics row under a chapter the student selected -- see the
+// orchestrator's own PracticePaperTopic (types.ts) for why this is
+// resolved by the web app, not the orchestrator.
+export type PracticePaperTopic = { id: string; chapter: string; topic: string };
+
+export type GeneratePracticePaperRequest = {
+  userId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  topics: PracticePaperTopic[];
+};
+
+export type PracticePaperQuestion = {
+  answeredQuestionId: string;
+  question: string;
+  type: ExerciseType;
+  marks: number;
+  sortOrder: number;
+};
+
+export type GeneratePracticePaperResponse = {
+  questions: PracticePaperQuestion[];
+  totalMarks: number;
+};
+
+export async function generatePracticePaper(
+  request: GeneratePracticePaperRequest,
+): Promise<GeneratePracticePaperResponse> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/practice-paper/generate`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
+  }
+  if (!body || !Array.isArray(body.questions)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return body as GeneratePracticePaperResponse;
+}
+
+// Deliberately no `expectedAnswer` field anywhere here -- the orchestrator
+// re-derives each question's own expected answer itself (see the
+// orchestrator's EvaluatePracticePaperRequest comment).
+export type EvaluatePracticePaperRequest = {
+  userId: string;
+  subjectName: string;
+  medium: Medium;
+  questions: {
+    id: string;
+    answeredQuestionId: string;
+    type: ExerciseType;
+    marks: number;
+  }[];
+  // One or more photographed answer-sheet pages -- the one place in this
+  // client that sends more than a single image in one request; every other
+  // image-taking request here stays singular and untouched.
+  images: ImageAttachment[];
+};
+
+export type PracticePaperQuestionResult = {
+  id: string;
+  score: number;
+  feedback: string;
+};
+
+export type EvaluatePracticePaperResponse = {
+  results: PracticePaperQuestionResult[];
+  totalScore: number;
+  maxPossibleScore: number;
+  overallFeedback: string;
+};
+
+export async function evaluatePracticePaperSubmission(
+  request: EvaluatePracticePaperRequest,
+): Promise<EvaluatePracticePaperResponse> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/practice-paper/evaluate`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
+  }
+  if (!body || !Array.isArray(body.results)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return body as EvaluatePracticePaperResponse;
+}

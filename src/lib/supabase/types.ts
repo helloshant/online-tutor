@@ -154,7 +154,11 @@ export type ChatMessage = {
   medium: Medium | null;
 };
 
-export type AnswerValidationStatus = "auto_approved" | "pending_review" | "admin_approved" | "rejected";
+export type AnswerValidationStatus =
+  | "auto_approved"
+  | "pending_review"
+  | "admin_approved"
+  | "rejected";
 
 // Written only by the orchestrator service (service-role key) -- see
 // supabase/migrations/0005_answer_bank.sql, 0006_answer_bank_validation.sql,
@@ -206,7 +210,12 @@ export type ChatEventMode = "student" | "staff";
 // "chapter_notes" is a topic-summary served straight from admin-authored
 // chapter content -- see services/orchestrator/src/server.ts's
 // /v1/topic-summary handler.
-export type ChatEventSource = "cache" | "database" | "llm" | "rejected" | "chapter_notes";
+export type ChatEventSource =
+  | "cache"
+  | "database"
+  | "llm"
+  | "rejected"
+  | "chapter_notes";
 
 // Written only by the observability service (service-role key) -- see
 // supabase/migrations/0007_chat_events.sql. The admin panel reads this
@@ -291,7 +300,12 @@ export type AdminPagePermission = {
 // intended common case) means no external source at all; the rest exist to
 // make that claim auditable when it isn't -- see
 // 0032_chapter_document_provenance.sql and docs/content-authoring-guide.md.
-export type ChapterDocumentSourceType = "original" | "public_domain" | "cc_licensed" | "ncert_or_diksha" | "other";
+export type ChapterDocumentSourceType =
+  | "original"
+  | "public_domain"
+  | "cc_licensed"
+  | "ncert_or_diksha"
+  | "other";
 
 export type ChapterDocument = {
   id: string;
@@ -305,7 +319,10 @@ export type ChapterDocument = {
   created_at: string;
 };
 
-export type TopicSummaryValidationStatus = "pending_review" | "approved" | "rejected";
+export type TopicSummaryValidationStatus =
+  | "pending_review"
+  | "approved"
+  | "rejected";
 
 // One LLM-generated summary per syllabus topic (topic_id is unique) --
 // see supabase/migrations/0013_topic_summaries_and_exercise_search.sql and
@@ -340,7 +357,12 @@ export type TopicSummary = {
 // operations with real cross-cutting logic that shouldn't trust a client
 // (resolving who a broadcast reaches, and scoring a submitted test) go
 // through services/broadcast itself (see broadcastClient.ts).
-export type BroadcastType = "announcement" | "promotion" | "feedback" | "test" | "exam";
+export type BroadcastType =
+  | "announcement"
+  | "promotion"
+  | "feedback"
+  | "test"
+  | "exam";
 export type BroadcastStatus = "draft" | "sent" | "closed";
 
 export type Broadcast = {
@@ -485,6 +507,65 @@ export type AnswerFeedback = {
   created_at: string;
 };
 
+// Student-initiated mock practice papers (0048_practice_papers.sql) --
+// structurally similar to Exam*/ExamSubmission above (a paper of
+// questions, a student's own uploaded file(s), per-question scores), but a
+// fully separate, student-owned set of tables: AI-graded and generated
+// on demand, not an admin-authored broadcast a human later marks by hand.
+export type PracticePaper = {
+  id: string;
+  user_id: string;
+  board_id: string;
+  grade_id: string;
+  subject_id: string;
+  medium: Medium;
+  chapters: string[];
+  total_marks: number;
+  created_at: string;
+};
+
+export type PracticePaperQuestionType =
+  | "MCQ"
+  | "short_answer"
+  | "long_answer"
+  | "numerical";
+
+export type PracticePaperQuestion = {
+  id: string;
+  paper_id: string;
+  answered_question_id: string;
+  question_type: PracticePaperQuestionType;
+  marks: number;
+  sort_order: number;
+};
+
+export type PracticePaperSubmissionStatus =
+  | "submitted"
+  | "grading"
+  | "graded"
+  | "failed";
+
+export type PracticePaperSubmission = {
+  id: string;
+  paper_id: string;
+  user_id: string;
+  file_paths: string[];
+  status: PracticePaperSubmissionStatus;
+  total_score: number | null;
+  max_possible_score: number | null;
+  overall_feedback: string | null;
+  submitted_at: string;
+  graded_at: string | null;
+};
+
+export type PracticePaperQuestionScore = {
+  id: string;
+  submission_id: string;
+  question_id: string;
+  score: number;
+  feedback: string;
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -517,9 +598,24 @@ export interface Database {
         Insert: Partial<BoardGradeSubject>;
         Update: Partial<BoardGradeSubject>;
         Relationships: [
-          { foreignKeyName: "board_grade_subjects_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "board_grade_subjects_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
-          { foreignKeyName: "board_grade_subjects_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "board_grade_subjects_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "board_grade_subjects_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "board_grade_subjects_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       syllabus_topics: {
@@ -527,9 +623,24 @@ export interface Database {
         Insert: Partial<SyllabusTopic>;
         Update: Partial<SyllabusTopic>;
         Relationships: [
-          { foreignKeyName: "syllabus_topics_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "syllabus_topics_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
-          { foreignKeyName: "syllabus_topics_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "syllabus_topics_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "syllabus_topics_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "syllabus_topics_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       subscriptions: {
@@ -537,8 +648,18 @@ export interface Database {
         Insert: Partial<Subscription>;
         Update: Partial<Subscription>;
         Relationships: [
-          { foreignKeyName: "subscriptions_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "subscriptions_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "subscriptions_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "subscriptions_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
         ];
       };
       subscription_subjects: {
@@ -546,8 +667,18 @@ export interface Database {
         Insert: Partial<SubscriptionSubject>;
         Update: Partial<SubscriptionSubject>;
         Relationships: [
-          { foreignKeyName: "subscription_subjects_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
-          { foreignKeyName: "subscription_subjects_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "subscription_subjects_subscription_id_fkey";
+            columns: ["subscription_id"];
+            referencedRelation: "subscriptions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "subscription_subjects_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       coupon_codes: {
@@ -555,7 +686,12 @@ export interface Database {
         Insert: Partial<CouponCode>;
         Update: Partial<CouponCode>;
         Relationships: [
-          { foreignKeyName: "coupon_codes_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "coupon_codes_subscription_id_fkey";
+            columns: ["subscription_id"];
+            referencedRelation: "subscriptions";
+            referencedColumns: ["id"];
+          },
         ];
       };
       chat_messages: {
@@ -563,8 +699,18 @@ export interface Database {
         Insert: Partial<ChatMessage>;
         Update: Partial<ChatMessage>;
         Relationships: [
-          { foreignKeyName: "chat_messages_subscription_id_fkey"; columns: ["subscription_id"]; referencedRelation: "subscriptions"; referencedColumns: ["id"] },
-          { foreignKeyName: "chat_messages_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "chat_messages_subscription_id_fkey";
+            columns: ["subscription_id"];
+            referencedRelation: "subscriptions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_messages_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       answered_questions: {
@@ -572,10 +718,30 @@ export interface Database {
         Insert: Partial<AnsweredQuestion>;
         Update: Partial<AnsweredQuestion>;
         Relationships: [
-          { foreignKeyName: "answered_questions_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "answered_questions_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
-          { foreignKeyName: "answered_questions_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
-          { foreignKeyName: "answered_questions_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "answered_questions_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "answered_questions_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "answered_questions_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "answered_questions_topic_id_fkey";
+            columns: ["topic_id"];
+            referencedRelation: "syllabus_topics";
+            referencedColumns: ["id"];
+          },
         ];
       };
       chat_events: {
@@ -583,10 +749,30 @@ export interface Database {
         Insert: Partial<ChatEvent>;
         Update: Partial<ChatEvent>;
         Relationships: [
-          { foreignKeyName: "chat_events_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "chat_events_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
-          { foreignKeyName: "chat_events_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
-          { foreignKeyName: "chat_events_answer_bank_id_fkey"; columns: ["answer_bank_id"]; referencedRelation: "answered_questions"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "chat_events_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_events_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_events_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_events_answer_bank_id_fkey";
+            columns: ["answer_bank_id"];
+            referencedRelation: "answered_questions";
+            referencedColumns: ["id"];
+          },
         ];
       };
       admin_page_permissions: {
@@ -600,7 +786,12 @@ export interface Database {
         Insert: Partial<TopicSummary>;
         Update: Partial<TopicSummary>;
         Relationships: [
-          { foreignKeyName: "topic_summaries_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "topic_summaries_topic_id_fkey";
+            columns: ["topic_id"];
+            referencedRelation: "syllabus_topics";
+            referencedColumns: ["id"];
+          },
         ];
       };
       chapter_documents: {
@@ -608,7 +799,12 @@ export interface Database {
         Insert: Partial<ChapterDocument>;
         Update: Partial<ChapterDocument>;
         Relationships: [
-          { foreignKeyName: "chapter_documents_topic_id_fkey"; columns: ["topic_id"]; referencedRelation: "syllabus_topics"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "chapter_documents_topic_id_fkey";
+            columns: ["topic_id"];
+            referencedRelation: "syllabus_topics";
+            referencedColumns: ["id"];
+          },
         ];
       };
       broadcasts: {
@@ -616,9 +812,24 @@ export interface Database {
         Insert: Partial<Broadcast>;
         Update: Partial<Broadcast>;
         Relationships: [
-          { foreignKeyName: "broadcasts_board_id_fkey"; columns: ["board_id"]; referencedRelation: "boards"; referencedColumns: ["id"] },
-          { foreignKeyName: "broadcasts_grade_id_fkey"; columns: ["grade_id"]; referencedRelation: "grades"; referencedColumns: ["id"] },
-          { foreignKeyName: "broadcasts_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "broadcasts_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "broadcasts_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "broadcasts_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       broadcast_recipients: {
@@ -626,7 +837,12 @@ export interface Database {
         Insert: Partial<BroadcastRecipient>;
         Update: Partial<BroadcastRecipient>;
         Relationships: [
-          { foreignKeyName: "broadcast_recipients_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "broadcast_recipients_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       broadcast_feedback_responses: {
@@ -634,7 +850,12 @@ export interface Database {
         Insert: Partial<BroadcastFeedbackResponse>;
         Update: Partial<BroadcastFeedbackResponse>;
         Relationships: [
-          { foreignKeyName: "broadcast_feedback_responses_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "broadcast_feedback_responses_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       test_questions: {
@@ -642,7 +863,12 @@ export interface Database {
         Insert: Partial<TestQuestion>;
         Update: Partial<TestQuestion>;
         Relationships: [
-          { foreignKeyName: "test_questions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "test_questions_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       test_attempts: {
@@ -650,7 +876,12 @@ export interface Database {
         Insert: Partial<TestAttempt>;
         Update: Partial<TestAttempt>;
         Relationships: [
-          { foreignKeyName: "test_attempts_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "test_attempts_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       test_answers: {
@@ -658,8 +889,18 @@ export interface Database {
         Insert: Partial<TestAnswer>;
         Update: Partial<TestAnswer>;
         Relationships: [
-          { foreignKeyName: "test_answers_attempt_id_fkey"; columns: ["attempt_id"]; referencedRelation: "test_attempts"; referencedColumns: ["id"] },
-          { foreignKeyName: "test_answers_question_id_fkey"; columns: ["question_id"]; referencedRelation: "test_questions"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "test_answers_attempt_id_fkey";
+            columns: ["attempt_id"];
+            referencedRelation: "test_attempts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "test_answers_question_id_fkey";
+            columns: ["question_id"];
+            referencedRelation: "test_questions";
+            referencedColumns: ["id"];
+          },
         ];
       };
       exam_questions: {
@@ -667,7 +908,12 @@ export interface Database {
         Insert: Partial<ExamQuestion>;
         Update: Partial<ExamQuestion>;
         Relationships: [
-          { foreignKeyName: "exam_questions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "exam_questions_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       exam_submissions: {
@@ -675,7 +921,12 @@ export interface Database {
         Insert: Partial<ExamSubmission>;
         Update: Partial<ExamSubmission>;
         Relationships: [
-          { foreignKeyName: "exam_submissions_broadcast_id_fkey"; columns: ["broadcast_id"]; referencedRelation: "broadcasts"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "exam_submissions_broadcast_id_fkey";
+            columns: ["broadcast_id"];
+            referencedRelation: "broadcasts";
+            referencedColumns: ["id"];
+          },
         ];
       };
       exam_question_scores: {
@@ -683,8 +934,18 @@ export interface Database {
         Insert: Partial<ExamQuestionScore>;
         Update: Partial<ExamQuestionScore>;
         Relationships: [
-          { foreignKeyName: "exam_question_scores_submission_id_fkey"; columns: ["submission_id"]; referencedRelation: "exam_submissions"; referencedColumns: ["id"] },
-          { foreignKeyName: "exam_question_scores_question_id_fkey"; columns: ["question_id"]; referencedRelation: "exam_questions"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "exam_question_scores_submission_id_fkey";
+            columns: ["submission_id"];
+            referencedRelation: "exam_submissions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "exam_question_scores_question_id_fkey";
+            columns: ["question_id"];
+            referencedRelation: "exam_questions";
+            referencedColumns: ["id"];
+          },
         ];
       };
       answer_feedback: {
@@ -692,7 +953,12 @@ export interface Database {
         Insert: Partial<AnswerFeedback>;
         Update: Partial<AnswerFeedback>;
         Relationships: [
-          { foreignKeyName: "answer_feedback_subject_id_fkey"; columns: ["subject_id"]; referencedRelation: "subjects"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "answer_feedback_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       student_usage_limits: {
@@ -700,6 +966,82 @@ export interface Database {
         Insert: Partial<StudentUsageLimit>;
         Update: Partial<StudentUsageLimit>;
         Relationships: [];
+      };
+      practice_papers: {
+        Row: PracticePaper;
+        Insert: Partial<PracticePaper>;
+        Update: Partial<PracticePaper>;
+        Relationships: [
+          {
+            foreignKeyName: "practice_papers_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "boards";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "practice_papers_grade_id_fkey";
+            columns: ["grade_id"];
+            referencedRelation: "grades";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "practice_papers_subject_id_fkey";
+            columns: ["subject_id"];
+            referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      practice_paper_questions: {
+        Row: PracticePaperQuestion;
+        Insert: Partial<PracticePaperQuestion>;
+        Update: Partial<PracticePaperQuestion>;
+        Relationships: [
+          {
+            foreignKeyName: "practice_paper_questions_paper_id_fkey";
+            columns: ["paper_id"];
+            referencedRelation: "practice_papers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "practice_paper_questions_answered_question_id_fkey";
+            columns: ["answered_question_id"];
+            referencedRelation: "answered_questions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      practice_paper_submissions: {
+        Row: PracticePaperSubmission;
+        Insert: Partial<PracticePaperSubmission>;
+        Update: Partial<PracticePaperSubmission>;
+        Relationships: [
+          {
+            foreignKeyName: "practice_paper_submissions_paper_id_fkey";
+            columns: ["paper_id"];
+            referencedRelation: "practice_papers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      practice_paper_question_scores: {
+        Row: PracticePaperQuestionScore;
+        Insert: Partial<PracticePaperQuestionScore>;
+        Update: Partial<PracticePaperQuestionScore>;
+        Relationships: [
+          {
+            foreignKeyName: "practice_paper_question_scores_submission_id_fkey";
+            columns: ["submission_id"];
+            referencedRelation: "practice_paper_submissions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "practice_paper_question_scores_question_id_fkey";
+            columns: ["question_id"];
+            referencedRelation: "practice_paper_questions";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       // The remaining archetype_* tables (archetype_segmented_questions,
       // archetype_question_signatures, archetype_question_embeddings,
@@ -718,7 +1060,12 @@ export interface Database {
         Insert: Partial<ArchetypeRow>;
         Update: Partial<ArchetypeRow>;
         Relationships: [
-          { foreignKeyName: "archetypes_run_id_fkey"; columns: ["run_id"]; referencedRelation: "archetype_pipeline_runs"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "archetypes_run_id_fkey";
+            columns: ["run_id"];
+            referencedRelation: "archetype_pipeline_runs";
+            referencedColumns: ["id"];
+          },
         ];
       };
       archetype_review_queue: {
@@ -726,7 +1073,12 @@ export interface Database {
         Insert: Partial<ReviewQueueRow>;
         Update: Partial<ReviewQueueRow>;
         Relationships: [
-          { foreignKeyName: "archetype_review_queue_run_id_fkey"; columns: ["run_id"]; referencedRelation: "archetype_pipeline_runs"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "archetype_review_queue_run_id_fkey";
+            columns: ["run_id"];
+            referencedRelation: "archetype_pipeline_runs";
+            referencedColumns: ["id"];
+          },
         ];
       };
       archetype_families: {
