@@ -176,9 +176,22 @@ export function PracticePanel({
   // `cancelled` guard around its own setState) and the post-generate
   // refresh (an ordinary event handler, no such guard needed) can share
   // it without one call site accidentally setting state after unmount.
+  //
+  // Scoped to this exact board/grade/subject/medium -- reported directly:
+  // with no scope filter, this showed every paper the account had ever
+  // generated across every subject/board/grade, most obviously for a staff
+  // account previewing several different combinations (a paper generated
+  // under one preview showed up while now previewing a completely
+  // different one).
   async function fetchHistory(): Promise<HistoryPaper[] | null> {
     try {
-      const res = await fetch("/api/practice-papers");
+      const params = new URLSearchParams({
+        subjectId,
+        boardId,
+        gradeId,
+        medium,
+      });
+      const res = await fetch(`/api/practice-papers?${params}`);
       if (!res.ok) return null;
       const body = await res.json();
       return body.papers ?? [];
@@ -196,7 +209,11 @@ export function PracticePanel({
     return () => {
       cancelled = true;
     };
-  }, [subjectId]);
+    // fetchHistory closes over exactly these same four props -- listing it
+    // too would just re-run this on every render (it's a fresh function
+    // identity each time), not on a real scope change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId, gradeId, subjectId, medium]);
 
   function toggleChapter(chapter: string) {
     setSelectedChapters((prev) => {

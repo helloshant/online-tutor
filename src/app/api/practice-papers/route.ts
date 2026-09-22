@@ -38,9 +38,9 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    return await handleGet();
+    return await handleGet(request);
   } catch (err) {
     console.error("Unexpected error in GET /api/practice-papers:", err);
     return NextResponse.json(
@@ -313,7 +313,19 @@ async function handlePost(request: Request) {
 // Relies entirely on the RLS "user can read own rows" policy
 // (0048_practice_papers.sql) -- the regular session client, not the admin
 // client, is what makes that meaningful here.
-async function handleGet() {
+//
+// Reported directly: with no scope filter at all, this returned EVERY
+// paper the account had ever generated, across every subject/board/grade
+// it had ever been used under -- glaringly obvious for a staff account
+// previewing several different board/grade combinations (a Math paper
+// generated while previewing West Bengal Board showed up in the history
+// list while now previewing CBSE), but the same bug for an ordinary
+// student the moment they had practice papers in more than one subject.
+// Scoped to the same board/grade/subject/medium PracticePanel is currently
+// mounted for -- all four, not just subjectId, since a staff account (or a
+// student who has changed board/medium over time) can otherwise have
+// papers for the same subjectId under a different scope entirely.
+async function handleGet(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -323,9 +335,36 @@ async function handleGet() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  const url = new URL(request.url);
+  const subjectId = url.searchParams.get("subjectId") ?? "";
+  const boardId = url.searchParams.get("boardId") ?? "";
+  const gradeId = url.searchParams.get("gradeId") ?? "";
+  const mediumParam = url.searchParams.get("medium");
+  const VALID_MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
+  if (
+    !subjectId ||
+    !boardId ||
+    !gradeId ||
+    !mediumParam ||
+    !VALID_MEDIUMS.includes(mediumParam as Medium)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "subjectId, boardId, gradeId, and a valid medium (English, Hindi, or Bengali) are required",
+      },
+      { status: 400 },
+    );
+  }
+  const medium = mediumParam as Medium;
+
   const { data: papers, error } = await supabase
     .from("practice_papers")
     .select("id, subject_id, chapters, total_marks, created_at")
+    .eq("subject_id", subjectId)
+    .eq("board_id", boardId)
+    .eq("grade_id", gradeId)
+    .eq("medium", medium)
     .order("created_at", { ascending: false });
 
   if (error) {
