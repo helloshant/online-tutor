@@ -376,8 +376,19 @@ export function PracticePanel({
     }
   }
 
+  // min-w-0 here (in addition to the history row's own, see below) is the
+  // real fix -- reported directly, still reproducing after that first fix:
+  // this div is ITSELF a flex item (dashboard-shell.tsx mounts it inside a
+  // `flex flex-col` wrapper, itself nested inside more flex ancestors).
+  // Without min-w-0 at THIS level too, a sufficiently long, unbreakable
+  // line deep inside (the history row's chapter list) can still stretch
+  // this whole flex item wider to fit it, which then makes the inner row's
+  // own `w-full`/`truncate` moot -- "100% of a container that grew to fit
+  // the content" never actually clips anything. This is the same flexbox
+  // min-width:auto quirk as the inner fix, just one containment boundary
+  // higher up the tree.
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
       {!activePaper ? (
         <>
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
