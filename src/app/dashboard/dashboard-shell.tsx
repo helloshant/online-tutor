@@ -24,6 +24,15 @@ interface SubjectSummary {
 // chat-panel.tsx's own local copy does.
 const ENGLISH_SUBJECT_CODE = "ENG";
 
+// Past Years (ExamYearTrends) only has real content behind it for a
+// board-level final exam grade -- Grade 10 and Grade 12 board exams --
+// across every board this app currently has (boards.name, not boards.code:
+// West Bengal Board's own catalog row is named "West Bengal Board", its
+// code is "WBBSE"). Every other grade has no past-year question data at
+// all, so the tab is hidden there rather than shown and rendering empty.
+const PAST_YEARS_BOARDS = new Set(["CBSE", "ICSE", "West Bengal Board"]);
+const PAST_YEARS_GRADES = new Set(["Grade 10", "Grade 12"]);
+
 // Mirrors SINGLE_COHORT_ENGLISH_BOARDS in src/lib/studentScope.ts --
 // boards where the English subject really is one course shared by every
 // student regardless of their own medium (CBSE's own prescribed reader,
@@ -128,6 +137,12 @@ export function DashboardShell({
   // specific board/grade/medium -- false for staff in unrestricted mode,
   // same as before this combination existed.
   const hasSyllabusScope = Boolean(boardId && gradeId && medium);
+  // Narrower than hasSyllabusScope -- see PAST_YEARS_BOARDS/PAST_YEARS_GRADES'
+  // own comment on why this additionally requires a board-exam grade.
+  const hasPastYearsScope =
+    hasSyllabusScope &&
+    PAST_YEARS_BOARDS.has(boardName) &&
+    PAST_YEARS_GRADES.has(gradeName);
 
   function handleSelectSubject(subjectId: string) {
     setSelectedSubjectId(subjectId);
@@ -159,7 +174,7 @@ export function DashboardShell({
     ...(hasSyllabusScope
       ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }]
       : []),
-    ...(hasSyllabusScope
+    ...(hasPastYearsScope
       ? [{ tab: "trends" as const, icon: "📈", label: "Past years" }]
       : []),
     { tab: "chat", icon: "💬", label: "Chat" },
@@ -339,20 +354,22 @@ export function DashboardShell({
                   {(isStaffUser
                     ? (["chat", "trends", "practice"] as const)
                     : (["chat", "trends", "practice", "inbox"] as const)
-                  ).map((tab) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setMainTab(tab)}
-                      className={`rounded-t-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
-                        mainTab === tab
-                          ? "border border-b-0 border-border bg-background text-brand"
-                          : "text-foreground/50 hover:text-foreground"
-                      }`}
-                    >
-                      {TAB_LABELS[tab] ?? tab}
-                    </button>
-                  ))}
+                  )
+                    .filter((tab) => tab !== "trends" || hasPastYearsScope)
+                    .map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setMainTab(tab)}
+                        className={`rounded-t-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
+                          mainTab === tab
+                            ? "border border-b-0 border-border bg-background text-brand"
+                            : "text-foreground/50 hover:text-foreground"
+                        }`}
+                      >
+                        {TAB_LABELS[tab] ?? tab}
+                      </button>
+                    ))}
                 </div>
               )}
 
@@ -384,7 +401,7 @@ export function DashboardShell({
                   />
                 </div>
               )}
-              {boardId && gradeId && medium && (
+              {boardId && gradeId && medium && hasPastYearsScope && (
                 <div
                   className={
                     mainTab === "trends"
