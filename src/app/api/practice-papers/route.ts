@@ -299,7 +299,18 @@ async function handleGet() {
     );
   }
 
-  return NextResponse.json({ papers: papers ?? [] });
+  // camelCase, matching every other route in this feature (POST's own
+  // response, GET /api/practice-papers/[id]) -- rather than leaking this
+  // one endpoint's raw snake_case row shape to the client.
+  return NextResponse.json({
+    papers: (papers ?? []).map((p) => ({
+      id: p.id,
+      subjectId: p.subject_id,
+      chapters: p.chapters,
+      totalMarks: p.total_marks,
+      createdAt: p.created_at,
+    })),
+  });
 }
 
 // Paper generation fires up to ~16 sequential-ish LLM calls in bounded

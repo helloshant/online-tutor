@@ -6,6 +6,7 @@ import { LogoutButton } from "@/components/logout-button";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
 import { InboxPanel } from "./inbox-panel";
+import { PracticePanel } from "./practice-panel";
 import { TopicList } from "./topic-list";
 import { ExamYearTrends } from "./exam-year-trends";
 import { StaffPreviewPicker } from "./staff-preview-picker";
@@ -45,8 +46,15 @@ const SINGLE_COHORT_ENGLISH_BOARDS = new Set(["CBSE", "ICSE"]);
 // already known non-null (guarded by `boardId && gradeId && medium` in
 // JSX -- see hasSyllabusScope), so the cast is safe in context, not a
 // blind assertion.
-function syllabusMediumFor(subject: SubjectSummary, boardName: string, medium: Medium): Medium {
-  return subject.code === ENGLISH_SUBJECT_CODE && SINGLE_COHORT_ENGLISH_BOARDS.has(boardName) ? "English" : medium;
+function syllabusMediumFor(
+  subject: SubjectSummary,
+  boardName: string,
+  medium: Medium,
+): Medium {
+  return subject.code === ENGLISH_SUBJECT_CODE &&
+    SINGLE_COHORT_ENGLISH_BOARDS.has(boardName)
+    ? "English"
+    : medium;
 }
 
 // "subjects" only exists as a destination below lg -- desktop switches
@@ -56,7 +64,7 @@ function syllabusMediumFor(subject: SubjectSummary, boardName: string, medium: M
 // where it's the only way to reach topic browsing at all (see topic-list.tsx).
 // "trends" (ExamYearTrends) has no desktop-persistent equivalent the way
 // "topics" does -- it's a real tab on both desktop and mobile.
-type MainTab = "subjects" | "topics" | "trends" | "chat" | "inbox";
+type MainTab = "subjects" | "topics" | "trends" | "chat" | "practice" | "inbox";
 
 // Only tabs whose id wouldn't already read fine through the row's own
 // `capitalize` CSS need an entry here -- "chat"/"inbox" fall through to
@@ -92,24 +100,30 @@ export function DashboardShell({
   allGrades?: { id: string; name: string }[];
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
-    subjects[0]?.id ?? null
+    subjects[0]?.id ?? null,
   );
   // A fresh id per click (not just the topic) so clicking the same topic
   // twice still drops a new summary bubble into the chat, same as sending
   // the same message twice would. Cleared on subject switch so a topic
   // clicked under one subject never leaks into another subject's chat.
-  const [topicClick, setTopicClick] = useState<{ clickId: string; topic: SyllabusTopic } | null>(null);
+  const [topicClick, setTopicClick] = useState<{
+    clickId: string;
+    topic: SyllabusTopic;
+  } | null>(null);
   // Collapsed as soon as a subject is active (including the default
   // preselected one on first load) so the syllabus panel gets the room --
   // expanded back only via the explicit toggle below. Desktop-only state:
   // the sidebar this controls doesn't render below lg at all.
-  const [subjectsCollapsed, setSubjectsCollapsed] = useState(selectedSubjectId !== null);
+  const [subjectsCollapsed, setSubjectsCollapsed] = useState(
+    selectedSubjectId !== null,
+  );
   // Which main-area surface is visible -- all stay mounted (see the main
   // content below) so switching tabs never loses any panel's local state
   // (e.g. the chat timeline's ephemeral topic bubbles).
   const [mainTab, setMainTab] = useState<MainTab>("chat");
 
-  const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) ?? null;
+  const selectedSubject =
+    subjects.find((s) => s.id === selectedSubjectId) ?? null;
   // True for a real student always, and for staff only while previewing a
   // specific board/grade/medium -- false for staff in unrestricted mode,
   // same as before this combination existed.
@@ -134,14 +148,30 @@ export function DashboardShell({
     setMainTab("chat");
   }
 
-  const subjectsHeading = isStaffUser ? (hasSyllabusScope ? "Offered subjects" : "All subjects") : "Your subjects";
+  const subjectsHeading = isStaffUser
+    ? hasSyllabusScope
+      ? "Offered subjects"
+      : "All subjects"
+    : "Your subjects";
 
   const mobileNavItems: { tab: MainTab; icon: string; label: string }[] = [
     { tab: "subjects", icon: "📚", label: "Subjects" },
-    ...(hasSyllabusScope ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }] : []),
-    ...(hasSyllabusScope ? [{ tab: "trends" as const, icon: "📈", label: "Past years" }] : []),
+    ...(hasSyllabusScope
+      ? [{ tab: "topics" as const, icon: "📖", label: "Topics" }]
+      : []),
+    ...(hasSyllabusScope
+      ? [{ tab: "trends" as const, icon: "📈", label: "Past years" }]
+      : []),
     { tab: "chat", icon: "💬", label: "Chat" },
-    ...(!isStaffUser ? [{ tab: "inbox" as const, icon: "🔔", label: "Inbox" }] : []),
+    // No meaning for staff (no subscription/marks concept) or without
+    // syllabus scope to generate a paper's chapters/questions from --
+    // same gating hasSyllabusScope already applies to Topics/Past years.
+    ...(hasSyllabusScope && !isStaffUser
+      ? [{ tab: "practice" as const, icon: "📝", label: "Practice" }]
+      : []),
+    ...(!isStaffUser
+      ? [{ tab: "inbox" as const, icon: "🔔", label: "Inbox" }]
+      : []),
   ];
 
   return (
@@ -159,11 +189,22 @@ export function DashboardShell({
         </div>
         <div className="flex items-center gap-4 text-sm">
           {isStaffUser && (
-            <StaffPreviewPicker boards={allBoards} grades={allGrades} boardId={boardId} gradeId={gradeId} medium={medium} />
+            <StaffPreviewPicker
+              boards={allBoards}
+              grades={allGrades}
+              boardId={boardId}
+              gradeId={gradeId}
+              medium={medium}
+            />
           )}
-          <span className="hidden text-foreground/70 sm:inline">{userName}</span>
+          <span className="hidden text-foreground/70 sm:inline">
+            {userName}
+          </span>
           {isStaffUser && (
-            <Link href="/admin" className="font-medium text-brand hover:underline">
+            <Link
+              href="/admin"
+              className="font-medium text-brand hover:underline"
+            >
               Admin
             </Link>
           )}
@@ -181,7 +222,9 @@ export function DashboardShell({
             subjectsCollapsed ? "w-14 p-2" : "w-56 p-3 sm:w-64"
           }`}
         >
-          <div className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}>
+          <div
+            className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}
+          >
             {!subjectsCollapsed && (
               <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
                 {subjectsHeading}
@@ -190,14 +233,20 @@ export function DashboardShell({
             <button
               type="button"
               onClick={() => setSubjectsCollapsed((collapsed) => !collapsed)}
-              title={subjectsCollapsed ? "Expand subjects" : "Collapse subjects"}
-              aria-label={subjectsCollapsed ? "Expand subjects" : "Collapse subjects"}
+              title={
+                subjectsCollapsed ? "Expand subjects" : "Collapse subjects"
+              }
+              aria-label={
+                subjectsCollapsed ? "Expand subjects" : "Collapse subjects"
+              }
               className="rounded p-1.5 text-foreground/50 transition hover:bg-brand/5 hover:text-foreground"
             >
               {subjectsCollapsed ? "»" : "«"}
             </button>
           </div>
-          <nav className={`mt-2 space-y-1 ${subjectsCollapsed ? "flex flex-col items-center" : ""}`}>
+          <nav
+            className={`mt-2 space-y-1 ${subjectsCollapsed ? "flex flex-col items-center" : ""}`}
+          >
             {subjects.map((subject) => (
               <button
                 key={subject.id}
@@ -214,11 +263,15 @@ export function DashboardShell({
                     : "text-foreground/80 hover:bg-brand/5"
                 }`}
               >
-                {subjectsCollapsed ? subject.code.slice(0, 2).toUpperCase() : subject.name}
+                {subjectsCollapsed
+                  ? subject.code.slice(0, 2).toUpperCase()
+                  : subject.name}
               </button>
             ))}
             {subjects.length === 0 && !subjectsCollapsed && (
-              <p className="px-2 text-sm text-foreground/50">No subjects subscribed.</p>
+              <p className="px-2 text-sm text-foreground/50">
+                No subjects subscribed.
+              </p>
             )}
           </nav>
         </aside>
@@ -242,7 +295,9 @@ export function DashboardShell({
                 {subjectsHeading}
               </h1>
               {subjects.length === 0 ? (
-                <p className="text-sm text-foreground/50">No subjects subscribed.</p>
+                <p className="text-sm text-foreground/50">
+                  No subjects subscribed.
+                </p>
               ) : (
                 <ul className="space-y-1.5">
                   {subjects.map((subject) => (
@@ -276,7 +331,10 @@ export function DashboardShell({
                       left off this row entirely for them rather than shown
                       and rendering nothing (see the !isStaffUser guard
                       further down where its panel is actually rendered). */}
-                  {(isStaffUser ? (["chat", "trends"] as const) : (["chat", "trends", "inbox"] as const)).map((tab) => (
+                  {(isStaffUser
+                    ? (["chat", "trends"] as const)
+                    : (["chat", "trends", "practice", "inbox"] as const)
+                  ).map((tab) => (
                     <button
                       key={tab}
                       type="button"
@@ -297,7 +355,13 @@ export function DashboardShell({
                   conditional rendering, so switching tabs never discards any
                   panel's state. */}
               {boardId && gradeId && medium && (
-                <div className={mainTab === "topics" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
+                <div
+                  className={
+                    mainTab === "topics"
+                      ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+                      : "hidden"
+                  }
+                >
                   <p className="mb-3 text-xs text-foreground/40">
                     Tap a topic to drop its summary into the chat.
                   </p>
@@ -305,24 +369,42 @@ export function DashboardShell({
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={syllabusMediumFor(selectedSubject, boardName, medium)}
+                    medium={syllabusMediumFor(
+                      selectedSubject,
+                      boardName,
+                      medium,
+                    )}
                     selectedTopicId={topicClick?.topic.id ?? null}
                     onSelectTopic={handleSelectTopic}
                   />
                 </div>
               )}
               {boardId && gradeId && medium && (
-                <div className={mainTab === "trends" ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" : "hidden"}>
+                <div
+                  className={
+                    mainTab === "trends"
+                      ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+                      : "hidden"
+                  }
+                >
                   <ExamYearTrends
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
-                    medium={syllabusMediumFor(selectedSubject, boardName, medium)}
+                    medium={syllabusMediumFor(
+                      selectedSubject,
+                      boardName,
+                      medium,
+                    )}
                     onSelectTopic={handleSelectTopic}
                   />
                 </div>
               )}
-              <div className={mainTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+              <div
+                className={
+                  mainTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"
+                }
+              >
                 <ChatPanel
                   key={selectedSubject.id}
                   subscriptionId={subscriptionId}
@@ -334,13 +416,45 @@ export function DashboardShell({
                   topicClick={topicClick}
                 />
               </div>
+              {/* Same gating as the mobile nav entry above -- no meaning for
+                  staff or without syllabus scope. Wrapped like Chat/Inbox
+                  (flex flex-col, no padding/scroll classes of its own) since
+                  PracticePanel -- like ChatPanel/InboxPanel -- owns its own
+                  internal scroll region, unlike Topics/Past years, whose
+                  wrapper div supplies that instead. */}
+              {boardId && gradeId && medium && !isStaffUser && (
+                <div
+                  className={
+                    mainTab === "practice"
+                      ? "flex min-h-0 flex-1 flex-col"
+                      : "hidden"
+                  }
+                >
+                  <PracticePanel
+                    boardId={boardId}
+                    gradeId={gradeId}
+                    subjectId={selectedSubject.id}
+                    medium={syllabusMediumFor(
+                      selectedSubject,
+                      boardName,
+                      medium,
+                    )}
+                  />
+                </div>
+              )}
               {/* Not subject-scoped (a student's broadcasts don't belong to
                   any one subject), but nested here anyway rather than as a
                   sibling of the selectedSubject branch -- reachable the
                   moment at least one subject is selected, which for a
                   subscribed student with any subjects at all is always. */}
               {!isStaffUser && (
-                <div className={mainTab === "inbox" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                <div
+                  className={
+                    mainTab === "inbox"
+                      ? "flex min-h-0 flex-1 flex-col"
+                      : "hidden"
+                  }
+                >
                   <InboxPanel />
                 </div>
               )}
@@ -368,7 +482,9 @@ export function DashboardShell({
             type="button"
             onClick={() => setMainTab(item.tab)}
             className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs font-medium transition ${
-              mainTab === item.tab ? "text-brand" : "text-foreground/50 hover:text-foreground"
+              mainTab === item.tab
+                ? "text-brand"
+                : "text-foreground/50 hover:text-foreground"
             }`}
           >
             <span className="text-lg" aria-hidden="true">
