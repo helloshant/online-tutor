@@ -17,15 +17,15 @@ import type { Medium } from "@/lib/supabase/types";
 
 // POST generates a fresh paper for one or more selected chapters -- no cap
 // on how many (a student can select the entire syllabus if they want, see
-// handlePost below); GET
-// lists the caller's own paper history. A real student's scope always
-// comes from their own subscription (resolveStudentSubjectScope, ignoring
-// any board/grade/medium the client sends); staff have no subscription at
-// all, so they instead preview a specific board/grade/medium the same way
-// /api/chat/route.ts already lets them -- see handlePost below. Staff
-// never subscribe or have marks tracked, but they still need to be able to
-// see and try this feature (e.g. to demo or QA it), the same way they can
-// already preview Topics/Past years/chat.
+// handlePost below); GET lists the caller's own paper history. A real
+// student's scope always comes from their own subscription
+// (resolveStudentSubjectScope, ignoring any board/grade/medium the client
+// sends); staff have no subscription at all, so they instead preview a
+// specific board/grade/medium the same way /api/chat/route.ts already lets
+// them -- see handlePost below. Staff never subscribe or have marks
+// tracked, but they still need to be able to see and try this feature
+// (e.g. to demo or QA it), the same way they can already preview
+// Topics/Past years/chat.
 export async function POST(request: Request) {
   try {
     return await handlePost(request);
@@ -167,20 +167,39 @@ async function handlePost(request: Request) {
     scope.medium,
   );
 
-  const { data: topicRows } = await supabase
-    .from("syllabus_topics")
-    .select("id, chapter, topic")
-    .eq("board_id", scope.boardId)
-    .eq("grade_id", scope.gradeId)
-    .eq("subject_id", subjectId)
-    .eq("medium", contentMedium)
-    .in("chapter", chapters);
+  // A requested label can be a real chapter name OR (for a subject whose
+  // syllabus_topics rows all share one chapter value, e.g. WBBSE Geography/
+  // Bengali -- see practice-panel.tsx's own comment on this) a topic name
+  // standing in for one -- the picker doesn't tell this route which case
+  // it's in, so both are matched and merged rather than guessing. Two
+  // separate .in() queries (not a single .or() with string-built value
+  // lists) specifically to avoid PostgREST's .or() syntax needing its own
+  // escaping for values that can contain commas/parentheses -- real
+  // Bengali chapter/topic text does (e.g. "স্থানাঙ্ক জ্যামিতি (দূরত্ব
+  // নির্ণয়)").
+  const scopedQuery = () =>
+    supabase
+      .from("syllabus_topics")
+      .select("id, chapter, topic")
+      .eq("board_id", scope.boardId)
+      .eq("grade_id", scope.gradeId)
+      .eq("subject_id", subjectId)
+      .eq("medium", contentMedium);
+  const [{ data: byChapter }, { data: byTopic }] = await Promise.all([
+    scopedQuery().in("chapter", chapters),
+    scopedQuery().in("topic", chapters),
+  ]);
+  const topicRows = Array.from(
+    new Map(
+      [...(byChapter ?? []), ...(byTopic ?? [])].map((t) => [t.id, t]),
+    ).values(),
+  );
 
-  const foundChapters = new Set((topicRows ?? []).map((t) => t.chapter));
-  const missingChapter = chapters.find((c: string) => !foundChapters.has(c));
+  const foundLabels = new Set(topicRows.flatMap((t) => [t.chapter, t.topic]));
+  const missingChapter = chapters.find((c: string) => !foundLabels.has(c));
   if (missingChapter) {
     return NextResponse.json(
-      { error: `No topics found for chapter "${missingChapter}".` },
+      { error: `No topics found for "${missingChapter}".` },
       { status: 400 },
     );
   }
@@ -195,7 +214,7 @@ async function handlePost(request: Request) {
       boardName: board?.name ?? "",
       gradeName: toArchetypeGradeOrYear(grade?.name ?? ""),
       medium: contentMedium,
-      topics: (topicRows ?? []).map((t) => ({
+      topics: topicRows.map((t) => ({
         id: t.id,
         chapter: t.chapter,
         topic: t.topic,

@@ -113,20 +113,43 @@ export function PracticePanel({
   // key on the subject id one level up for ChatPanel; PracticePanel follows
   // the same pattern), but this effect also covers a staff preview's own
   // board/grade/medium changing under an otherwise-stable subject.
+  //
+  // Reported directly, twice, for two different subjects (WBBSE Bengali,
+  // then WBBSE Geography): some subjects' syllabus_topics rows all share
+  // ONE chapter value (the book/subject's own title), with the real,
+  // chapter-sized divisions actually living in each row's own `topic`
+  // field instead -- the exact same board-agnostic ambiguity already
+  // handled elsewhere in this app (see archetypeExercises.ts). A picker
+  // grounded strictly in `chapter` degenerates to a single, useless
+  // checkbox for a subject shaped this way. Falls back to `topic` ONLY
+  // when `chapter` gives no real choice (a single distinct value) -- for
+  // every ordinary subject (e.g. Math, whose 8 numbered chapters already
+  // are the real unit), this changes nothing at all. The fallback topics
+  // are themselves full chapter-sized units here (confirmed directly:
+  // "Earth as a Planet", "Movements of the Earth", ...), not fine-grained
+  // sub-points, so this is NOT the sub-topic picker that was explicitly
+  // ruled out -- it's the same "pick a chapter" UI, just sourced from
+  // whichever column actually carries that granularity for this subject.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const supabase = createClient();
       const { data } = await supabase
         .from("syllabus_topics")
-        .select("chapter")
+        .select("chapter, topic")
         .eq("board_id", boardId)
         .eq("grade_id", gradeId)
         .eq("subject_id", subjectId)
         .eq("medium", medium)
         .order("sort_order");
       if (cancelled) return;
-      setChapters([...new Set((data ?? []).map((t) => t.chapter))]);
+      const rows = data ?? [];
+      const distinctChapters = [...new Set(rows.map((t) => t.chapter))];
+      setChapters(
+        distinctChapters.length > 1
+          ? distinctChapters
+          : [...new Set(rows.map((t) => t.topic))],
+      );
     })();
     return () => {
       cancelled = true;
@@ -398,7 +421,16 @@ export function PracticePanel({
                       disabled={loadingPaper}
                       className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm transition hover:bg-brand/5 disabled:opacity-60"
                     >
-                      <span className="truncate">{p.chapters.join(", ")}</span>
+                      {/* min-w-0 is required for truncate to actually take
+                          effect on a flex child -- without it, a flex item's
+                          default min-width:auto stops it shrinking below its
+                          own text's natural width, so a long chapter list
+                          just overflows the button instead of ellipsizing
+                          (reported directly with a screenshot showing
+                          exactly that overflow). */}
+                      <span className="min-w-0 truncate">
+                        {p.chapters.join(", ")}
+                      </span>
                       <span className="shrink-0 text-xs text-foreground/40">
                         {p.totalMarks} marks
                       </span>
