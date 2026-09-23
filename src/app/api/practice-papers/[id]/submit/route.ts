@@ -62,7 +62,7 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
 
   const { data: paper } = await admin
     .from("practice_papers")
-    .select("id, user_id, subject_id, medium, total_marks")
+    .select("id, user_id, board_id, grade_id, subject_id, medium, total_marks")
     .eq("id", paperId)
     .maybeSingle();
   if (!paper) {
@@ -199,6 +199,9 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
         // Re-resolved from the paper's own stored row, never trusted from
         // the request -- same reasoning as every other trust boundary in
         // this app.
+        subjectId: paper.subject_id,
+        boardId: paper.board_id,
+        gradeId: paper.grade_id,
         subjectName: subject?.name ?? "",
         medium: paper.medium,
         questions: questionRows.map((q) => ({

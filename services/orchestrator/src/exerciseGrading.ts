@@ -7,11 +7,15 @@
 // genuinely different-but-valid method as correct, not just a literal
 // match.
 import { buildGradingPrompt } from "./prompts.js";
-import { getChatReply } from "./llm.js";
+import { getChatReply, type LlmCallContext } from "./llm.js";
 import type { ExerciseVerdict, Medium } from "./types.js";
 
 const MAX_TOKENS = 400;
-const VALID_VERDICTS: ExerciseVerdict[] = ["correct", "partially_correct", "incorrect"];
+const VALID_VERDICTS: ExerciseVerdict[] = [
+  "correct",
+  "partially_correct",
+  "incorrect",
+];
 
 // Deliberately its own tiny parser, not jsonCompletion.ts's JSON path --
 // grading output is two plain-text lines (see buildGradingPrompt's own
@@ -33,22 +37,30 @@ export async function gradeExerciseAnswer(params: {
   question: string;
   expectedAnswer: string;
   studentAnswer: string;
+  event: LlmCallContext;
 }): Promise<{ verdict: ExerciseVerdict; feedback: string } | null> {
-  const systemPrompt = buildGradingPrompt(params);
+  const { event, ...promptParams } = params;
+  const systemPrompt = buildGradingPrompt(promptParams);
   const { text } = await getChatReply({
     systemPrompt,
     history: [],
     message: "Grade this attempt now.",
     maxTokens: MAX_TOKENS,
+    event,
   });
 
   const verdictMatch = text.match(VERDICT_LINE);
   const feedbackMatch = text.match(FEEDBACK_LINE);
-  const verdict = verdictMatch?.[1]?.toLowerCase() as ExerciseVerdict | undefined;
+  const verdict = verdictMatch?.[1]?.toLowerCase() as
+    | ExerciseVerdict
+    | undefined;
   const feedback = feedbackMatch?.[1]?.trim();
 
   if (!verdict || !VALID_VERDICTS.includes(verdict) || !feedback) {
-    console.warn("Could not parse a grading verdict from the LLM response:", text.slice(0, 300));
+    console.warn(
+      "Could not parse a grading verdict from the LLM response:",
+      text.slice(0, 300),
+    );
     return null;
   }
 

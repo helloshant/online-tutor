@@ -514,6 +514,16 @@ export type GeneratePracticePaperResponse = {
 // GradeExerciseRequest already draws for single-exercise grading.
 export type EvaluatePracticePaperRequest = {
   userId: string;
+  // Added so the grading LLM call can be attributed to a real usage/audit
+  // trail row (see llm.ts's own LlmCallContext comment) -- previously this
+  // request carried no scope at all, so grading a submitted answer sheet
+  // was spending real tokens with nothing ever recorded into chat_events.
+  // boardId/gradeId are optional only because ChatEventInput itself treats
+  // them as optional; the web app's own caller always has and sends both
+  // (practice_papers.board_id/grade_id are populated at generation time).
+  subjectId: string;
+  boardId?: string | null;
+  gradeId?: string | null;
   subjectName: string;
   medium: Medium;
   questions: {

@@ -810,6 +810,12 @@ export async function generatePracticePaper(
 // orchestrator's EvaluatePracticePaperRequest comment).
 export type EvaluatePracticePaperRequest = {
   userId: string;
+  // Lets the orchestrator attribute this grading call to a real usage/
+  // audit-trail row -- see the orchestrator's own EvaluatePracticePaperRequest
+  // comment on the gap this fixes.
+  subjectId: string;
+  boardId?: string | null;
+  gradeId?: string | null;
   subjectName: string;
   medium: Medium;
   questions: {

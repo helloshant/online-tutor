@@ -32,7 +32,7 @@ import {
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
 import { parseGeneratedExercises } from "./exerciseParser.js";
-import { getActiveLlmProvider, getChatReply, getGradingReply } from "./llm.js";
+import { getChatReply, getGradingReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
 import { buildPracticeBlueprint } from "./practiceBlueprint.js";
 import { parsePracticePaperGrading } from "./practicePaperGrading.js";
@@ -310,7 +310,7 @@ app.post(
     // real tokens and cost real money too.
     if (body.mode === "staff") {
       try {
-        const { text, model, usage } = await getChatReply({
+        const { text } = await getChatReply({
           systemPrompt: buildStaffSystemPrompt(
             body.subjectName,
             Boolean(image),
@@ -319,18 +319,13 @@ app.post(
           message: body.message,
           image,
           maxTokens: MAX_TOKENS,
-        });
-        void recordChatEvent({
-          userId: body.userId,
-          mode: "staff",
-          subjectId: body.subjectId,
-          question: body.message.trim() || "[Image question]",
-          source: "llm",
-          provider: getActiveLlmProvider(),
-          model,
-          promptTokens: usage.promptTokens,
-          completionTokens: usage.completionTokens,
-          latencyMs: Date.now() - startedAt,
+          event: {
+            loggable: true,
+            userId: body.userId,
+            mode: "staff",
+            subjectId: body.subjectId,
+            question: body.message.trim() || "[Image question]",
+          },
         });
         const response: ChatOrchestrationResponse = {
           reply: text,
@@ -540,12 +535,23 @@ app.post(
     });
 
     try {
-      const { text, model, usage } = await getChatReply({
+      const { text } = await getChatReply({
         systemPrompt,
         history,
         message: studentBody.message,
         image,
         maxTokens: MAX_TOKENS,
+        event: {
+          loggable: true,
+          userId: studentBody.userId,
+          mode: "student",
+          boardId: studentBody.boardId,
+          gradeId: studentBody.gradeId,
+          subjectId: studentBody.subjectId,
+          medium: responseLanguage,
+          question: studentBody.message.trim() || "[Image question]",
+          grounded: referenceChunks.length > 0,
+        },
       });
 
       if (scope) {
@@ -565,6 +571,16 @@ app.post(
           void (async () => {
             const restatedQuestion = await restateQuestionForStorage(
               scope.question,
+              {
+                loggable: true,
+                userId: studentBody.userId,
+                mode: "student",
+                boardId: studentBody.boardId,
+                gradeId: studentBody.gradeId,
+                subjectId: studentBody.subjectId,
+                medium: responseLanguage,
+                question: `restate-for-storage: ${scope.question}`,
+              },
             );
             if (!restatedQuestion) {
               console.error(
@@ -600,23 +616,6 @@ app.post(
           }
         }
       }
-
-      void recordChatEvent({
-        userId: studentBody.userId,
-        mode: "student",
-        boardId: studentBody.boardId,
-        gradeId: studentBody.gradeId,
-        subjectId: studentBody.subjectId,
-        medium: responseLanguage,
-        question: studentBody.message.trim() || "[Image question]",
-        source: "llm",
-        provider: getActiveLlmProvider(),
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        latencyMs: Date.now() - startedAt,
-        grounded: referenceChunks.length > 0,
-      });
 
       const response: ChatOrchestrationResponse = {
         reply: text,
@@ -834,6 +833,10 @@ app.post(
           history: [],
           message: chunk,
           maxTokens: EMPHASIS_MAX_TOKENS,
+          // An admin content-authoring pass over arbitrary document text --
+          // no student/subject to attribute this to at all (the request is
+          // just `{ content }`, see this route's own validation above).
+          event: { loggable: false },
         });
         if (
           stripEmphasisForComparison(text) === stripEmphasisForComparison(chunk)
@@ -1046,7 +1049,7 @@ app.post(
             chapter: body.chapter,
             topic: body.topic,
           });
-      const { text, model, usage } = await getChatReply({
+      const { text } = await getChatReply({
         systemPrompt,
         history: [],
         message: "Write the summary now.",
@@ -1056,22 +1059,16 @@ app.post(
         maxTokens: fromChapterNotes
           ? SUMMARY_TRANSLATION_MAX_TOKENS
           : SUMMARY_MAX_TOKENS,
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          subjectId: body.subjectId,
+          question: `topic-summary: ${body.chapter} / ${body.topic}`,
+        },
       });
 
       await upsertTopicSummary(body.topicId, responseLanguage, text);
-
-      void recordChatEvent({
-        userId: body.userId,
-        mode: "student",
-        subjectId: body.subjectId,
-        question: `topic-summary: ${body.chapter} / ${body.topic}`,
-        source: "llm",
-        provider: getActiveLlmProvider(),
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        latencyMs: Date.now() - startedAt,
-      });
 
       const response: TopicSummaryResponse = { summary: text, source: "llm" };
       res.json(response);
@@ -1333,11 +1330,21 @@ app.post(
         count: EXERCISE_GENERATION_COUNT,
         archetypes,
       });
-      const { text, model, usage } = await getChatReply({
+      const { text } = await getChatReply({
         systemPrompt,
         history: [],
         message: "Generate the exercises now.",
         maxTokens: EXERCISE_MAX_TOKENS,
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          boardId: scope.boardId,
+          gradeId: scope.gradeId,
+          subjectId: scope.subjectId,
+          medium: scope.medium,
+          question: `topic-exercises: ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
+        },
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -1392,22 +1399,6 @@ app.post(
         );
         if (item) stored.push(item);
       }
-
-      void recordChatEvent({
-        userId: body.userId,
-        mode: "student",
-        boardId: scope.boardId,
-        gradeId: scope.gradeId,
-        subjectId: scope.subjectId,
-        medium: scope.medium,
-        question: `topic-exercises: ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
-        source: "llm",
-        provider: getActiveLlmProvider(),
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        latencyMs: Date.now() - startedAt,
-      });
 
       const response: TopicExercisesResponse = {
         exercises: stored,
@@ -1611,7 +1602,6 @@ app.post(
   "/v1/topic-exercises/generate-for-concept",
   requireSharedSecret,
   async (req: Request, res: Response) => {
-    const startedAt = Date.now();
     const body = req.body as
       | Partial<GenerateConceptExercisesRequest>
       | undefined;
@@ -1684,11 +1674,21 @@ app.post(
         count: CONCEPT_EXERCISE_COUNT,
         requestedType,
       });
-      const { text, model, usage } = await getChatReply({
+      const { text } = await getChatReply({
         systemPrompt,
         history: [],
         message: "Generate the exercises now.",
         maxTokens: EXERCISE_MAX_TOKENS,
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          boardId: scope.boardId,
+          gradeId: scope.gradeId,
+          subjectId: scope.subjectId,
+          medium: scope.medium,
+          question: `topic-exercises/generate-for-concept: ${body.chapter} / ${body.topic} (${concept.term})`,
+        },
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -1714,22 +1714,6 @@ app.post(
         if (item) stored.push(item);
       }
 
-      void recordChatEvent({
-        userId: body.userId,
-        mode: "student",
-        boardId: scope.boardId,
-        gradeId: scope.gradeId,
-        subjectId: scope.subjectId,
-        medium: scope.medium,
-        question: `topic-exercises/generate-for-concept: ${body.chapter} / ${body.topic} (${concept.term})`,
-        source: "llm",
-        provider: getActiveLlmProvider(),
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        latencyMs: Date.now() - startedAt,
-      });
-
       const response: GenerateConceptExercisesResponse = { exercises: stored };
       res.json(response);
     } catch (err) {
@@ -1754,7 +1738,6 @@ app.post(
   "/v1/topic-exercises/generate",
   requireSharedSecret,
   async (req: Request, res: Response) => {
-    const startedAt = Date.now();
     const body = req.body as Partial<GenerateTopicExerciseRequest> | undefined;
 
     if (
@@ -1878,11 +1861,21 @@ app.post(
         requestedDifficulty,
         requestedType,
       });
-      const { text, model, usage } = await getChatReply({
+      const { text } = await getChatReply({
         systemPrompt,
         history: [],
         message: "Generate the exercise now.",
         maxTokens: EXERCISE_MAX_TOKENS,
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          boardId: scope.boardId,
+          gradeId: scope.gradeId,
+          subjectId: scope.subjectId,
+          medium: scope.medium,
+          question: `topic-exercises/generate: ${body.chapter} / ${body.topic} (${chosen.name})`,
+        },
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -1916,22 +1909,6 @@ app.post(
           archetypes: [chosen],
         });
       }
-
-      void recordChatEvent({
-        userId: body.userId,
-        mode: "student",
-        boardId: scope.boardId,
-        gradeId: scope.gradeId,
-        subjectId: scope.subjectId,
-        medium: scope.medium,
-        question: `topic-exercises/generate: ${body.chapter} / ${body.topic} (${chosen.name})`,
-        source: "llm",
-        provider: getActiveLlmProvider(),
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        latencyMs: Date.now() - startedAt,
-      });
 
       const response: GenerateTopicExerciseResponse = { exercise: item };
       res.json(response);
@@ -1988,6 +1965,16 @@ app.post(
         question: exercise.question,
         expectedAnswer: exercise.answer,
         studentAnswer: body.studentAnswer,
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          boardId: exercise.boardId,
+          gradeId: exercise.gradeId,
+          subjectId: exercise.subjectId,
+          medium: exercise.medium as Medium,
+          question: `topic-exercises/grade: ${exercise.question.slice(0, 80)}`,
+        },
       });
 
       // Only credited when grading actually produced a real verdict AND the
@@ -2141,6 +2128,22 @@ async function generatePracticePaperQuestion(params: {
     history: [],
     message: "Generate the exercises now.",
     maxTokens: EXERCISE_MAX_TOKENS,
+    // Reported directly: this call -- fired once per practice-paper
+    // question, up to 41 times per paper (see practiceBlueprint.ts) -- was
+    // spending real tokens with nothing ever recorded into chat_events,
+    // invisible both to the monthly usage-limit check and to
+    // /admin/observability's cost reporting. See LlmCallContext's own
+    // comment for the other two paths this same gap was found in.
+    event: {
+      loggable: true,
+      userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `practice-paper/generate: ${topic.chapter} / ${topic.topic} (${type})`,
+    },
   });
 
   const [exercise] = parseGeneratedExercises(text);
@@ -2322,6 +2325,8 @@ app.post(
       !body ||
       typeof body.userId !== "string" ||
       !body.userId ||
+      typeof body.subjectId !== "string" ||
+      !body.subjectId ||
       typeof body.subjectName !== "string" ||
       typeof body.medium !== "string" ||
       !Array.isArray(body.questions) ||
@@ -2331,7 +2336,7 @@ app.post(
       body.images.length > MAX_IMAGES_PER_SUBMISSION
     ) {
       res.status(400).json({
-        error: `userId, subjectName, medium, a non-empty questions array, and 1-${MAX_IMAGES_PER_SUBMISSION} images are required`,
+        error: `userId, subjectId, subjectName, medium, a non-empty questions array, and 1-${MAX_IMAGES_PER_SUBMISSION} images are required`,
       });
       return;
     }
@@ -2387,6 +2392,21 @@ app.post(
         systemPrompt,
         images,
         maxTokens: EXERCISE_MAX_TOKENS,
+        // Reported directly: this route (grading a photographed answer
+        // sheet) had no scope at all, so it was spending real vision-model
+        // tokens with nothing ever recorded into chat_events -- see
+        // LlmCallContext's own comment for the other two paths this same
+        // gap was found in.
+        event: {
+          loggable: true,
+          userId: body.userId,
+          mode: "student",
+          boardId: body.boardId,
+          gradeId: body.gradeId,
+          subjectId: body.subjectId,
+          medium,
+          question: `practice-paper/evaluate: ${gradingQuestions.length} questions`,
+        },
       });
 
       const parsed = parsePracticePaperGrading(
