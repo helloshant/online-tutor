@@ -17,6 +17,22 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   numerical: "Numerical",
 };
 
+// Same local-mirror convention as ExerciseType above. Wire values match the
+// orchestrator's own DifficultyLevel ("Easy" | "Medium" | "Hard") exactly --
+// only the UI labels differ ("Moderate"/"Difficult" read better to a student
+// than "Medium"/"Hard"). "Difficult" is deliberately the top of the slider,
+// not a separate "Very difficult" step -- the orchestrator's own prompt
+// instruction for "Hard" already asks for "difficult to very difficult"
+// questions (see prompts.ts's describeDifficultyLevel), so the slider's top
+// end already covers that range rather than needing a fourth step.
+type Difficulty = "Easy" | "Medium" | "Hard";
+const DIFFICULTY_LEVELS: Difficulty[] = ["Easy", "Medium", "Hard"];
+const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  Easy: "Easy",
+  Medium: "Moderate",
+  Hard: "Difficult",
+};
+
 // Same allow-list/caps as /api/practice-papers/[id]/submit/route.ts --
 // checked here too so a student finds out about an unsupported file
 // before spending time uploading it.
@@ -96,6 +112,11 @@ export function PracticePanel({
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
     new Set(),
   );
+  // Defaults to Moderate. Deliberately NOT reset by resetToPicker() below --
+  // a sticky per-session preference (a student who sets Difficult and
+  // generates one paper most likely wants the next one at the same level
+  // too, not silently reset to Moderate every time they click "New paper").
+  const [difficulty, setDifficulty] = useState<Difficulty>("Medium");
   const [history, setHistory] = useState<HistoryPaper[] | null>(null);
 
   const [activePaper, setActivePaper] = useState<Paper | null>(null);
@@ -252,6 +273,7 @@ export function PracticePanel({
           boardId,
           gradeId,
           medium,
+          difficulty,
         }),
       });
       const body = await res.json();
@@ -428,6 +450,33 @@ export function PracticePanel({
                   );
                 })}
               </ul>
+
+              <div className="mt-4">
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="font-semibold uppercase tracking-wide text-foreground/40">
+                    Difficulty
+                  </span>
+                  <span className="font-medium text-foreground/70">
+                    {DIFFICULTY_LABELS[difficulty]}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={DIFFICULTY_LEVELS.length - 1}
+                  step={1}
+                  value={DIFFICULTY_LEVELS.indexOf(difficulty)}
+                  onChange={(e) =>
+                    setDifficulty(DIFFICULTY_LEVELS[Number(e.target.value)])
+                  }
+                  className="w-full accent-brand"
+                />
+                <div className="mt-1 flex justify-between text-[10px] text-foreground/40">
+                  <span>Easy</span>
+                  <span>Moderate</span>
+                  <span>Difficult</span>
+                </div>
+              </div>
 
               {generateError && (
                 <p className="mt-3 text-sm text-red-600">{generateError}</p>

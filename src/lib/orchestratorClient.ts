@@ -762,6 +762,9 @@ export type GeneratePracticePaperRequest = {
   gradeName: string;
   medium: Medium;
   topics: PracticePaperTopic[];
+  // The practice panel's own difficulty slider -- see the orchestrator's
+  // own GeneratePracticePaperRequest comment.
+  difficulty?: DifficultyLevel;
 };
 
 export type PracticePaperQuestion = {

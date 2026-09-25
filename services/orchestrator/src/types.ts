@@ -492,6 +492,10 @@ export type GeneratePracticePaperRequest = {
   gradeName: string;
   medium: Medium;
   topics: PracticePaperTopic[];
+  // The practice panel's own difficulty slider -- invalid/absent defaults
+  // to "Medium" ("Moderate" in the UI), same posture as every other
+  // optional refinement in this file (requestedType, requestedDifficulty).
+  difficulty?: DifficultyLevel;
 };
 
 export type PracticePaperQuestion = {

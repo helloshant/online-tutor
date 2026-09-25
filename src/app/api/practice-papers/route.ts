@@ -13,7 +13,10 @@ import {
 } from "@/lib/usageLimits";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { generatePracticePaper } from "@/lib/orchestratorClient";
+import type { DifficultyLevel } from "@/lib/orchestratorClient";
 import type { Medium } from "@/lib/supabase/types";
+
+const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
 
 // POST generates a fresh paper for one or more selected chapters -- no cap
 // on how many (a student can select the entire syllabus if they want, see
@@ -69,6 +72,14 @@ async function handlePost(request: Request) {
   const body = await request.json().catch(() => null);
   const subjectId = typeof body?.subjectId === "string" ? body.subjectId : "";
   const chapters = Array.isArray(body?.chapters) ? body.chapters : null;
+  // The practice panel's own difficulty slider -- invalid/absent defaults
+  // to "Medium" ("Moderate" in the UI) rather than a 400, same posture as
+  // every other optional refinement across this app's generation routes.
+  const difficulty: DifficultyLevel = VALID_DIFFICULTIES.includes(
+    body?.difficulty,
+  )
+    ? body.difficulty
+    : "Medium";
 
   if (
     !subjectId ||
@@ -219,6 +230,7 @@ async function handlePost(request: Request) {
         chapter: t.chapter,
         topic: t.topic,
       })),
+      difficulty,
     });
 
     if (questions.length === 0) {

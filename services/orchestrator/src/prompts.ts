@@ -469,6 +469,26 @@ function describeDifficultyAsk(
   return `Historically this pattern has appeared as ${spread}. Write it at ${requested} difficulty, consistent with how it's actually appeared at that level for this pattern.`;
 }
 
+// General, non-archetype-calibrated difficulty instruction -- the fallback
+// for every case describeDifficultyAsk above can't handle: zero archetypes
+// (ungrounded, or concept-grounded, which has no archetype concept at all)
+// or more than one (the batch path, where there's no single pattern's own
+// historical distribution to calibrate against). Used by practice-paper
+// generation's own difficulty slider (see server.ts's generatePracticePaperQuestion)
+// -- "Hard" is deliberately written as "difficult to very difficult," not
+// just "hard," since that slider's top end is meant to read as a real
+// stretch, not merely one notch above moderate.
+function describeDifficultyLevel(level: DifficultyLevel): string {
+  switch (level) {
+    case "Easy":
+      return "Write these at an easy, foundational difficulty -- straightforward, single-step reasoning, well below the hardest questions this topic could support.";
+    case "Medium":
+      return "Write these at a moderate, typical-exam difficulty -- the standard mix this topic actually gets tested at, neither trivially easy nor a stretch question.";
+    case "Hard":
+      return "Write these at a difficult to very difficult level -- multi-step reasoning, edge cases, or the kind of challenging question that separates top-scoring students, without going out of syllabus or becoming unfair.";
+  }
+}
+
 export function buildExerciseGenerationPrompt(params: {
   subjectName: string;
   boardName: string;
@@ -486,10 +506,11 @@ export function buildExerciseGenerationPrompt(params: {
   // Falls back to the original ungrounded instruction when empty, exactly
   // as before this parameter existed.
   archetypes?: ExerciseArchetype[];
-  // Set only by the on-demand single-pattern path (Tier D) when the
-  // student picked a specific difficulty rather than "Any" -- meaningless
-  // (and ignored) for the batch path or an ungrounded generation, since
-  // there's no single archetype to calibrate the ask against.
+  // Set by the on-demand single-pattern path (Tier D, historically-
+  // calibrated against that one archetype's own difficulty spread) or by
+  // practice-paper generation's own difficulty slider (see server.ts's
+  // generatePracticePaperQuestion, generally 0 or 2+ archetypes -- see
+  // describeDifficultyLevel's own comment for that fallback).
   requestedDifficulty?: DifficultyLevel;
   // Set only when the student picked a specific type rather than "Any" --
   // see ExerciseType's own comment and describeTypeAsk. Unlike
@@ -514,20 +535,29 @@ export function buildExerciseGenerationPrompt(params: {
     requestedType,
   } = params;
 
-  const difficultyAsk =
-    requestedDifficulty && archetypes.length === 1
-      ? `\n\n${describeDifficultyAsk(archetypes[0], requestedDifficulty)}`
-      : "";
+  const difficultyAsk = requestedDifficulty
+    ? `\n\n${
+        archetypes.length === 1
+          ? describeDifficultyAsk(archetypes[0], requestedDifficulty)
+          : describeDifficultyLevel(requestedDifficulty)
+      }`
+    : "";
   const typeAsk = requestedType
     ? `\n\n${describeTypeAsk(requestedType, count)}`
     : "";
+  // "Vary the difficulty slightly" only makes sense when nothing specific
+  // was requested -- a requested difficulty replaces it with difficultyAsk
+  // instead, which would otherwise directly contradict "vary."
+  const varyDifficulty = requestedDifficulty
+    ? ""
+    : ` Vary the difficulty slightly across the ${count} questions.`;
 
   const taskInstruction =
     archetypes.length > 0
       ? `Generate exactly ${count} practice questions by instantiating the reasoning patterns below with FRESH numbers, names, and context of your own choosing -- never reuse or lightly reword a historical question, only the underlying reasoning structure. Cycle through the patterns (repeat some if there are fewer than ${count}) so the set as a whole reflects the mix of patterns and difficulty this chapter/topic actually gets tested on, not an arbitrary spread:
 
 ${archetypes.map(describeArchetype).join("\n")}${difficultyAsk}${typeAsk}`
-      : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution. Vary the difficulty slightly across the ${count} questions.${typeAsk}`;
+      : `Generate exactly ${count} practice questions appropriate for this grade, board, and topic, each with a complete worked solution.${varyDifficulty}${difficultyAsk}${typeAsk}`;
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
@@ -569,6 +599,11 @@ export function buildConceptExerciseGenerationPrompt(params: {
   // Set only when the student picked a specific type rather than "Any" --
   // see ExerciseType's own comment and describeTypeAsk.
   requestedType?: ExerciseType;
+  // Practice-paper generation's own difficulty slider only -- see
+  // describeDifficultyLevel's own comment (this path has no archetype
+  // concept at all, so it always uses that general fallback, never
+  // describeDifficultyAsk's per-archetype calibration).
+  requestedDifficulty?: DifficultyLevel;
 }): string {
   const {
     subjectName,
@@ -582,10 +617,18 @@ export function buildConceptExerciseGenerationPrompt(params: {
     conceptContent,
     count,
     requestedType,
+    requestedDifficulty,
   } = params;
   const typeAsk = requestedType
     ? `\n\n${describeTypeAsk(requestedType, count)}`
     : "";
+  const difficultyAsk = requestedDifficulty
+    ? `\n\n${describeDifficultyLevel(requestedDifficulty)}`
+    : "";
+  // See buildExerciseGenerationPrompt's own identical reasoning.
+  const varyDifficulty = requestedDifficulty
+    ? ""
+    : ` Vary the difficulty slightly across the ${count} questions.`;
 
   return `You are writing practice exercises for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
 
@@ -598,7 +641,7 @@ Here is the chapter's own material on this specific concept, to ground your ques
 ${conceptContent}
 """
 
-Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution. Vary the difficulty slightly across the ${count} questions, and use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.${typeAsk}${describeCountReminder(count)}
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Generate exactly ${count} practice questions that test ONLY the concept above -- not the rest of the chapter -- each with a complete worked solution.${varyDifficulty} Use fresh numbers/examples of your own choosing rather than reusing any example given above verbatim.${difficultyAsk}${typeAsk}${describeCountReminder(count)}
 
 ${EXERCISE_FORMAT_INSTRUCTIONS}`;
 }

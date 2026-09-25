@@ -2058,6 +2058,14 @@ async function generatePracticePaperQuestion(params: {
   medium: Medium;
   topic: PracticePaperTopic;
   type: ExerciseType;
+  // The practice-paper difficulty slider -- see buildPracticeBlueprint's
+  // sibling comment and describeDifficultyLevel in prompts.ts for how "Hard"
+  // is deliberately written as "difficult to very difficult," not just
+  // "hard." The same level is used for every question in a given paper
+  // (this is a whole-paper setting, not per-question), applied uniformly
+  // whether this specific question ends up archetype-grounded, concept-
+  // grounded, or fully ungrounded.
+  difficulty: DifficultyLevel;
 }): Promise<{ id: string; question: string; type: ExerciseType } | null> {
   const {
     userId,
@@ -2068,6 +2076,7 @@ async function generatePracticePaperQuestion(params: {
     medium,
     topic,
     type,
+    difficulty,
   } = params;
 
   const archetypes = await findArchetypesForTopic({
@@ -2090,6 +2099,7 @@ async function generatePracticePaperQuestion(params: {
       count: 1,
       archetypes,
       requestedType: type,
+      requestedDifficulty: difficulty,
     });
   } else {
     const concepts = await findConceptsForTopic(topic.id);
@@ -2109,6 +2119,7 @@ async function generatePracticePaperQuestion(params: {
           conceptContent: concept.content,
           count: 1,
           requestedType: type,
+          requestedDifficulty: difficulty,
         })
       : buildExerciseGenerationPrompt({
           subjectName,
@@ -2120,6 +2131,7 @@ async function generatePracticePaperQuestion(params: {
           count: 1,
           archetypes: [],
           requestedType: type,
+          requestedDifficulty: difficulty,
         });
   }
 
@@ -2142,7 +2154,7 @@ async function generatePracticePaperQuestion(params: {
       gradeId: scope.gradeId,
       subjectId: scope.subjectId,
       medium: scope.medium,
-      question: `practice-paper/generate: ${topic.chapter} / ${topic.topic} (${type})`,
+      question: `practice-paper/generate: ${topic.chapter} / ${topic.topic} (${type}, ${difficulty})`,
     },
   });
 
@@ -2230,6 +2242,16 @@ app.post(
     const boardName = body.boardName;
     const gradeName = body.gradeName;
     const medium = body.medium as Medium;
+    // The difficulty slider on the practice panel -- defaults to "Medium"
+    // ("Moderate" in the UI) the same way an invalid/absent requestedType or
+    // requestedDifficulty elsewhere in this file just means "no preference"
+    // rather than a 400, since this is the one optional refinement on an
+    // otherwise already-valid request.
+    const difficulty = VALID_DIFFICULTIES.includes(
+      body.difficulty as DifficultyLevel,
+    )
+      ? (body.difficulty as DifficultyLevel)
+      : "Medium";
     // Shuffled (not the caller's own resolution order) -- see the route
     // comment above on why: the round-robin below only ever draws
     // `jobs.length` topics total, which is far fewer than a large/whole-
@@ -2277,6 +2299,7 @@ app.post(
               medium,
               topic,
               type: job.type,
+              difficulty,
             }).then((result) =>
               result ? { ...result, marks: job.marks } : null,
             );
