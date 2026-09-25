@@ -9,7 +9,10 @@ export function NewPasswordForm({
   action,
   submitLabel = "Set new password",
 }: {
-  action: (prevState: ResetPasswordState, formData: FormData) => Promise<ResetPasswordState>;
+  action: (
+    prevState: ResetPasswordState,
+    formData: FormData,
+  ) => Promise<ResetPasswordState>;
   submitLabel?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -46,6 +49,9 @@ export function NewPasswordForm({
       </div>
 
       {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.success && (
+        <p className="text-sm text-green-600">Password updated.</p>
+      )}
 
       <button
         type="submit"

@@ -226,6 +226,12 @@ export function DashboardShell({
               Admin
             </Link>
           )}
+          <Link
+            href="/account"
+            className="font-medium text-foreground/60 hover:text-foreground"
+          >
+            Account
+          </Link>
           <LogoutButton className="font-medium text-foreground/60 hover:text-foreground" />
         </div>
       </header>

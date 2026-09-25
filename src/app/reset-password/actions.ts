@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 
 export interface ResetPasswordState {
   error?: string;
+  // Set by a caller that stays on the same page instead of redirecting on
+  // success (see the account page's own changePassword action) -- resetPassword
+  // itself never sets this, since it always redirect()s on success instead,
+  // which throws before this function would otherwise return a value.
+  success?: boolean;
 }
 
 // Shared by both /reset-password (after a recovery-link session) and
@@ -12,7 +17,7 @@ export interface ResetPasswordState {
 // mechanically it's the same operation, just reached two different ways.
 export async function resetPassword(
   _prevState: ResetPasswordState,
-  formData: FormData
+  formData: FormData,
 ): Promise<ResetPasswordState> {
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
