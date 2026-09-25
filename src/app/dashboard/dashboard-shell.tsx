@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { LogoutButton } from "@/components/logout-button";
+import { UserMenu } from "@/components/user-menu";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
 import { InboxPanel } from "./inbox-panel";
@@ -215,9 +215,6 @@ export function DashboardShell({
               medium={medium}
             />
           )}
-          <span className="hidden text-foreground/70 sm:inline">
-            {userName}
-          </span>
           {isStaffUser && (
             <Link
               href="/admin"
@@ -226,13 +223,7 @@ export function DashboardShell({
               Admin
             </Link>
           )}
-          <Link
-            href="/account"
-            className="font-medium text-foreground/60 hover:text-foreground"
-          >
-            Account
-          </Link>
-          <LogoutButton className="font-medium text-foreground/60 hover:text-foreground" />
+          <UserMenu userName={userName} />
         </div>
       </header>
 
