@@ -29,7 +29,7 @@ export function ExamQuestionForm({ broadcastId }: { broadcastId: string }) {
         className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
       />
       <div className="flex items-center gap-2">
-        <label className="text-xs text-foreground/60">
+        <label className="text-xs text-foreground/75">
           Max marks{" "}
           <input
             key={`maxScore-${generation}`}

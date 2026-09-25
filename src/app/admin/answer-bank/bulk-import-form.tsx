@@ -74,7 +74,7 @@ export function BulkImportForm({
         Bulk import (e.g. a textbook or past exam paper)
       </summary>
       <form action={formAction} encType="multipart/form-data" className="space-y-3 px-3 pb-4">
-        <p className="text-xs text-foreground/60">
+        <p className="text-xs text-foreground/75">
           For real, sourced questions (a textbook&apos;s exercise set, a past exam paper) rather
           than LLM-generated practice — these are stored <b>admin-approved</b> immediately, no
           quality check applied, and tagged so students can find them by source (e.g. &ldquo;Ganit
@@ -180,7 +180,7 @@ export function BulkImportForm({
             className="w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm"
           />
           <div className="flex items-center gap-2">
-            <label htmlFor="textFile" className="whitespace-nowrap text-xs text-foreground/60">
+            <label htmlFor="textFile" className="whitespace-nowrap text-xs text-foreground/75">
               …or for a large batch, upload a .txt file in the same format instead:
             </label>
             <input
@@ -202,7 +202,7 @@ export function BulkImportForm({
             multiple
             className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm file:mr-2 file:rounded file:border-0 file:bg-brand/10 file:px-2 file:py-1 file:text-sm"
           />
-          <p className="text-xs text-foreground/60">
+          <p className="text-xs text-foreground/75">
             Optional: select every diagram file referenced by an{" "}
             <code className="rounded bg-brand/10 px-1 py-0.5">IMG:</code> line above, all at once —
             each is matched to its question by filename, so pick as many as you need in one go.

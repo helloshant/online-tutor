@@ -79,7 +79,7 @@ export function ImportChunksForm({
         Bulk import from JSON (pre-chunked)
       </summary>
       <form action={formAction} encType="multipart/form-data" className="space-y-3 px-3 pb-4">
-        <p className="text-xs text-foreground/60">
+        <p className="text-xs text-foreground/75">
           For content prepared offline with chunks already split along real boundaries (chapter
           overview, plot summary, one entry per vocabulary word, etc.), each optionally carrying its
           own citation -- a top-level <code className="rounded bg-brand/10 px-1 py-0.5">chunks</code>{" "}

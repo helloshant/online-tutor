@@ -60,7 +60,7 @@ export default async function AuthorizationPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Authorization</h1>
-      <p className="mt-1 max-w-2xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-2xl text-sm text-foreground/75">
         Control which admin pages each admin can access. Superadmins always have full access to
         every page and can&apos;t be restricted here — only a superadmin can grant or revoke another
         admin&apos;s page permissions, and role changes themselves still happen from{" "}
@@ -72,7 +72,7 @@ export default async function AuthorizationPage() {
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full min-w-[700px] text-left text-sm">
-          <thead className="border-b border-border text-xs uppercase text-foreground/50">
+          <thead className="border-b border-border text-xs uppercase text-foreground/68">
             <tr>
               <th className="px-4 py-3">Admin</th>
               {PAGES.map((p) => (
@@ -90,7 +90,7 @@ export default async function AuthorizationPage() {
                 <tr key={profile.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3">
                     <div className="font-medium">{profile.full_name ?? "—"}</div>
-                    <div className="text-xs text-foreground/50">{email}</div>
+                    <div className="text-xs text-foreground/68">{email}</div>
                     {isSuperadmin && (
                       <span className="mt-1 inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
                         superadmin — full access
@@ -117,7 +117,7 @@ export default async function AuthorizationPage() {
             })}
             {staff.length === 0 && (
               <tr>
-                <td colSpan={PAGES.length + 1} className="px-4 py-8 text-center text-foreground/50">
+                <td colSpan={PAGES.length + 1} className="px-4 py-8 text-center text-foreground/68">
                   No admins yet.
                 </td>
               </tr>

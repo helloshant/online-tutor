@@ -9,13 +9,13 @@ export default function SignupPage() {
           TutorOps
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">Create your account</h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           Next you&apos;ll pick your board, grade, subjects, and language.
         </p>
 
         <SignupForm />
 
-        <p className="mt-6 text-center text-sm text-foreground/60">
+        <p className="mt-6 text-center text-sm text-foreground/75">
           Already have an account?{" "}
           <Link href="/login" className="font-medium text-brand hover:underline">
             Log in

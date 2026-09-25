@@ -53,7 +53,7 @@ export default async function SubscribePage({
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-sm">
         <h1 className="text-2xl font-semibold">Complete your subscription</h1>
-        <p className="mt-1 text-sm text-foreground/60">One last step before you can start asking questions.</p>
+        <p className="mt-1 text-sm text-foreground/75">One last step before you can start asking questions.</p>
 
         {error && CALLBACK_ERROR_MESSAGES[error] && (
           <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -63,19 +63,19 @@ export default async function SubscribePage({
 
         <dl className="mt-6 space-y-3 text-sm">
           <div className="flex justify-between border-b border-border pb-2">
-            <dt className="text-foreground/60">Board</dt>
+            <dt className="text-foreground/75">Board</dt>
             <dd className="font-medium">{board?.name}</dd>
           </div>
           <div className="flex justify-between border-b border-border pb-2">
-            <dt className="text-foreground/60">Grade</dt>
+            <dt className="text-foreground/75">Grade</dt>
             <dd className="font-medium">{grade?.name}</dd>
           </div>
           <div className="flex justify-between border-b border-border pb-2">
-            <dt className="text-foreground/60">Medium</dt>
+            <dt className="text-foreground/75">Medium</dt>
             <dd className="font-medium">{subscription.medium}</dd>
           </div>
           <div className="flex justify-between border-b border-border pb-2">
-            <dt className="text-foreground/60">Subjects ({subjectNames.length})</dt>
+            <dt className="text-foreground/75">Subjects ({subjectNames.length})</dt>
             <dd className="text-right font-medium">{subjectNames.join(", ")}</dd>
           </div>
           <div className="flex justify-between pt-1 text-base">
@@ -86,7 +86,7 @@ export default async function SubscribePage({
           </div>
         </dl>
 
-        <p className="mt-4 text-xs text-foreground/50">
+        <p className="mt-4 text-xs text-foreground/68">
           {subjectNames.length} subject(s) × ₹{PRICE_PER_SUBJECT_INR}/month
         </p>
 

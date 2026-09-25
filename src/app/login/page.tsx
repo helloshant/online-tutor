@@ -15,13 +15,13 @@ export default async function LoginPage({
           TutorOps
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">Welcome back</h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           Log in to continue your Q&amp;A with your subjects.
         </p>
 
         <LoginForm next={next} />
 
-        <p className="mt-6 text-center text-sm text-foreground/60">
+        <p className="mt-6 text-center text-sm text-foreground/75">
           New here?{" "}
           <Link href="/signup" className="font-medium text-brand hover:underline">
             Create an account

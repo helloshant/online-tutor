@@ -51,7 +51,7 @@ export function CCAvenueCheckout() {
       >
         {loading ? "Redirecting to secure checkout…" : "Pay with CCAvenue"}
       </button>
-      <p className="mt-3 text-center text-xs text-foreground/50">
+      <p className="mt-3 text-center text-xs text-foreground/68">
         Payments are handled securely by CCAvenue. Your card/UPI details never touch our servers.
       </p>
 

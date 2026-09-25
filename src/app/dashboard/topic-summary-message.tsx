@@ -578,21 +578,21 @@ export function TopicSummaryMessage({
           it to sit narrower than the space it has. */}
       <div className="w-full space-y-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-foreground/40">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground/62">
             {topic.chapter}
           </p>
           <p className="font-semibold">{topic.topic}</p>
         </div>
 
         {loadingSummary ? (
-          <p className="text-foreground/50">
+          <p className="text-foreground/68">
             <LoadingIndicator label="Generating summary…" />
           </p>
         ) : summaryError ? (
           <p className="text-red-600">{summaryError}</p>
         ) : (
           <>
-            <p className="whitespace-pre-wrap text-foreground/80">
+            <p className="whitespace-pre-wrap text-foreground/88">
               <TableText text={summary ?? ""} />
             </p>
             {/* target_id is the topic itself, not a topic_summaries row --
@@ -629,14 +629,14 @@ export function TopicSummaryMessage({
                     : "Relevant Exercises"}
                 </button>
                 {loadingChapterTopics && (
-                  <p className="mt-2 text-sm text-foreground/50">
+                  <p className="mt-2 text-sm text-foreground/68">
                     <LoadingIndicator label="Loading topics for this chapter…" />
                   </p>
                 )}
               </>
             ) : selectedExerciseTopic === null ? (
               <>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                   {topic.chapter} — pick a topic for exercises
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -648,7 +648,7 @@ export function TopicSummaryMessage({
                       className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                         t.id === topic.id
                           ? "bg-brand/10 text-brand hover:bg-brand/20"
-                          : "bg-foreground/10 text-foreground/70 hover:bg-foreground/20"
+                          : "bg-foreground/10 text-foreground/82 hover:bg-foreground/20"
                       }`}
                     >
                       {t.topic}
@@ -659,7 +659,7 @@ export function TopicSummaryMessage({
             ) : (
               <>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground/62">
                     Exercises — {selectedExerciseTopic.topic}
                   </p>
                   {/* Omitted when chapterTopics only ever held this one
@@ -670,7 +670,7 @@ export function TopicSummaryMessage({
                     <button
                       type="button"
                       onClick={handleBackToChapterTopics}
-                      className="shrink-0 text-xs text-foreground/40 hover:underline"
+                      className="shrink-0 text-xs text-foreground/62 hover:underline"
                     >
                       ← All topics in this chapter
                     </button>
@@ -678,7 +678,7 @@ export function TopicSummaryMessage({
                 </div>
 
                 {loadingSubtopics ? (
-                  <p className="text-sm text-foreground/50">
+                  <p className="text-sm text-foreground/68">
                     <LoadingIndicator label="Finding sub-topics…" />
                   </p>
                 ) : subtopics === null ? null : selectedSubtopic === null ? (
@@ -687,7 +687,7 @@ export function TopicSummaryMessage({
                   // moment subtopics comes back empty, skipping this pill
                   // row entirely (see its own comment).
                   <>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                       {selectedExerciseTopic.topic} — pick a sub-topic
                     </p>
                     <div className="flex flex-wrap gap-1.5">
@@ -716,7 +716,7 @@ export function TopicSummaryMessage({
                             kind: "all",
                           })
                         }
-                        className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/60 transition hover:bg-foreground/20"
+                        className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/75 transition hover:bg-foreground/20"
                       >
                         All exercises for this chapter
                       </button>
@@ -731,7 +731,7 @@ export function TopicSummaryMessage({
                       <button
                         type="button"
                         onClick={handleBackToSubtopics}
-                        className="mb-2 text-xs text-foreground/40 hover:underline"
+                        className="mb-2 text-xs text-foreground/62 hover:underline"
                       >
                         ← Different sub-topic
                       </button>
@@ -746,14 +746,14 @@ export function TopicSummaryMessage({
                         seconds -- this makes that wait visible instead of just a
                         silent gap while exercises is still null. */}
                     {exercises === null && loadingExercises ? (
-                      <p className="text-sm text-foreground/50">
+                      <p className="text-sm text-foreground/68">
                         <LoadingIndicator label="Asking the tutor for relevant exercises…" />
                       </p>
                     ) : exercises === null ? null : (
                       <>
                         {topicTags.length > 0 && (
                           <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-foreground/40">
+                            <span className="text-xs text-foreground/62">
                               Refine by tag:
                             </span>
                             {topicTags.map((t) => (
@@ -778,7 +778,7 @@ export function TopicSummaryMessage({
                               <button
                                 type="button"
                                 onClick={clearTagFilter}
-                                className="text-xs text-foreground/40 hover:underline"
+                                className="text-xs text-foreground/62 hover:underline"
                               >
                                 Clear
                               </button>
@@ -787,7 +787,7 @@ export function TopicSummaryMessage({
                         )}
 
                         {loadingFilter ? (
-                          <p className="text-foreground/50">Filtering…</p>
+                          <p className="text-foreground/68">Filtering…</p>
                         ) : activeTagFilter ? (
                           // Tag-filtered results come from a different endpoint
                           // (/api/answer-bank/search) with no stable id in its
@@ -796,13 +796,13 @@ export function TopicSummaryMessage({
                           // endpoint too. See SearchExercise's own comment.
                           filteredExercises === null ||
                           filteredExercises.length === 0 ? (
-                            <p className="text-foreground/50">
+                            <p className="text-foreground/68">
                               No exercises tagged &quot;{activeTagFilter}&quot;
                               for this topic.
                             </p>
                           ) : (
                             <>
-                              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                                 Relevant exercises — &quot;{activeTagFilter}
                                 &quot;
                               </p>
@@ -812,7 +812,7 @@ export function TopicSummaryMessage({
                                     <p className="whitespace-pre-wrap font-medium">
                                       {i + 1}. <MathText text={ex.question} />
                                     </p>
-                                    <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+                                    <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/88">
                                       <MathText text={ex.answer} />
                                     </p>
                                     {/* No target_id -- several exercises share this one
@@ -949,7 +949,7 @@ export function TopicSummaryMessage({
                                 the sticky preference for the plain button
                                 above AND immediately generates one more
                                 batch at that type, same one-click feel. */}
-                            <span className="self-center text-xs text-foreground/40">
+                            <span className="self-center text-xs text-foreground/62">
                               Type:
                             </span>
                             {EXERCISE_TYPES.map((t) => (
@@ -975,7 +975,7 @@ export function TopicSummaryMessage({
                                 className={`rounded-full px-2 py-0.5 text-xs font-medium transition disabled:opacity-40 ${
                                   conceptType === t
                                     ? "bg-brand text-white"
-                                    : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20"
+                                    : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20"
                                 }`}
                               >
                                 {EXERCISE_TYPE_LABELS[t]}
@@ -989,7 +989,7 @@ export function TopicSummaryMessage({
                                 conceptType === undefined
                               }
                               title="Any type"
-                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60 transition hover:bg-foreground/20 disabled:opacity-40"
+                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/75 transition hover:bg-foreground/20 disabled:opacity-40"
                             >
                               Any
                             </button>

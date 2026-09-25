@@ -72,7 +72,7 @@ export default async function AdminCatalogPage({
     <div className="space-y-10">
       <div>
         <h1 className="text-xl font-semibold">Catalog</h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           Manage boards, grades, subjects, which subjects each board/grade offers, and the syllabus
           topics used to scope student Q&amp;A.
         </p>
@@ -81,7 +81,7 @@ export default async function AdminCatalogPage({
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-sm font-semibold">Boards</h2>
-          <ul className="mt-3 space-y-1 text-sm text-foreground/70">
+          <ul className="mt-3 space-y-1 text-sm text-foreground/82">
             {(boards ?? []).map((b) => (
               <li key={b.id}>{b.name}</li>
             ))}
@@ -107,7 +107,7 @@ export default async function AdminCatalogPage({
 
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-sm font-semibold">Grades</h2>
-          <ul className="mt-3 space-y-1 text-sm text-foreground/70">
+          <ul className="mt-3 space-y-1 text-sm text-foreground/82">
             {(grades ?? []).map((g) => (
               <li key={g.id}>{g.name}</li>
             ))}
@@ -134,7 +134,7 @@ export default async function AdminCatalogPage({
 
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-sm font-semibold">Subjects</h2>
-          <ul className="mt-3 space-y-1 text-sm text-foreground/70">
+          <ul className="mt-3 space-y-1 text-sm text-foreground/82">
             {(subjects ?? []).map((s) => (
               <li key={s.id}>{s.name}</li>
             ))}
@@ -161,7 +161,7 @@ export default async function AdminCatalogPage({
 
       <section className="rounded-xl border border-border bg-surface p-5">
         <h2 className="text-sm font-semibold">Board / grade / subject offerings</h2>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           Which subjects a board offers at a given grade. Students only see subjects offered here.
         </p>
 
@@ -197,7 +197,7 @@ export default async function AdminCatalogPage({
 
         <div className="mt-5 max-h-80 overflow-y-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-foreground/40">
+            <thead className="text-xs uppercase text-foreground/62">
               <tr>
                 <th className="py-1.5">Board</th>
                 <th className="py-1.5">Grade</th>
@@ -230,7 +230,7 @@ export default async function AdminCatalogPage({
 
       <section className="rounded-xl border border-border bg-surface p-5">
         <h2 className="text-sm font-semibold">Syllabus topics</h2>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           The topics used to keep student Q&amp;A confined to what they&apos;re actually meant to be
           learning. Each medium has its own syllabus — a board&apos;s vernacular syllabus (e.g. West
           Bengal Board&apos;s Bengali-medium document) isn&apos;t assumed to be a translation of its
@@ -335,7 +335,7 @@ export default async function AdminCatalogPage({
                 <input type="hidden" name="gradeId" value={gradeId} />
                 <input type="hidden" name="subjectId" value={subjectId} />
                 <input type="hidden" name="medium" value={medium} />
-                <p className="text-xs text-foreground/60">
+                <p className="text-xs text-foreground/75">
                   One chapter name per un-indented line; indent each topic underneath its chapter
                   (bullets like <code>-</code>, <code>*</code>, or <code>•</code> are stripped
                   automatically). Paste close to verbatim from the official syllabus document —
@@ -356,12 +356,12 @@ export default async function AdminCatalogPage({
               </form>
             </details>
 
-            <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+            <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/62">
               {(topics ?? []).length} {medium} topic{(topics ?? []).length === 1 ? "" : "s"}
             </p>
             <div className="mt-2 max-h-[28rem] overflow-y-auto rounded-lg border border-border">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-surface text-xs uppercase text-foreground/40">
+                <thead className="sticky top-0 bg-surface text-xs uppercase text-foreground/62">
                   <tr>
                     <th className="px-3 py-2">Chapter</th>
                     <th className="px-3 py-2">Topic</th>
@@ -448,7 +448,7 @@ export default async function AdminCatalogPage({
               </table>
             </div>
             {(topics ?? []).length === 0 && (
-              <p className="mt-2 text-sm text-foreground/50">No topics yet for this selection.</p>
+              <p className="mt-2 text-sm text-foreground/68">No topics yet for this selection.</p>
             )}
           </div>
         )}

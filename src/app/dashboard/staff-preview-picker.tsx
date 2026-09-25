@@ -73,7 +73,7 @@ export function StaffPreviewPicker({
         {isPreviewing ? "Switch" : "Preview as student"}
       </button>
       {isPreviewing && (
-        <a href="/dashboard" className="text-xs text-foreground/50 hover:text-foreground hover:underline">
+        <a href="/dashboard" className="text-xs text-foreground/68 hover:text-foreground hover:underline">
           Exit preview
         </a>
       )}

@@ -16,11 +16,11 @@ export default async function ResetPasswordPage() {
 
         {session ? (
           <>
-            <p className="mt-1 text-sm text-foreground/60">Choose a new password for your account.</p>
+            <p className="mt-1 text-sm text-foreground/75">Choose a new password for your account.</p>
             <NewPasswordForm action={resetPassword} />
           </>
         ) : (
-          <p className="mt-4 text-sm text-foreground/60">
+          <p className="mt-4 text-sm text-foreground/75">
             This reset link is invalid or has expired.{" "}
             <Link href="/forgot-password" className="font-medium text-brand hover:underline">
               Request a new one

@@ -71,7 +71,7 @@ export function NewChapterDocumentForm({
         Add a chapter document
       </summary>
       <form action={formAction} className="space-y-3 px-3 pb-4">
-        <p className="text-xs text-foreground/60">
+        <p className="text-xs text-foreground/75">
           A detailed summary of one chapter&apos;s actual content (e.g. the plot, characters, and
           themes of an English-medium literature chapter) -- unlike the answer bank, which answers
           a specific exercise question, this is reference material the tutor draws on to answer a

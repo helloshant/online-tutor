@@ -9,13 +9,13 @@ export default function ForgotPasswordPage() {
           TutorOps
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">Reset your password</h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           Enter the email on your account and we&apos;ll send you a link to set a new password.
         </p>
 
         <ForgotPasswordForm />
 
-        <p className="mt-6 text-center text-sm text-foreground/60">
+        <p className="mt-6 text-center text-sm text-foreground/75">
           <Link href="/login" className="font-medium text-brand hover:underline">
             Back to log in
           </Link>

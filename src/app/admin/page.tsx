@@ -68,7 +68,7 @@ export default async function AdminUsersPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Users</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Every signed-up user, their selections, and subscription status.
       </p>
 
@@ -120,7 +120,7 @@ export default async function AdminUsersPage() {
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full min-w-[900px] text-left text-sm">
-          <thead className="border-b border-border text-xs uppercase text-foreground/50">
+          <thead className="border-b border-border text-xs uppercase text-foreground/68">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Email</th>
@@ -142,7 +142,7 @@ export default async function AdminUsersPage() {
                     {row.fullName}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-foreground/70">{row.email}</td>
+                <td className="px-4 py-3 text-foreground/82">{row.email}</td>
                 <td className="px-4 py-3">
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -150,7 +150,7 @@ export default async function AdminUsersPage() {
                         ? "bg-purple-600 text-white"
                         : row.role === "admin"
                           ? "bg-brand text-white"
-                          : "bg-foreground/10 text-foreground/70"
+                          : "bg-foreground/10 text-foreground/82"
                     }`}
                   >
                     {row.role}
@@ -172,7 +172,7 @@ export default async function AdminUsersPage() {
                           ? "bg-green-100 text-green-700"
                           : row.status === "pending_payment"
                             ? "bg-yellow-100 text-yellow-700"
-                            : "bg-foreground/10 text-foreground/60"
+                            : "bg-foreground/10 text-foreground/75"
                       }`}
                     >
                       {row.status}
@@ -181,7 +181,7 @@ export default async function AdminUsersPage() {
                     "—"
                   )}
                 </td>
-                <td className="px-4 py-3 text-foreground/70">
+                <td className="px-4 py-3 text-foreground/82">
                   {row.signupSource
                     ? row.signupCampaign
                       ? `${row.signupSource} (${row.signupCampaign})`
@@ -194,7 +194,7 @@ export default async function AdminUsersPage() {
                       row.passwordStatus === "expired"
                         ? "bg-red-100 text-red-700"
                         : row.passwordStatus === "google"
-                          ? "bg-foreground/10 text-foreground/60"
+                          ? "bg-foreground/10 text-foreground/75"
                           : "bg-green-100 text-green-700"
                     }`}
                   >
@@ -205,7 +205,7 @@ export default async function AdminUsersPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-foreground/50">
+                <td colSpan={10} className="px-4 py-8 text-center text-foreground/68">
                   No users yet.
                 </td>
               </tr>

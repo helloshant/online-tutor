@@ -2,9 +2,18 @@
 
 :root {
   --background: #f6f7fb;
-  --foreground: #16181d;
-  --brand: #4f46e5;
-  --brand-dark: #4338ca;
+  /* A near-black with a deliberate cool indigo cast (90% of the old flat
+     #16181d blended with 10% of the new --brand below) rather than flat
+     neutral gray -- every text-foreground/NN muted-text usage across the
+     app (labels, captions, secondary copy) inherits this tint, so the
+     whole app's "quiet" text reads as richer/cooler instead of washed-out,
+     with zero change needed in any component file. */
+  --foreground: #1b1b2e;
+  /* Indigo-700/800 (Tailwind's own stops) instead of 600/700 -- one step
+     deeper for more visual weight on every button/link/active-tab, while
+     staying unmistakably the same indigo brand family. */
+  --brand: #4338ca;
+  --brand-dark: #3730a3;
   --surface: #ffffff;
   --border: #e5e7eb;
 }

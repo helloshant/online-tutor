@@ -319,7 +319,7 @@ function DiagramFrame({ title, children }: { title?: string; children: React.Rea
       >
         {children}
       </svg>
-      {title && <figcaption className="mt-0.5 text-center text-xs text-foreground/50">{title}</figcaption>}
+      {title && <figcaption className="mt-0.5 text-center text-xs text-foreground/68">{title}</figcaption>}
     </figure>
   );
 }

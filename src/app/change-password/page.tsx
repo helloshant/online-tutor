@@ -16,7 +16,7 @@ export default async function ChangePasswordPage() {
           TutorOps
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">Time to update your password</h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-foreground/75">
           For your account&apos;s security, passwords need to be refreshed periodically. Set a new
           one to continue.
         </p>

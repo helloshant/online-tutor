@@ -171,7 +171,7 @@ export default async function AnswerBankPage({
   return (
     <div>
       <h1 className="text-xl font-semibold">Answer bank</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Questions and answers the orchestrator has learned from real student conversations, so
         repeat questions can be served from the database instead of costing another LLM call. Every
         entry passes an automatic quality check on arrival; only <b>auto-approved</b> and{" "}
@@ -188,7 +188,7 @@ export default async function AnswerBankPage({
             className={`rounded-full border px-3 py-1 ${
               activeStatus === f.value
                 ? "border-brand bg-brand text-white"
-                : "border-border text-foreground/70 hover:bg-brand/5"
+                : "border-border text-foreground/82 hover:bg-brand/5"
             }`}
           >
             {f.label}
@@ -280,7 +280,7 @@ export default async function AnswerBankPage({
               topic: null,
               page: null,
             })}
-            className="text-xs text-foreground/50 hover:underline"
+            className="text-xs text-foreground/68 hover:underline"
           >
             Clear filters
           </a>
@@ -306,7 +306,7 @@ export default async function AnswerBankPage({
           const inlineImageClassName = "mx-auto h-auto max-w-xs rounded-lg border border-border object-contain";
           return (
             <div key={row.id} className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/50">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/68">
                 <span
                   className={`rounded-full px-2 py-0.5 font-medium ${STATUS_STYLES[row.validation_status]}`}
                 >
@@ -346,7 +346,7 @@ export default async function AnswerBankPage({
               <p className="mt-2 whitespace-pre-wrap text-sm font-medium">
                 <TextWithInlineImages text={row.question} imageUrls={questionImages} imageClassName={inlineImageClassName} />
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/70">
+              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/82">
                 <TextWithInlineImages text={row.answer} imageUrls={answerImages} imageClassName={inlineImageClassName} />
               </p>
 
@@ -371,7 +371,7 @@ export default async function AnswerBankPage({
                         {/* Matches the "[IMAGE N]" numbering EditAnswerForm's
                             textarea uses -- lets an admin tell which
                             placeholder corresponds to which thumbnail. */}
-                        <span className="text-xs text-foreground/50">[IMAGE {i + 1}]</span>
+                        <span className="text-xs text-foreground/68">[IMAGE {i + 1}]</span>
                         {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL, not a local/optimizable asset */}
                         <img
                           src={url}
@@ -379,7 +379,7 @@ export default async function AnswerBankPage({
                           className="h-24 w-24 rounded-lg border border-border object-cover"
                         />
                         <form action={removeImage.bind(null, row.id, url)}>
-                          <button type="submit" className="text-xs text-foreground/50 hover:underline">
+                          <button type="submit" className="text-xs text-foreground/68 hover:underline">
                             Remove
                           </button>
                         </form>
@@ -396,7 +396,7 @@ export default async function AnswerBankPage({
                     type="file"
                     name="image"
                     accept="image/jpeg,image/png,image/gif,image/webp"
-                    className="text-xs text-foreground/60"
+                    className="text-xs text-foreground/75"
                   />
                   <button
                     type="submit"
@@ -454,7 +454,7 @@ export default async function AnswerBankPage({
                 )}
                 {(row.validation_status === "rejected" || row.validation_status === "admin_approved") && (
                   <form action={restoreAnswer.bind(null, row.id)}>
-                    <button className="text-foreground/60 hover:underline">Reset to auto</button>
+                    <button className="text-foreground/75 hover:underline">Reset to auto</button>
                   </form>
                 )}
                 <form
@@ -467,14 +467,14 @@ export default async function AnswerBankPage({
                     question: row.question,
                   })}
                 >
-                  <button className="text-foreground/40 hover:underline">Delete</button>
+                  <button className="text-foreground/62 hover:underline">Delete</button>
                 </form>
               </div>
             </div>
           );
         })}
         {rows.length === 0 && (
-          <p className="text-sm text-foreground/50">No entries yet for this filter.</p>
+          <p className="text-sm text-foreground/68">No entries yet for this filter.</p>
         )}
       </div>
 
@@ -490,7 +490,7 @@ export default async function AnswerBankPage({
           ) : (
             <span />
           )}
-          <span className="text-foreground/50">Page {activePage}</span>
+          <span className="text-foreground/68">Page {activePage}</span>
           {hasNextPage ? (
             <a
               href={buildHref({ page: String(activePage + 1) })}

@@ -413,21 +413,21 @@ export function PracticePanel({
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
       {!activePaper ? (
         <>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
             Practice paper
           </p>
-          <p className="mb-4 text-xs text-foreground/40">
+          <p className="mb-4 text-xs text-foreground/62">
             Pick the chapters to generate a mock question paper from -- write
             your answers on paper, photograph them, and get them graded
             automatically.
           </p>
 
           {chapters === null ? (
-            <p className="text-sm text-foreground/50">
+            <p className="text-sm text-foreground/68">
               <LoadingIndicator label="Loading chapters…" />
             </p>
           ) : chapters.length === 0 ? (
-            <p className="text-sm text-foreground/50">
+            <p className="text-sm text-foreground/68">
               No syllabus entered yet for this subject.
             </p>
           ) : (
@@ -453,10 +453,10 @@ export function PracticePanel({
 
               <div className="mt-4">
                 <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-semibold uppercase tracking-wide text-foreground/40">
+                  <span className="font-semibold uppercase tracking-wide text-foreground/62">
                     Difficulty
                   </span>
-                  <span className="font-medium text-foreground/70">
+                  <span className="font-medium text-foreground/82">
                     {DIFFICULTY_LABELS[difficulty]}
                   </span>
                 </div>
@@ -471,7 +471,7 @@ export function PracticePanel({
                   }
                   className="w-full accent-brand"
                 />
-                <div className="mt-1 flex justify-between text-[10px] text-foreground/40">
+                <div className="mt-1 flex justify-between text-[10px] text-foreground/62">
                   <span>Easy</span>
                   <span>Moderate</span>
                   <span>Difficult</span>
@@ -499,7 +499,7 @@ export function PracticePanel({
 
           {history && history.length > 0 && (
             <div className="mt-8 border-t border-border pt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                 Your practice papers
               </p>
               <ul className="space-y-1.5">
@@ -521,7 +521,7 @@ export function PracticePanel({
                       <span className="min-w-0 truncate">
                         {p.chapters.join(", ")}
                       </span>
-                      <span className="shrink-0 text-xs text-foreground/40">
+                      <span className="shrink-0 text-xs text-foreground/62">
                         {p.totalMarks} marks
                       </span>
                     </button>
@@ -536,16 +536,16 @@ export function PracticePanel({
           <button
             type="button"
             onClick={resetToPicker}
-            className="mb-3 text-xs text-foreground/40 hover:underline"
+            className="mb-3 text-xs text-foreground/62 hover:underline"
           >
             ← New paper
           </button>
 
           <p className="text-lg font-bold">Mock Exam</p>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
             {activePaper.chapters.join(", ")}
           </p>
-          <p className="mb-4 text-xs text-foreground/40">
+          <p className="mb-4 text-xs text-foreground/62">
             Total: {activePaper.totalMarks} marks
           </p>
 
@@ -554,10 +554,10 @@ export function PracticePanel({
               <li key={q.id}>
                 <p className="whitespace-pre-wrap font-medium">
                   {i + 1}.{" "}
-                  <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/50">
+                  <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
                     {EXERCISE_TYPE_LABELS[q.type]}
                   </span>
-                  <span className="mr-1 text-xs font-normal text-foreground/40">
+                  <span className="mr-1 text-xs font-normal text-foreground/62">
                     ({q.marks} mark{q.marks === 1 ? "" : "s"})
                   </span>
                   <MathText text={q.question} />
@@ -588,17 +588,17 @@ export function PracticePanel({
                 Total: {submission.totalScore} / {submission.maxPossibleScore}
               </p>
               {submission.overallFeedback && (
-                <p className="text-sm text-foreground/70">
+                <p className="text-sm text-foreground/82">
                   {submission.overallFeedback}
                 </p>
               )}
             </div>
           ) : (
             <div className="mt-4 space-y-2 border-t border-border pt-4">
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                 Upload your answer sheet
               </p>
-              <p className="mb-2 text-xs text-foreground/40">
+              <p className="mb-2 text-xs text-foreground/62">
                 Write your answers on paper, then photograph each page (up to{" "}
                 {MAX_IMAGES_PER_SUBMISSION} photos) and upload them here.
               </p>
@@ -623,7 +623,7 @@ export function PracticePanel({
                       <button
                         type="button"
                         onClick={() => removeFile(i)}
-                        className="shrink-0 text-foreground/40 hover:text-foreground"
+                        className="shrink-0 text-foreground/62 hover:text-foreground"
                       >
                         Remove
                       </button>

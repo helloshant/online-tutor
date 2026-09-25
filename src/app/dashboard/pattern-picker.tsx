@@ -318,7 +318,7 @@ export function PatternPicker({
 
   return (
     <div className="mt-4 border-t border-border pt-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
         Practice a specific pattern
       </p>
       {generateError && (
@@ -379,7 +379,7 @@ export function PatternPicker({
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition disabled:opacity-60 ${
             active && !active.pattern
               ? "border-foreground/70 bg-foreground/70 text-white"
-              : "border-foreground/30 bg-foreground/5 text-foreground/70 hover:bg-foreground/10"
+              : "border-foreground/30 bg-foreground/5 text-foreground/82 hover:bg-foreground/10"
           }`}
         >
           {generating === GENERATING_RANDOM && generatingTrigger === "pill"
@@ -396,7 +396,7 @@ export function PatternPicker({
       {active && (
         <div className="mt-2 rounded-lg bg-background p-2">
           {active.pattern?.studentExplanation && (
-            <p className="mb-2 text-xs text-foreground/70">
+            <p className="mb-2 text-xs text-foreground/82">
               {active.pattern.studentExplanation}
             </p>
           )}
@@ -436,7 +436,7 @@ export function PatternPicker({
                     className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
                       active.difficulty === level
                         ? "bg-brand/20 text-brand"
-                        : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                        : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20 disabled:opacity-40"
                     }`}
                   >
                     {level}
@@ -461,7 +461,7 @@ export function PatternPicker({
                   className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
                     active.difficulty === undefined
                       ? "bg-brand/20 text-brand"
-                      : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                      : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20 disabled:opacity-40"
                   }`}
                 >
                   Any
@@ -483,7 +483,7 @@ export function PatternPicker({
                 A distinct highlighted color (matching the difficulty
                 pills' own identical fix just above) makes the current
                 selection read as a clear, deliberate state instead. */}
-            <span className="text-xs text-foreground/40">
+            <span className="text-xs text-foreground/62">
               Type: {active.type ? EXERCISE_TYPE_LABELS[active.type] : "Any"}
             </span>
             {EXERCISE_TYPES.map((t) => (
@@ -505,7 +505,7 @@ export function PatternPicker({
                 className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
                   active.type === t
                     ? "bg-brand/20 text-brand"
-                    : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                    : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20 disabled:opacity-40"
                 }`}
               >
                 {EXERCISE_TYPE_LABELS[t]}
@@ -528,7 +528,7 @@ export function PatternPicker({
               className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
                 active.type === undefined
                   ? "bg-brand/20 text-brand"
-                  : "bg-foreground/10 text-foreground/60 hover:bg-foreground/20 disabled:opacity-40"
+                  : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20 disabled:opacity-40"
               }`}
             >
               Any type
@@ -536,7 +536,7 @@ export function PatternPicker({
             <button
               type="button"
               onClick={() => setActive(null)}
-              className="ml-auto text-xs text-foreground/40 hover:underline"
+              className="ml-auto text-xs text-foreground/62 hover:underline"
             >
               Hide
             </button>

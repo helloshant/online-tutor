@@ -95,17 +95,17 @@ export function TopicList({
   }
 
   if (loading) {
-    return <p className="px-2 text-sm text-foreground/50">Loading…</p>;
+    return <p className="px-2 text-sm text-foreground/68">Loading…</p>;
   }
   if (chapters.length === 0) {
-    return <p className="px-2 text-sm text-foreground/50">No syllabus entered yet for this subject.</p>;
+    return <p className="px-2 text-sm text-foreground/68">No syllabus entered yet for this subject.</p>;
   }
 
   return (
     <div className="space-y-4">
       {chapters.map((group) => (
         <div key={group.chapter}>
-          <h3 className="px-2 text-sm font-semibold text-foreground/80">{group.chapter}</h3>
+          <h3 className="px-2 text-sm font-semibold text-foreground/88">{group.chapter}</h3>
           <ul className="mt-1 space-y-0.5">
             {group.topics.map((topic) => {
               const stats = progress.get(`${topic.chapter}::${topic.topic}`);
@@ -117,7 +117,7 @@ export function TopicList({
                     className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition ${
                       selectedTopicId === topic.id
                         ? "bg-brand/10 font-medium text-brand"
-                        : "text-foreground/70 hover:bg-brand/5 hover:text-foreground"
+                        : "text-foreground/82 hover:bg-brand/5 hover:text-foreground"
                     }`}
                   >
                     <span>{topic.topic}</span>
@@ -127,7 +127,7 @@ export function TopicList({
                         from, see the badge's own title text below. */}
                     {stats && (
                       <span
-                        className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground/50"
+                        className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground/68"
                         title={`${stats.practiced} of ${stats.total} known exam patterns practiced for this topic`}
                       >
                         {stats.practiced}/{stats.total}

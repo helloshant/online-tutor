@@ -41,13 +41,13 @@ export function UserMenu({ userName }: { userName: string }) {
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+        className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-foreground/82 hover:bg-foreground/5 hover:text-foreground"
       >
         <span aria-hidden="true" className="sm:hidden">
           👤
         </span>
         <span className="hidden sm:inline">{userName}</span>
-        <span aria-hidden="true" className="text-[10px] text-foreground/40">
+        <span aria-hidden="true" className="text-[10px] text-foreground/62">
           ▾
         </span>
       </button>
@@ -61,11 +61,11 @@ export function UserMenu({ userName }: { userName: string }) {
             href="/account"
             role="menuitem"
             onClick={() => setOpen(false)}
-            className="block px-3 py-1.5 text-sm text-foreground/80 hover:bg-brand/5"
+            className="block px-3 py-1.5 text-sm text-foreground/88 hover:bg-brand/5"
           >
             Account
           </Link>
-          <LogoutButton className="block w-full px-3 py-1.5 text-left text-sm text-foreground/80 hover:bg-brand/5 disabled:opacity-60" />
+          <LogoutButton className="block w-full px-3 py-1.5 text-left text-sm text-foreground/88 hover:bg-brand/5 disabled:opacity-60" />
         </div>
       )}
     </div>

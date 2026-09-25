@@ -232,7 +232,7 @@ export default async function ObservabilityPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Observability</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Token usage, LLM cost, and pipeline hit counts across every question asked.
       </p>
 
@@ -263,7 +263,7 @@ export default async function ObservabilityPage() {
         <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">LLM usage by user</h2>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-foreground/50">
+            <thead className="border-b border-border text-xs uppercase text-foreground/68">
               <tr>
                 <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Role</th>
@@ -280,7 +280,7 @@ export default async function ObservabilityPage() {
                 <tr key={row.userId} className="border-b border-border last:border-0 hover:bg-brand/5">
                   <td className="px-4 py-3">
                     <div className="font-medium">{row.name}</div>
-                    <div className="text-xs text-foreground/50">{row.email}</div>
+                    <div className="text-xs text-foreground/68">{row.email}</div>
                   </td>
                   <td className="px-4 py-3">{row.role}</td>
                   <td className="px-4 py-3">{row.queries}</td>
@@ -290,7 +290,7 @@ export default async function ObservabilityPage() {
                   <td className="px-4 py-3">
                     {USD_FORMATTER.format(row.costUsd)}
                     {row.unpriced > 0 && (
-                      <span className="ml-1 text-xs text-foreground/40">(+{row.unpriced} unpriced)</span>
+                      <span className="ml-1 text-xs text-foreground/62">(+{row.unpriced} unpriced)</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -302,7 +302,7 @@ export default async function ObservabilityPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-foreground/50">
+                  <td colSpan={8} className="px-4 py-8 text-center text-foreground/68">
                     No LLM usage recorded yet.
                   </td>
                 </tr>
@@ -314,7 +314,7 @@ export default async function ObservabilityPage() {
 
       <section className="mt-8 rounded-xl border border-border bg-surface">
         <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">Monthly usage vs quota</h2>
-        <p className="px-4 pt-3 text-xs text-foreground/50">
+        <p className="px-4 pt-3 text-xs text-foreground/68">
           This calendar month&apos;s token usage against each student&apos;s allowance -- the same cap
           enforced live in /api/chat (see supabase/migrations/0037_student_token_usage_limits.sql). Only
           students with usage this month or an admin-set override are listed; open a student&apos;s page
@@ -328,7 +328,7 @@ export default async function ObservabilityPage() {
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-foreground/50">
+            <thead className="border-b border-border text-xs uppercase text-foreground/68">
               <tr>
                 <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Used this month</th>
@@ -343,13 +343,13 @@ export default async function ObservabilityPage() {
                 <tr key={row.userId} className="border-b border-border last:border-0 hover:bg-brand/5">
                   <td className="px-4 py-3">
                     <div className="font-medium">{row.name}</div>
-                    <div className="text-xs text-foreground/50">{row.email}</div>
+                    <div className="text-xs text-foreground/68">{row.email}</div>
                   </td>
                   <td className="px-4 py-3">{row.usedThisMonth.toLocaleString()}</td>
                   <td className="px-4 py-3">
                     {row.unlimited ? "Unlimited" : row.limit.toLocaleString()}
                     {row.hasOverride && !row.unlimited && (
-                      <span className="ml-1 text-xs text-foreground/40">(override)</span>
+                      <span className="ml-1 text-xs text-foreground/62">(override)</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -364,13 +364,13 @@ export default async function ObservabilityPage() {
                   </td>
                   <td className="px-4 py-3">
                     {row.unlimited ? (
-                      <span className="text-foreground/40">—</span>
+                      <span className="text-foreground/62">—</span>
                     ) : row.overLimit ? (
                       <span className="font-medium text-red-600">Over limit</span>
                     ) : row.pctUsed >= 80 ? (
                       <span className="font-medium text-yellow-700">Near limit ({row.pctUsed}%)</span>
                     ) : (
-                      <span className="text-foreground/60">OK ({row.pctUsed}%)</span>
+                      <span className="text-foreground/75">OK ({row.pctUsed}%)</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -382,7 +382,7 @@ export default async function ObservabilityPage() {
               ))}
               {quotaRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-foreground/50">
+                  <td colSpan={6} className="px-4 py-8 text-center text-foreground/68">
                     No student usage recorded this month yet.
                   </td>
                 </tr>
@@ -394,7 +394,7 @@ export default async function ObservabilityPage() {
 
       <section className="mt-8 rounded-xl border border-border bg-surface">
         <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">Grounding by subject</h2>
-        <p className="px-4 pt-3 text-xs text-foreground/50">
+        <p className="px-4 pt-3 text-xs text-foreground/68">
           Where students are actually getting an answer tied to this app&apos;s own ingested chapter
           content (&ldquo;Grounded&rdquo;) versus the model&apos;s own general knowledge
           (&ldquo;Ungrounded&rdquo;) -- the signal for which subjects need more chapter notes
@@ -403,7 +403,7 @@ export default async function ObservabilityPage() {
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-foreground/50">
+            <thead className="border-b border-border text-xs uppercase text-foreground/68">
               <tr>
                 <th className="px-4 py-3">Subject</th>
                 <th className="px-4 py-3">Questions</th>
@@ -421,14 +421,14 @@ export default async function ObservabilityPage() {
                     <td className="px-4 py-3 font-medium">{row.name}</td>
                     <td className="px-4 py-3">{row.total.toLocaleString()}</td>
                     <td className="px-4 py-3">
-                      {row.reused.toLocaleString()} <span className="text-xs text-foreground/40">({pct(row.reused)})</span>
+                      {row.reused.toLocaleString()} <span className="text-xs text-foreground/62">({pct(row.reused)})</span>
                     </td>
                     <td className="px-4 py-3">
-                      {row.grounded.toLocaleString()} <span className="text-xs text-foreground/40">({pct(row.grounded)})</span>
+                      {row.grounded.toLocaleString()} <span className="text-xs text-foreground/62">({pct(row.grounded)})</span>
                     </td>
                     <td className="px-4 py-3">
                       {row.ungrounded.toLocaleString()}{" "}
-                      <span className="text-xs text-foreground/40">({pct(row.ungrounded)})</span>
+                      <span className="text-xs text-foreground/62">({pct(row.ungrounded)})</span>
                     </td>
                     <td className="px-4 py-3">{row.rejected.toLocaleString()}</td>
                   </tr>
@@ -436,7 +436,7 @@ export default async function ObservabilityPage() {
               })}
               {subjectRollupRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-foreground/50">
+                  <td colSpan={6} className="px-4 py-8 text-center text-foreground/68">
                     No questions recorded yet.
                   </td>
                 </tr>
@@ -452,9 +452,9 @@ export default async function ObservabilityPage() {
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-xs uppercase tracking-wide text-foreground/50">{label}</p>
+      <p className="text-xs uppercase tracking-wide text-foreground/68">{label}</p>
       <p className="mt-1 text-2xl font-semibold">{value}</p>
-      {sub && <p className="mt-1 text-xs text-foreground/40">{sub}</p>}
+      {sub && <p className="mt-1 text-xs text-foreground/62">{sub}</p>}
     </div>
   );
 }

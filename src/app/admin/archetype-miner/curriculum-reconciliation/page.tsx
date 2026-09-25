@@ -54,7 +54,7 @@ export default async function CurriculumReconciliationPage({
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Curriculum chapter reconciliation</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Stage 1 classifies each question&apos;s chapter from its own judgment whenever no taxonomy
         document anchors it to this app&apos;s own curated syllabus wording -- producing text
         that&apos;s topically right but doesn&apos;t exactly match it (a colon, an extra word, a
@@ -68,7 +68,7 @@ export default async function CurriculumReconciliationPage({
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <AutoSubmitSelect
             name="board"
@@ -84,7 +84,7 @@ export default async function CurriculumReconciliationPage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <AutoSubmitSelect
             name="grade"
@@ -100,7 +100,7 @@ export default async function CurriculumReconciliationPage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Subject
           <select
             name="subject"

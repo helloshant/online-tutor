@@ -47,7 +47,7 @@ export function NewBroadcastForm({
               <input type="radio" name="type" value={t.value} defaultChecked={t.value === "announcement"} className="mt-0.5" />
               <span>
                 <span className="block font-medium text-foreground">{t.label}</span>
-                <span className="block text-foreground/50">{t.hint}</span>
+                <span className="block text-foreground/68">{t.hint}</span>
               </span>
             </label>
           ))}
@@ -69,7 +69,7 @@ export function NewBroadcastForm({
           className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
         />
 
-        <p className="text-xs text-foreground/50">
+        <p className="text-xs text-foreground/68">
           Who this reaches -- leave any of these on &quot;All&quot; to not filter by that dimension.
         </p>
         <div className="flex flex-wrap gap-2">

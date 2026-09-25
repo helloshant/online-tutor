@@ -204,13 +204,13 @@ export function TopicPractice({
   return (
     <div>
       {exercises.length === 0 ? (
-        emptyLabel && <p className="text-foreground/50">{emptyLabel}</p>
+        emptyLabel && <p className="text-foreground/68">{emptyLabel}</p>
       ) : (
         <>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
             Relevant exercises
           </p>
-          <p className="mb-3 text-xs text-foreground/40">
+          <p className="mb-3 text-xs text-foreground/62">
             Try each one yourself first -- the worked solution shows once you
             check your answer.
           </p>
@@ -222,7 +222,7 @@ export function TopicPractice({
                   <p className="whitespace-pre-wrap font-medium">
                     {i + 1}.{" "}
                     {ex.type && (
-                      <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/50">
+                      <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
                         {EXERCISE_TYPE_LABELS[ex.type]}
                       </span>
                     )}
@@ -242,8 +242,8 @@ export function TopicPractice({
                         </span>{" "}
                         {state.feedback}
                       </p>
-                      <div className="rounded-lg bg-background p-3 text-foreground/80">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+                      <div className="rounded-lg bg-background p-3 text-foreground/88">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                           Solution
                         </p>
                         <p className="whitespace-pre-wrap">

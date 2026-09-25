@@ -16,67 +16,67 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <span className="text-sm font-semibold text-brand">TutorOps Admin</span>
           <nav className="flex gap-4 text-sm">
             {canSee("users") && (
-              <Link href="/admin" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin" className="text-foreground/82 hover:text-foreground">
                 Users
               </Link>
             )}
             {canSee("catalog") && (
-              <Link href="/admin/catalog" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/catalog" className="text-foreground/82 hover:text-foreground">
                 Catalog
               </Link>
             )}
             {canSee("answer_bank") && (
-              <Link href="/admin/answer-bank" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/answer-bank" className="text-foreground/82 hover:text-foreground">
                 Answer bank
               </Link>
             )}
             {canSee("observability") && (
-              <Link href="/admin/observability" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/observability" className="text-foreground/82 hover:text-foreground">
                 Observability
               </Link>
             )}
             {canSee("coupons") && (
-              <Link href="/admin/coupons" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/coupons" className="text-foreground/82 hover:text-foreground">
                 Coupons
               </Link>
             )}
             {canSee("chapter_notes") && (
-              <Link href="/admin/chapter-notes" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/chapter-notes" className="text-foreground/82 hover:text-foreground">
                 Chapter notes
               </Link>
             )}
             {canSee("topic_summaries") && (
-              <Link href="/admin/topic-summaries" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/topic-summaries" className="text-foreground/82 hover:text-foreground">
                 Topic summaries
               </Link>
             )}
             {canSee("broadcasts") && (
-              <Link href="/admin/broadcasts" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/broadcasts" className="text-foreground/82 hover:text-foreground">
                 Broadcasts
               </Link>
             )}
             {canSee("feedback") && (
-              <Link href="/admin/feedback" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/feedback" className="text-foreground/82 hover:text-foreground">
                 Feedback
               </Link>
             )}
             {canSee("archetype_miner") && (
-              <Link href="/admin/archetype-miner" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/archetype-miner" className="text-foreground/82 hover:text-foreground">
                 Archetype Miner
               </Link>
             )}
             {isSuperadmin && (
-              <Link href="/admin/authorization" className="text-foreground/70 hover:text-foreground">
+              <Link href="/admin/authorization" className="text-foreground/82 hover:text-foreground">
                 Authorization
               </Link>
             )}
           </nav>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <Link href="/dashboard" className="text-foreground/60 hover:text-foreground">
+          <Link href="/dashboard" className="text-foreground/75 hover:text-foreground">
             Back to app
           </Link>
-          <LogoutButton className="font-medium text-foreground/60 hover:text-foreground" />
+          <LogoutButton className="font-medium text-foreground/75 hover:text-foreground" />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>

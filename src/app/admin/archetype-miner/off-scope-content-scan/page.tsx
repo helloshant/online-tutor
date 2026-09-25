@@ -61,7 +61,7 @@ export default async function OffScopeContentScanPage({
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Off-scope content scan</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Checks every already-mined question in one board/grade/subject scope against its own real
         content -- flagging anything that&apos;s actually a different subject entirely (e.g. an
         English question mixed into a Biology paper) or actually a different grade&apos;s own
@@ -72,7 +72,7 @@ export default async function OffScopeContentScanPage({
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <AutoSubmitSelect
             name="board"
@@ -88,7 +88,7 @@ export default async function OffScopeContentScanPage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <AutoSubmitSelect
             name="grade"
@@ -104,7 +104,7 @@ export default async function OffScopeContentScanPage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Subject
           <select
             name="subject"

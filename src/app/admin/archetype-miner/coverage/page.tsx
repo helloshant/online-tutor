@@ -49,7 +49,7 @@ export default async function ArchetypeCoveragePage({
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Chapter / topic coverage</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Every mined archetype, grouped by the chapter and topic it actually appeared under in the exam --
         derived from its supporting questions&apos; own curriculum classification (the most common chapter/topic
         among them), not a separate field on the archetype itself, so this works for every run already mined,
@@ -57,7 +57,7 @@ export default async function ArchetypeCoveragePage({
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <AutoSubmitSelect
             name="board"
@@ -73,7 +73,7 @@ export default async function ArchetypeCoveragePage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <AutoSubmitSelect
             name="grade"
@@ -89,7 +89,7 @@ export default async function ArchetypeCoveragePage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Subject
           <select
             name="subject"
@@ -104,7 +104,7 @@ export default async function ArchetypeCoveragePage({
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1.5 pb-2 text-xs text-foreground/60">
+        <label className="flex items-center gap-1.5 pb-2 text-xs text-foreground/75">
           <input type="checkbox" name="all" value="1" defaultChecked={showAll} className="h-4 w-4" />
           Show everything (including candidate/REVIEW/MERGE/REMOVE)
         </label>
@@ -125,7 +125,7 @@ export default async function ArchetypeCoveragePage({
       )}
 
       {scopeChosen && (
-        <p className="mt-4 text-xs text-foreground/40">
+        <p className="mt-4 text-xs text-foreground/62">
           {rows.length} archetype(s) across {chapterEntries.length} chapter(s) shown.
         </p>
       )}
@@ -136,12 +136,12 @@ export default async function ArchetypeCoveragePage({
           return (
             <div key={chapterName}>
               <h2 className="text-lg font-semibold">
-                {chapterName} <span className="text-sm font-normal text-foreground/40">({chapterCount})</span>
+                {chapterName} <span className="text-sm font-normal text-foreground/62">({chapterCount})</span>
               </h2>
               <div className="mt-3 space-y-4 border-l-2 border-border pl-4">
                 {Array.from(byTopic.entries()).map(([topicName, topicRows]) => (
                   <div key={topicName} className="rounded-xl border border-border bg-surface">
-                    <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/50">
+                    <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/68">
                       {topicName} ({topicRows.length})
                     </h3>
                     <div className="divide-y divide-border">
@@ -157,13 +157,13 @@ export default async function ArchetypeCoveragePage({
                                   {row.critic_decision}
                                 </span>
                               )}
-                              <span className="text-xs text-foreground/40">
+                              <span className="text-xs text-foreground/62">
                                 confidence {a.mining_confidence?.toFixed(2)}
                               </span>
                             </div>
-                            <p className="mt-1 text-sm text-foreground/70">{a.learning_objective}</p>
-                            <p className="mt-1 text-xs text-foreground/50">{a.invariant_reasoning_structure}</p>
-                            <p className="mt-2 text-xs text-foreground/40">
+                            <p className="mt-1 text-sm text-foreground/82">{a.learning_objective}</p>
+                            <p className="mt-1 text-xs text-foreground/68">{a.invariant_reasoning_structure}</p>
+                            <p className="mt-2 text-xs text-foreground/62">
                               {/* years_observed is typed as number[] but a handful of real rows (mostly
                                   un-critiqued "candidate" ones, invisible under the default filter) have
                                   it stored as null instead of [] -- confirmed live, e.g.
@@ -188,7 +188,7 @@ export default async function ArchetypeCoveragePage({
           );
         })}
         {scopeChosen && chapterEntries.length === 0 && (
-          <p className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground/50">
+          <p className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground/68">
             No archetypes match this filter yet.
           </p>
         )}

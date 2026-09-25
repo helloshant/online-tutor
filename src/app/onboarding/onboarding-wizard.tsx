@@ -65,7 +65,7 @@ export function OnboardingWizard({
 
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-4 py-10">
-      <ol className="mb-8 flex items-center justify-between text-xs font-medium text-foreground/50">
+      <ol className="mb-8 flex items-center justify-between text-xs font-medium text-foreground/68">
         {STEPS.map((label, i) => (
           <li key={label} className={`flex items-center gap-2 ${i <= step ? "text-brand" : ""}`}>
             <span
@@ -84,12 +84,12 @@ export function OnboardingWizard({
         {step === 0 && (
           <section>
             <h2 className="text-lg font-semibold">Which board and grade?</h2>
-            <p className="mt-1 text-sm text-foreground/60">
+            <p className="mt-1 text-sm text-foreground/75">
               Your syllabus and Q&amp;A scope will be based on this selection.
             </p>
 
             <div className="mt-6">
-              <h3 className="text-sm font-medium text-foreground/70">Board</h3>
+              <h3 className="text-sm font-medium text-foreground/82">Board</h3>
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {boards.map((b) => (
                   <button
@@ -109,7 +109,7 @@ export function OnboardingWizard({
             </div>
 
             <div className="mt-6">
-              <h3 className="text-sm font-medium text-foreground/70">Grade</h3>
+              <h3 className="text-sm font-medium text-foreground/82">Grade</h3>
               <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
                 {grades.map((g) => (
                   <button
@@ -133,7 +133,7 @@ export function OnboardingWizard({
         {step === 1 && (
           <section>
             <h2 className="text-lg font-semibold">Choose your subjects</h2>
-            <p className="mt-1 text-sm text-foreground/60">
+            <p className="mt-1 text-sm text-foreground/75">
               Subjects offered for {selectedBoard?.name}, {selectedGrade?.name}. Q&amp;A will be
               confined to whichever subject you select in the dashboard.
             </p>
@@ -165,7 +165,7 @@ export function OnboardingWizard({
         {step === 2 && (
           <section>
             <h2 className="text-lg font-semibold">Medium of instruction</h2>
-            <p className="mt-1 text-sm text-foreground/60">
+            <p className="mt-1 text-sm text-foreground/75">
               The tutor will always answer in this language.
             </p>
 
@@ -193,19 +193,19 @@ export function OnboardingWizard({
             <h2 className="text-lg font-semibold">Confirm your subscription</h2>
             <dl className="mt-6 space-y-3 text-sm">
               <div className="flex justify-between border-b border-border pb-2">
-                <dt className="text-foreground/60">Board</dt>
+                <dt className="text-foreground/75">Board</dt>
                 <dd className="font-medium">{selectedBoard?.name}</dd>
               </div>
               <div className="flex justify-between border-b border-border pb-2">
-                <dt className="text-foreground/60">Grade</dt>
+                <dt className="text-foreground/75">Grade</dt>
                 <dd className="font-medium">{selectedGrade?.name}</dd>
               </div>
               <div className="flex justify-between border-b border-border pb-2">
-                <dt className="text-foreground/60">Medium</dt>
+                <dt className="text-foreground/75">Medium</dt>
                 <dd className="font-medium">{medium}</dd>
               </div>
               <div className="flex justify-between border-b border-border pb-2">
-                <dt className="text-foreground/60">Subjects</dt>
+                <dt className="text-foreground/75">Subjects</dt>
                 <dd className="text-right font-medium">
                   {selectedSubjects.map((s) => s.name).join(", ")}
                 </dd>
@@ -244,7 +244,7 @@ export function OnboardingWizard({
             type="button"
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/60 disabled:opacity-0"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-foreground/75 disabled:opacity-0"
           >
             Back
           </button>

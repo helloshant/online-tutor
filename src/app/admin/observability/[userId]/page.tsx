@@ -44,12 +44,12 @@ export default async function UserObservabilityPage({
         &larr; Back to observability
       </Link>
       <h1 className="mt-2 text-xl font-semibold">{profile?.full_name ?? "—"}</h1>
-      <p className="text-sm text-foreground/60">{authUser?.user?.email ?? "(no email)"}</p>
-      <p className="mt-1 text-xs text-foreground/40">Most recent 300 queries.</p>
+      <p className="text-sm text-foreground/75">{authUser?.user?.email ?? "(no email)"}</p>
+      <p className="mt-1 text-xs text-foreground/62">Most recent 300 queries.</p>
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full min-w-[900px] text-left text-sm">
-          <thead className="border-b border-border text-xs uppercase text-foreground/50">
+          <thead className="border-b border-border text-xs uppercase text-foreground/68">
             <tr>
               <th className="px-4 py-3">Time</th>
               <th className="px-4 py-3">Source</th>
@@ -66,7 +66,7 @@ export default async function UserObservabilityPage({
               const subject = (ev as unknown as { subjects: { name: string } | null }).subjects;
               return (
                 <tr key={ev.id} className="border-b border-border align-top last:border-0">
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-foreground/60">
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-foreground/75">
                     {new Date(ev.created_at).toLocaleString()}
                   </td>
                   <td className="px-4 py-3">
@@ -85,7 +85,7 @@ export default async function UserObservabilityPage({
                   <td className="px-4 py-3">
                     {ev.cost_usd != null ? USD_FORMATTER.format(ev.cost_usd) : "—"}
                   </td>
-                  <td className="px-4 py-3 text-xs text-foreground/50">
+                  <td className="px-4 py-3 text-xs text-foreground/68">
                     {ev.latency_ms != null ? `${ev.latency_ms} ms` : "—"}
                   </td>
                 </tr>
@@ -93,7 +93,7 @@ export default async function UserObservabilityPage({
             })}
             {(events ?? []).length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-foreground/50">
+                <td colSpan={8} className="px-4 py-8 text-center text-foreground/68">
                   No queries recorded yet.
                 </td>
               </tr>

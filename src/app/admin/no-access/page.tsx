@@ -7,7 +7,7 @@ export default function NoAccessPage() {
   return (
     <div className="rounded-xl border border-border bg-surface p-6">
       <h1 className="text-lg font-semibold">Access restricted</h1>
-      <p className="mt-2 max-w-md text-sm text-foreground/60">
+      <p className="mt-2 max-w-md text-sm text-foreground/75">
         You don&apos;t have permission to view this page. Ask a superadmin to grant it from Admin →
         Authorization.
       </p>

@@ -42,7 +42,7 @@ export default async function CrossRunMergePage({
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Cross-run duplicate merge</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Stage 3&apos;s own duplicate detection only ever compares archetypes mined within ONE run&apos;s
         own batch -- it has no visibility into any other run at all. The same reasoning pattern mined
         across several separate papers/runs for the same chapter shows up as several differently-worded
@@ -53,7 +53,7 @@ export default async function CrossRunMergePage({
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <AutoSubmitSelect
             name="board"
@@ -69,7 +69,7 @@ export default async function CrossRunMergePage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <AutoSubmitSelect
             name="grade"
@@ -85,7 +85,7 @@ export default async function CrossRunMergePage({
             ))}
           </AutoSubmitSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Subject
           <select
             name="subject"

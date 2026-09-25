@@ -25,7 +25,7 @@ export default function Home() {
       <header className="flex items-center justify-between px-6 py-5 sm:px-10">
         <span className="text-lg font-semibold text-brand">TutorOps</span>
         <nav className="flex items-center gap-4 text-sm font-medium">
-          <Link href="/login" className="text-foreground/70 hover:text-foreground">
+          <Link href="/login" className="text-foreground/82 hover:text-foreground">
             Log in
           </Link>
           <Link
@@ -41,7 +41,7 @@ export default function Home() {
         <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl">
           A tutor that knows exactly what you&apos;re supposed to be studying.
         </h1>
-        <p className="mt-5 max-w-xl text-lg text-foreground/60">
+        <p className="mt-5 max-w-xl text-lg text-foreground/75">
           Pick your board, grade, subjects, and language. TutorOps keeps every answer inside your
           syllabus — nothing more, nothing off-topic.
         </p>
@@ -64,13 +64,13 @@ export default function Home() {
           {FEATURES.map((f) => (
             <div key={f.title} className="rounded-xl border border-border bg-surface p-5">
               <h3 className="font-semibold">{f.title}</h3>
-              <p className="mt-1 text-sm text-foreground/60">{f.body}</p>
+              <p className="mt-1 text-sm text-foreground/75">{f.body}</p>
             </div>
           ))}
         </div>
       </main>
 
-      <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/40">
+      <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/62">
         TutorOps — built for students, by subject, by syllabus.
       </footer>
     </div>

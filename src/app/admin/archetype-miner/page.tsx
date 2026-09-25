@@ -40,7 +40,7 @@ export default async function ArchetypeMinerPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Question Archetype Miner</h1>
-          <p className="mt-1 text-sm text-foreground/60">
+          <p className="mt-1 text-sm text-foreground/75">
             Mines a reusable archetype taxonomy from a historical question corpus (Segmenter →
             Analyzer → embed/cluster → Miner → Critic), scoped by education level and curriculum.
           </p>
@@ -160,7 +160,7 @@ export default async function ArchetypeMinerPage() {
         <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">Pipeline runs</h2>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[800px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-foreground/50">
+            <thead className="border-b border-border text-xs uppercase text-foreground/68">
               <tr>
                 <th className="px-4 py-3">Submitted</th>
                 <th className="px-4 py-3">Education context</th>
@@ -175,11 +175,11 @@ export default async function ArchetypeMinerPage() {
                   <td className="px-4 py-3">{new Date(run.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{run.education_context.subject_or_course}</div>
-                    <div className="text-xs text-foreground/50">
+                    <div className="text-xs text-foreground/68">
                       {run.education_context.curriculum_source.name} · {run.education_context.education_stage} ·{" "}
                       {run.education_context.grade_or_year}
                     </div>
-                    <span className="mt-1 inline-block rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/50">
+                    <span className="mt-1 inline-block rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/68">
                       {run.llm_provider}
                     </span>
                   </td>
@@ -197,7 +197,7 @@ export default async function ArchetypeMinerPage() {
                     </span>
                     {run.error && <div className="mt-1 max-w-xs text-xs text-red-600">{run.error}</div>}
                   </td>
-                  <td className="px-4 py-3 text-xs text-foreground/60">
+                  <td className="px-4 py-3 text-xs text-foreground/75">
                     {run.stats.segmented != null && <div>Segmented: {run.stats.segmented}</div>}
                     {run.stats.analyzed != null && <div>Analyzed: {run.stats.analyzed}</div>}
                     {run.stats.mined != null && <div>Archetypes: {run.stats.mined}</div>}
@@ -212,7 +212,7 @@ export default async function ArchetypeMinerPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-foreground/50">
+                  <td colSpan={5} className="px-4 py-8 text-center text-foreground/68">
                     No pipeline runs submitted yet.
                   </td>
                 </tr>

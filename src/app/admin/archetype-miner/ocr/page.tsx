@@ -12,7 +12,7 @@ export default async function ArchetypeOcrPage() {
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">OCR a scanned paper or book</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         A standalone utility, separate from the pipeline itself -- extracts text from an image or PDF using Google
         Document AI, chosen specifically for its strong Devanagari/Hindi OCR support. Built for the case where
         neither the PDF path (Anthropic&apos;s native reading) nor the DOCX path (plain text extraction) can produce

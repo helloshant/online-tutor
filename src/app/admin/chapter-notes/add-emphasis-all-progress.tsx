@@ -138,7 +138,7 @@ export function AddEmphasisAllProgress() {
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="mt-1 text-xs text-foreground/60">
+          <p className="mt-1 text-xs text-foreground/75">
             {status.processed} / {status.total} checked ({pct}%)
             {status.currentTitle && <> — currently: {status.currentTitle}</>}
           </p>

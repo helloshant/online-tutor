@@ -153,7 +153,7 @@ export default async function ChapterNotesPage({
   return (
     <div>
       <h1 className="text-lg font-semibold">Chapter notes</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Detailed, admin-authored chapter content (e.g. a full English-medium literature chapter
         summary), retrieved by meaning during chat so the tutor can ground its answers in the real
         text instead of guessing from the chapter title alone. Prescribed textbooks are copyrighted --
@@ -177,7 +177,7 @@ export default async function ChapterNotesPage({
       <section className="mt-6 rounded-xl border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">Ingestion coverage</h2>
-          <p className="mt-1 text-xs text-foreground/50">
+          <p className="mt-1 text-xs text-foreground/68">
             Catalog segments (board · grade · subject · medium) with topics that have no chapter
             notes yet -- a chat question here can still be answered, but only from the model&apos;s
             own general knowledge, never grounded in this app&apos;s actual syllabus content.
@@ -186,7 +186,7 @@ export default async function ChapterNotesPage({
           </p>
         </div>
         {incompleteGroups.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-foreground/50">
+          <p className="px-4 py-6 text-center text-sm text-foreground/68">
             Every topic in the catalog has at least one chapter note ingested.
           </p>
         ) : (
@@ -195,11 +195,11 @@ export default async function ChapterNotesPage({
               <details key={group.key} className="px-4 py-3">
                 <summary className="cursor-pointer text-sm">
                   <span className="font-medium">{group.label}</span>{" "}
-                  <span className="text-foreground/50">
+                  <span className="text-foreground/68">
                     — {group.totalTopics - group.missingTopics.length}/{group.totalTopics} topics ingested
                   </span>
                 </summary>
-                <ul className="mt-2 space-y-1 pl-4 text-xs text-foreground/60">
+                <ul className="mt-2 space-y-1 pl-4 text-xs text-foreground/75">
                   {group.missingTopics.map((t, i) => (
                     <li key={i}>
                       {t.chapter} — {t.topic}
@@ -212,10 +212,10 @@ export default async function ChapterNotesPage({
         )}
         {fullyCoveredGroups.length > 0 && (
           <details className="border-t border-border px-4 py-3">
-            <summary className="cursor-pointer text-sm text-foreground/60">
+            <summary className="cursor-pointer text-sm text-foreground/75">
               Show fully covered segments ({fullyCoveredGroups.length})
             </summary>
-            <ul className="mt-2 space-y-1 pl-4 text-xs text-foreground/60">
+            <ul className="mt-2 space-y-1 pl-4 text-xs text-foreground/75">
               {fullyCoveredGroups.map((group) => (
                 <li key={group.key}>
                   {group.label} — {group.totalTopics}/{group.totalTopics} topics ingested
@@ -300,7 +300,7 @@ export default async function ChapterNotesPage({
           Filter
         </button>
         {hasActiveFilter && (
-          <a href="/admin/chapter-notes" className="text-xs text-foreground/50 hover:underline">
+          <a href="/admin/chapter-notes" className="text-xs text-foreground/68 hover:underline">
             Clear filters
           </a>
         )}
@@ -308,7 +308,7 @@ export default async function ChapterNotesPage({
 
       <div className="mt-4 space-y-3">
         {(documents ?? []).length === 0 && (
-          <p className="text-sm text-foreground/50">
+          <p className="text-sm text-foreground/68">
             {hasActiveFilter ? "No chapter documents match this filter." : "No chapter documents yet."}
           </p>
         )}
@@ -349,13 +349,13 @@ export default async function ChapterNotesPage({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-foreground/50">
+                  <p className="text-xs text-foreground/68">
                     {topic
                       ? `${topic.boards?.name} · ${topic.grades?.name} · ${topic.subjects?.name} · ${topic.medium} · ${topic.chapter} — ${topic.topic}`
                       : "(topic no longer exists)"}
                   </p>
                   {doc.source_type !== "original" && (doc.source_url || doc.source_note) && (
-                    <p className="mt-1 text-xs text-foreground/50">
+                    <p className="mt-1 text-xs text-foreground/68">
                       {doc.source_url && (
                         <a
                           href={doc.source_url}
@@ -380,7 +380,7 @@ export default async function ChapterNotesPage({
                   </form>
                 </div>
               </div>
-              <p className="mt-2 whitespace-pre-wrap text-foreground/70">{preview}</p>
+              <p className="mt-2 whitespace-pre-wrap text-foreground/82">{preview}</p>
               <EditChapterDocumentForm
                 id={doc.id}
                 title={doc.title}

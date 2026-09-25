@@ -83,12 +83,12 @@ export function ExamYearTrends({
   }
 
   if (loading) {
-    return <p className="px-2 text-sm text-foreground/50">Loading…</p>;
+    return <p className="px-2 text-sm text-foreground/68">Loading…</p>;
   }
 
   if (!coverage || coverage.topics.length === 0) {
     return (
-      <p className="px-2 text-sm text-foreground/50">
+      <p className="px-2 text-sm text-foreground/68">
         No exam-pattern data has been analyzed for this subject yet -- check back once past papers have been reviewed.
       </p>
     );
@@ -105,7 +105,7 @@ export function ExamYearTrends({
 
   return (
     <div>
-      <p className="mb-2 px-2 text-xs text-foreground/40">
+      <p className="mb-2 px-2 text-xs text-foreground/62">
         Topics that had a real, mined question in the year(s) you pick below. Tap a topic to see it in chat.
       </p>
 
@@ -119,7 +119,7 @@ export function ExamYearTrends({
               onClick={() => toggleYear(year)}
               aria-pressed={checked}
               className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                checked ? "bg-brand text-white" : "bg-foreground/10 text-foreground/50 hover:bg-foreground/20"
+                checked ? "bg-brand text-white" : "bg-foreground/10 text-foreground/68 hover:bg-foreground/20"
               }`}
             >
               {checked ? "✓ " : ""}
@@ -130,12 +130,12 @@ export function ExamYearTrends({
       </div>
 
       {visibleTopics.length === 0 ? (
-        <p className="px-2 text-sm text-foreground/50">No topics matched -- pick at least one year above.</p>
+        <p className="px-2 text-sm text-foreground/68">No topics matched -- pick at least one year above.</p>
       ) : (
         <div className="space-y-4">
           {chapters.map((group) => (
             <div key={group.chapter}>
-              <h3 className="px-2 text-sm font-semibold text-foreground/80">{group.chapter}</h3>
+              <h3 className="px-2 text-sm font-semibold text-foreground/88">{group.chapter}</h3>
               <ul className="mt-1 space-y-0.5">
                 {group.rows.map((row) => {
                   // Every year this app has ANY mined data for, not just
@@ -156,7 +156,7 @@ export function ExamYearTrends({
                       <button
                         type="button"
                         onClick={() => onSelectTopic(row.topic)}
-                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground/70 transition hover:bg-brand/5 hover:text-foreground"
+                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground/82 transition hover:bg-brand/5 hover:text-foreground"
                       >
                         <span className="flex items-center gap-1.5">
                           {row.topic.topic}
@@ -169,7 +169,7 @@ export function ExamYearTrends({
                             </span>
                           )}
                         </span>
-                        <span className="shrink-0 text-[10px] font-medium text-foreground/40">{row.years.join(", ")}</span>
+                        <span className="shrink-0 text-[10px] font-medium text-foreground/62">{row.years.join(", ")}</span>
                       </button>
                       {/* Informational only, not its own click target -- there's
                           no finer-grained selection this app's chat flow
@@ -181,10 +181,10 @@ export function ExamYearTrends({
                           {visibleSubTopics.map((st) => (
                             <li
                               key={st.topic}
-                              className="flex items-center justify-between gap-2 px-2 py-0.5 text-xs text-foreground/50"
+                              className="flex items-center justify-between gap-2 px-2 py-0.5 text-xs text-foreground/68"
                             >
                               <span>{st.topic}</span>
-                              <span className="shrink-0 text-[10px] text-foreground/35">{st.years.join(", ")}</span>
+                              <span className="shrink-0 text-[10px] text-foreground/55">{st.years.join(", ")}</span>
                             </li>
                           ))}
                         </ul>

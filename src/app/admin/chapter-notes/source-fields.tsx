@@ -26,11 +26,11 @@ export function SourceFields({
 }) {
   return (
     <details className="rounded-lg border border-border/60 bg-background/50 px-3 py-2">
-      <summary className="cursor-pointer text-xs font-medium text-foreground/60 hover:text-foreground">
+      <summary className="cursor-pointer text-xs font-medium text-foreground/75 hover:text-foreground">
         Source (copyright provenance) -- see the content authoring guide
       </summary>
       <div className="mt-2 space-y-2">
-        <p className="text-xs text-foreground/50">
+        <p className="text-xs text-foreground/68">
           Only fill this in if you drew on something beyond your own understanding of the syllabus
           topic -- never a substitute for actually writing this in your own words. See{" "}
           <code className="rounded bg-brand/10 px-1 py-0.5">docs/content-authoring-guide.md</code>.

@@ -18,7 +18,7 @@ export default async function ArchetypeFamiliesPage() {
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Archetype families</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Cross-level progressions — the SAME underlying reasoning skill recurring across education
         levels at increasing rigor (e.g. &quot;solve for an unknown from a stated condition&quot;
         across grade 9 through undergraduate). Never merges the underlying archetypes; each one
@@ -27,7 +27,7 @@ export default async function ArchetypeFamiliesPage() {
 
       <div className="mt-6 rounded-xl border border-border bg-surface p-5">
         <h2 className="text-sm font-semibold">Mine families for a subject/course</h2>
-        <p className="mt-1 text-xs text-foreground/50">
+        <p className="mt-1 text-xs text-foreground/68">
           Runs across every accepted archetype (status reviewed/final, decision KEEP/REVISE/ADD)
           sharing this exact subject_or_course label, across ALL runs/education levels. Enter it
           exactly as it appears on the pipeline runs you want related (e.g. &quot;Mathematics&quot;).
@@ -64,14 +64,14 @@ export default async function ArchetypeFamiliesPage() {
                 {f.subject_or_course}
               </span>
             </div>
-            <p className="mt-1.5 text-sm text-foreground/70">{f.progression_notes}</p>
-            <p className="mt-2 text-xs text-foreground/40">
+            <p className="mt-1.5 text-sm text-foreground/82">{f.progression_notes}</p>
+            <p className="mt-2 text-xs text-foreground/62">
               {f.member_archetype_ids.length} member archetype(s): {f.member_archetype_ids.join(", ")}
             </p>
           </div>
         ))}
         {families.length === 0 && (
-          <p className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-foreground/50">
+          <p className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-foreground/68">
             No families mined yet.
           </p>
         )}

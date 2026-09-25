@@ -17,7 +17,7 @@ export function ExamPaperUploadForm({ broadcastId }: { broadcastId: string }) {
       <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
         Upload
       </button>
-      <p className="w-full text-xs text-foreground/50">
+      <p className="w-full text-xs text-foreground/68">
         One or more pages, as images or a PDF (up to 15MB each).
       </p>
     </form>

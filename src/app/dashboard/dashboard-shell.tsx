@@ -197,7 +197,7 @@ export function DashboardShell({
       <header className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-brand">TutorOps</span>
-          <span className="hidden text-xs text-foreground/50 sm:inline">
+          <span className="hidden text-xs text-foreground/68 sm:inline">
             {isStaffUser
               ? hasSyllabusScope
                 ? `Previewing: ${boardName} · ${gradeName} · ${medium}`
@@ -241,7 +241,7 @@ export function DashboardShell({
             className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}
           >
             {!subjectsCollapsed && (
-              <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+              <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                 {subjectsHeading}
               </h2>
             )}
@@ -254,7 +254,7 @@ export function DashboardShell({
               aria-label={
                 subjectsCollapsed ? "Expand subjects" : "Collapse subjects"
               }
-              className="rounded p-1.5 text-foreground/50 transition hover:bg-brand/5 hover:text-foreground"
+              className="rounded p-1.5 text-foreground/68 transition hover:bg-brand/5 hover:text-foreground"
             >
               {subjectsCollapsed ? "»" : "«"}
             </button>
@@ -275,7 +275,7 @@ export function DashboardShell({
                 } ${
                   subject.id === selectedSubjectId
                     ? "bg-brand text-white font-medium"
-                    : "text-foreground/80 hover:bg-brand/5"
+                    : "text-foreground/88 hover:bg-brand/5"
                 }`}
               >
                 {subjectsCollapsed
@@ -284,7 +284,7 @@ export function DashboardShell({
               </button>
             ))}
             {subjects.length === 0 && !subjectsCollapsed && (
-              <p className="px-2 text-sm text-foreground/50">
+              <p className="px-2 text-sm text-foreground/68">
                 No subjects subscribed.
               </p>
             )}
@@ -306,11 +306,11 @@ export function DashboardShell({
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           {mainTab === "subjects" ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/40">
+              <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/62">
                 {subjectsHeading}
               </h1>
               {subjects.length === 0 ? (
-                <p className="text-sm text-foreground/50">
+                <p className="text-sm text-foreground/68">
                   No subjects subscribed.
                 </p>
               ) : (
@@ -323,7 +323,7 @@ export function DashboardShell({
                         className={`block w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition ${
                           subject.id === selectedSubjectId
                             ? "bg-brand text-white"
-                            : "bg-surface text-foreground/80 hover:bg-brand/5"
+                            : "bg-surface text-foreground/88 hover:bg-brand/5"
                         }`}
                       >
                         {subject.name}
@@ -361,7 +361,7 @@ export function DashboardShell({
                         className={`rounded-t-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
                           mainTab === tab
                             ? "border border-b-0 border-border bg-background text-brand"
-                            : "text-foreground/50 hover:text-foreground"
+                            : "text-foreground/68 hover:text-foreground"
                         }`}
                       >
                         {TAB_LABELS[tab] ?? tab}
@@ -381,7 +381,7 @@ export function DashboardShell({
                       : "hidden"
                   }
                 >
-                  <p className="mb-3 text-xs text-foreground/40">
+                  <p className="mb-3 text-xs text-foreground/62">
                     Tap a topic to drop its summary into the chat.
                   </p>
                   <TopicList
@@ -480,7 +480,7 @@ export function DashboardShell({
               )}
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-foreground/50">
+            <div className="flex flex-1 items-center justify-center text-sm text-foreground/68">
               Select a subject to start chatting.
             </div>
           )}
@@ -504,7 +504,7 @@ export function DashboardShell({
             className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs font-medium transition ${
               mainTab === item.tab
                 ? "text-brand"
-                : "text-foreground/50 hover:text-foreground"
+                : "text-foreground/68 hover:text-foreground"
             }`}
           >
             <span className="text-lg" aria-hidden="true">

@@ -11,7 +11,7 @@ const DECISION_COLOR: Record<string, string> = {
   REVISE: "bg-blue-100 text-blue-700",
   MERGE: "bg-purple-100 text-purple-700",
   SPLIT: "bg-purple-100 text-purple-700",
-  REMOVE: "bg-foreground/10 text-foreground/60",
+  REMOVE: "bg-foreground/10 text-foreground/75",
   REVIEW: "bg-yellow-100 text-yellow-700",
 };
 
@@ -50,11 +50,11 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
             <h1 className="text-xl font-semibold">
               {runRow.education_context.subject_or_course} — {runRow.education_context.curriculum_source.name}
             </h1>
-            <p className="mt-1 text-sm text-foreground/60">
+            <p className="mt-1 text-sm text-foreground/75">
               {runRow.education_context.education_stage} · grade/year {runRow.education_context.grade_or_year}
               {runRow.education_context.program_or_stream && ` · ${runRow.education_context.program_or_stream}`}
             </p>
-            <p className="mt-1 text-xs text-foreground/40">
+            <p className="mt-1 text-xs text-foreground/62">
               Submitted {new Date(runRow.created_at).toLocaleString()}
               {runRow.completed_at && ` · finished ${new Date(runRow.completed_at).toLocaleString()}`}
               {" · "}
@@ -78,11 +78,11 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
 
         <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-8">
           <div>
-            <dt className="text-foreground/50">Segmented</dt>
+            <dt className="text-foreground/68">Segmented</dt>
             <dd className="font-medium">{runRow.stats.segmented ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-foreground/50" title="Papers whose own Stage 0 call failed (e.g. a truncated response) -- every other paper in the same batch still ran normally.">
+            <dt className="text-foreground/68" title="Papers whose own Stage 0 call failed (e.g. a truncated response) -- every other paper in the same batch still ran normally.">
               Papers failed
             </dt>
             <dd className={`font-medium ${(runRow.stats.papers_failed ?? 0) > 0 ? "text-red-600" : ""}`}>
@@ -90,18 +90,18 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
             </dd>
           </div>
           <div>
-            <dt className="text-foreground/50">Analyzed</dt>
+            <dt className="text-foreground/68">Analyzed</dt>
             <dd className="font-medium">{runRow.stats.analyzed ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-foreground/50" title="Shared stem/stimulus records with no independent reasoning task of their own -- not a failure.">
+            <dt className="text-foreground/68" title="Shared stem/stimulus records with no independent reasoning task of their own -- not a failure.">
               Stems excluded
             </dt>
             <dd className="font-medium">{runRow.stats.stems_excluded ?? "—"}</dd>
           </div>
           <div>
             <dt
-              className="text-foreground/50"
+              className="text-foreground/68"
               title="Content Stage 1 determined doesn't belong to this run's own declared subject/grade at all -- excluded from clustering/mining, queued for review."
             >
               Off-scope flagged
@@ -111,15 +111,15 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
             </dd>
           </div>
           <div>
-            <dt className="text-foreground/50">Clusters</dt>
+            <dt className="text-foreground/68">Clusters</dt>
             <dd className="font-medium">{runRow.stats.clusters ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-foreground/50">Archetypes mined</dt>
+            <dt className="text-foreground/68">Archetypes mined</dt>
             <dd className="font-medium">{runRow.stats.mined ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-foreground/50">Review queue</dt>
+            <dt className="text-foreground/68">Review queue</dt>
             <dd className="font-medium">{runRow.stats.review_queue ?? "—"}</dd>
           </div>
         </dl>
@@ -131,7 +131,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
           <div className="mt-3 space-y-3">
             {pending.map((item) => (
               <div key={item.queue_item_id} className="rounded-lg border border-yellow-300 bg-white p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/50">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/68">
                   <span className="rounded-full bg-yellow-100 px-2 py-0.5 font-medium text-yellow-800">
                     {item.source}
                   </span>
@@ -173,15 +173,15 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
                   <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{row.status}</span>
                   {row.critic_decision && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${DECISION_COLOR[row.critic_decision] ?? "bg-foreground/10 text-foreground/60"}`}
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${DECISION_COLOR[row.critic_decision] ?? "bg-foreground/10 text-foreground/75"}`}
                     >
                       {row.critic_decision}
                     </span>
                   )}
-                  <span className="text-xs text-foreground/40">confidence {a.mining_confidence?.toFixed(2)}</span>
+                  <span className="text-xs text-foreground/62">confidence {a.mining_confidence?.toFixed(2)}</span>
                 </div>
-                <p className="mt-1 text-sm text-foreground/70">{a.learning_objective}</p>
-                <p className="mt-1 text-xs text-foreground/50">{a.invariant_reasoning_structure}</p>
+                <p className="mt-1 text-sm text-foreground/82">{a.learning_objective}</p>
+                <p className="mt-1 text-xs text-foreground/68">{a.invariant_reasoning_structure}</p>
                 {a.variations.length > 0 && (
                   <ul className="mt-2 flex flex-wrap gap-1.5">
                     {a.variations.map((v) => (
@@ -195,12 +195,12 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
                     ))}
                   </ul>
                 )}
-                <p className="mt-2 text-xs text-foreground/40">
+                <p className="mt-2 text-xs text-foreground/62">
                   {a.stats.question_count} question(s) · {a.supporting_question_ids.length} supporting id(s)
                   {!a.generator_usable && " · not yet generator-usable"}
                 </p>
                 {a.critic_rationale && (
-                  <p className="mt-1 text-xs text-foreground/50">
+                  <p className="mt-1 text-xs text-foreground/68">
                     <span className="font-medium">Critic:</span> {a.critic_rationale}
                   </p>
                 )}
@@ -208,7 +208,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
             );
           })}
           {archetypes.length === 0 && (
-            <p className="p-4 text-center text-sm text-foreground/50">
+            <p className="p-4 text-center text-sm text-foreground/68">
               No archetypes mined yet — the run may still be in progress.
             </p>
           )}
@@ -223,11 +223,11 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
           <div className="space-y-2 border-t border-border p-4 text-sm">
             {resolved.map((item) => (
               <div key={item.queue_item_id} className="rounded-lg border border-border p-3">
-                <div className="text-xs text-foreground/50">
+                <div className="text-xs text-foreground/68">
                   {item.source} · ref: {item.reference_id}
                 </div>
                 <p className="mt-1">{item.reason}</p>
-                <p className="mt-1 text-foreground/60">
+                <p className="mt-1 text-foreground/75">
                   <span className="font-medium">Resolution:</span> {item.resolution}
                 </p>
               </div>

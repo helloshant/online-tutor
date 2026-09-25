@@ -15,9 +15,9 @@ const TYPE_LABELS: Record<BroadcastType, string> = {
 };
 
 const STATUS_STYLES: Record<BroadcastStatus, string> = {
-  draft: "bg-foreground/10 text-foreground/60",
+  draft: "bg-foreground/10 text-foreground/75",
   sent: "bg-green-100 text-green-700",
-  closed: "bg-foreground/10 text-foreground/40",
+  closed: "bg-foreground/10 text-foreground/62",
 };
 
 type BroadcastRow = {
@@ -58,7 +58,7 @@ export default async function BroadcastsPage() {
   return (
     <div>
       <h1 className="text-lg font-semibold">Broadcasts</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Send an announcement, promotion, feedback request, or test to a segment of registered
         students -- filtered by board/grade/subject/medium, same as the rest of the catalog, or left
         unfiltered to reach everyone. A draft reaches nobody until you open it and hit Send.
@@ -67,7 +67,7 @@ export default async function BroadcastsPage() {
       <NewBroadcastForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
 
       <div className="mt-6 space-y-2">
-        {rows.length === 0 && <p className="text-sm text-foreground/50">No broadcasts yet.</p>}
+        {rows.length === 0 && <p className="text-sm text-foreground/68">No broadcasts yet.</p>}
         {rows.map((row) => (
           <div
             key={row.id}
@@ -85,7 +85,7 @@ export default async function BroadcastsPage() {
                   {row.title}
                 </Link>
               </div>
-              <p className="mt-1 text-xs text-foreground/50">
+              <p className="mt-1 text-xs text-foreground/68">
                 {[row.boards?.name ?? "All boards", row.grades?.name ?? "All grades", row.subjects?.name ?? "All subjects", row.medium ?? "All mediums"].join(" · ")}
                 {" · "}
                 {row.status === "sent" && row.sent_at
@@ -104,7 +104,7 @@ export default async function BroadcastsPage() {
                   <form action={deleteBroadcast.bind(null, row.id)}>
                     <ConfirmSubmitButton
                       confirmMessage="Delete this draft?"
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground/60 hover:bg-brand/5"
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground/75 hover:bg-brand/5"
                     >
                       Delete
                     </ConfirmSubmitButton>
@@ -113,7 +113,7 @@ export default async function BroadcastsPage() {
               )}
               <Link
                 href={`/admin/broadcasts/${row.id}`}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground/70 hover:bg-brand/5"
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground/82 hover:bg-brand/5"
               >
                 {row.status === "draft" ? "Edit" : "View"}
               </Link>

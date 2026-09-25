@@ -88,8 +88,8 @@ export default async function AdminUserDetailPage({
       <div className="mt-4 flex items-start justify-between rounded-xl border border-border bg-surface p-6">
         <div>
           <h1 className="text-xl font-semibold">{profile?.full_name ?? "Unnamed user"}</h1>
-          <p className="mt-1 text-sm text-foreground/60">{authUser.user.email}</p>
-          <p className="mt-1 text-xs text-foreground/40">
+          <p className="mt-1 text-sm text-foreground/75">{authUser.user.email}</p>
+          <p className="mt-1 text-xs text-foreground/62">
             Joined {new Date(authUser.user.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -119,9 +119,9 @@ export default async function AdminUserDetailPage({
             ))}
           </div>
         ) : (
-          <span className="rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground/70">
+          <span className="rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground/82">
             {ROLE_LABEL[targetRole]}
-            <span className="ml-2 text-xs text-foreground/40">(only a superadmin can change this)</span>
+            <span className="ml-2 text-xs text-foreground/62">(only a superadmin can change this)</span>
           </span>
         )}
       </div>
@@ -158,7 +158,7 @@ export default async function AdminUserDetailPage({
         <h2 className="text-sm font-semibold">Password</h2>
 
         {hasPasswordIdentity ? (
-          <p className="mt-1 text-sm text-foreground/60">
+          <p className="mt-1 text-sm text-foreground/75">
             {profile?.password_changed_at ? (
               <>Last changed {new Date(profile.password_changed_at).toLocaleDateString()} — </>
             ) : (
@@ -170,7 +170,7 @@ export default async function AdminUserDetailPage({
             , same as any native account after {PASSWORD_EXPIRY_DAYS} days.
           </p>
         ) : (
-          <p className="mt-1 text-sm text-foreground/60">
+          <p className="mt-1 text-sm text-foreground/75">
             Signed in with Google only — no password with this app yet. Setting one below also
             lets this account sign in with email/password from then on.
           </p>
@@ -185,7 +185,7 @@ export default async function AdminUserDetailPage({
 
           {hasPasswordIdentity && (
             <form action={setAccountExpired.bind(null, id)} className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-sm text-foreground/70">
+              <label className="flex items-center gap-1.5 text-sm text-foreground/82">
                 <input type="checkbox" name="expired" defaultChecked={passwordExpired} className="h-4 w-4" />
                 Account expired
               </label>
@@ -207,7 +207,7 @@ export default async function AdminUserDetailPage({
         </div>
       </div>
 
-      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/50">
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground/68">
         Subscriptions
       </h2>
 
@@ -217,7 +217,7 @@ export default async function AdminUserDetailPage({
         ))}
 
         {(subscriptions ?? []).length === 0 && (
-          <p className="rounded-xl border border-border bg-surface p-5 text-sm text-foreground/50">
+          <p className="rounded-xl border border-border bg-surface p-5 text-sm text-foreground/68">
             {targetRole === "admin" || targetRole === "superadmin"
               ? "Staff accounts get full subject access without a subscription."
               : "This user hasn't started onboarding yet."}
@@ -276,7 +276,7 @@ function UsageLimitCard({
   return (
     <div className="mt-8 rounded-xl border border-border bg-surface p-6">
       <h2 className="text-sm font-semibold">Usage-based pricing</h2>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         This month:{" "}
         <span className={overLimit ? "font-medium text-red-600" : "font-medium"}>
           {usedThisMonth.toLocaleString()} tokens
@@ -302,7 +302,7 @@ function UsageLimitCard({
       )}
 
       <form action={updateUserUsageLimit.bind(null, userId)} className="mt-4 flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Monthly token limit override
           <input
             name="monthlyTokenLimit"
@@ -317,7 +317,7 @@ function UsageLimitCard({
         <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
           Save
         </button>
-        <p className="w-full text-xs text-foreground/40">
+        <p className="w-full text-xs text-foreground/62">
           Leave blank to use the platform default. Enter 0 for unlimited. Any other number replaces the
           default with this student&apos;s own monthly cap.
         </p>
@@ -375,12 +375,12 @@ async function SubscriptionCard({
                 ? "bg-green-100 text-green-700"
                 : row.status === "pending_payment"
                   ? "bg-yellow-100 text-yellow-700"
-                  : "bg-foreground/10 text-foreground/60"
+                  : "bg-foreground/10 text-foreground/75"
             }`}
           >
             {row.status}
           </span>
-          <span className="text-sm text-foreground/60">{new Date(row.created_at).toLocaleDateString()}</span>
+          <span className="text-sm text-foreground/75">{new Date(row.created_at).toLocaleDateString()}</span>
         </div>
         {row.status === "active" && (
           <form
@@ -416,23 +416,23 @@ async function SubscriptionCard({
 
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-foreground/50">Board</dt>
+          <dt className="text-foreground/68">Board</dt>
           <dd className="font-medium">{row.boards?.name ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-foreground/50">Grade</dt>
+          <dt className="text-foreground/68">Grade</dt>
           <dd className="font-medium">{row.grades?.name ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-foreground/50">Medium</dt>
+          <dt className="text-foreground/68">Medium</dt>
           <dd className="font-medium">{row.medium}</dd>
         </div>
         <div>
-          <dt className="text-foreground/50">Amount</dt>
+          <dt className="text-foreground/68">Amount</dt>
           <dd className="font-medium">{row.amount_paise ? `₹${(row.amount_paise / 100).toFixed(0)}/mo` : "—"}</dd>
         </div>
         <div className="col-span-2 sm:col-span-4">
-          <dt className="text-foreground/50">Subjects</dt>
+          <dt className="text-foreground/68">Subjects</dt>
           <dd className="font-medium">{subjectNames.length ? subjectNames.join(", ") : "—"}</dd>
         </div>
       </dl>
@@ -486,7 +486,7 @@ function BoardGradeEditor({
 }) {
   return (
     <details className="mt-4 rounded-lg border border-border">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/60 hover:bg-brand/5">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/75 hover:bg-brand/5">
         Edit board / grade
       </summary>
       <form
@@ -494,7 +494,7 @@ function BoardGradeEditor({
         className="space-y-3 border-t border-border p-3"
       >
         <div className="flex flex-wrap gap-3">
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Board
             <select
               name="boardId"
@@ -508,7 +508,7 @@ function BoardGradeEditor({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Grade
             <select
               name="gradeId"
@@ -527,7 +527,7 @@ function BoardGradeEditor({
           <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
             Save board / grade
           </button>
-          <p className="text-xs text-foreground/40">
+          <p className="text-xs text-foreground/62">
             Subjects not offered under the new board/grade are dropped automatically. If none of the
             current subjects carry over, the change is blocked -- adjust subjects for the target
             board/grade separately first.
@@ -575,7 +575,7 @@ async function SubjectEditor({
 
   return (
     <details className="mt-4 rounded-lg border border-border">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/60 hover:bg-brand/5">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/75 hover:bg-brand/5">
         Edit subjects
       </summary>
       <form
@@ -597,7 +597,7 @@ async function SubjectEditor({
           <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
             Save subjects
           </button>
-          <p className="text-xs text-foreground/40">At least one subject must stay selected.</p>
+          <p className="text-xs text-foreground/62">At least one subject must stay selected.</p>
         </div>
       </form>
     </details>

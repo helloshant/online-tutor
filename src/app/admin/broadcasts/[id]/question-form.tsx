@@ -77,12 +77,12 @@ export function QuestionForm({ broadcastId }: { broadcastId: string }) {
               />
             </div>
           ))}
-          <p className="text-xs text-foreground/50">Select the radio button next to the correct option.</p>
+          <p className="text-xs text-foreground/68">Select the radio button next to the correct option.</p>
         </div>
       )}
 
       <div className="flex items-center gap-2">
-        <label className="text-xs text-foreground/60">
+        <label className="text-xs text-foreground/75">
           Max score{" "}
           <input
             key={`maxScore-${generation}`}

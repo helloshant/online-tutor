@@ -79,7 +79,7 @@ export default async function TopicSummariesPage({
   return (
     <div>
       <h1 className="text-xl font-semibold">Topic summaries</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Quick-reference summaries shown when a student opens a topic in the syllabus panel. When
         admin-authored chapter notes exist for a topic, those are shown directly and never reach this
         queue. Otherwise the LLM generates one, but it stays <b>pending review</b> -- not served to any
@@ -109,7 +109,7 @@ export default async function TopicSummariesPage({
               className={`rounded-full border px-3 py-1 ${
                 activeStatus === f.value
                   ? "border-brand bg-brand text-white"
-                  : "border-border text-foreground/70 hover:bg-brand/5"
+                  : "border-border text-foreground/82 hover:bg-brand/5"
               }`}
             >
               {f.label}
@@ -132,7 +132,7 @@ export default async function TopicSummariesPage({
 
       <div className="mt-4 space-y-3">
         {rows.length === 0 && (
-          <p className="rounded-xl border border-border bg-surface p-4 text-sm text-foreground/50">
+          <p className="rounded-xl border border-border bg-surface p-4 text-sm text-foreground/68">
             Nothing here.
           </p>
         )}
@@ -142,7 +142,7 @@ export default async function TopicSummariesPage({
             <div key={row.id} className="rounded-xl border border-border bg-surface p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs text-foreground/50">
+                  <p className="text-xs text-foreground/68">
                     {t
                       ? `${t.boards?.name ?? "—"} · ${t.grades?.name ?? "—"} · ${t.subjects?.name ?? "—"} · ${t.medium}` +
                         (row.language !== t.medium ? ` content, summarized in ${row.language}` : "")
@@ -162,7 +162,7 @@ export default async function TopicSummariesPage({
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-foreground/40">
+                <span className="text-foreground/62">
                   Updated {new Date(row.updated_at).toLocaleString()}
                 </span>
                 <div className="ml-auto flex gap-2">
@@ -183,7 +183,7 @@ export default async function TopicSummariesPage({
                   <form action={deleteTopicSummary.bind(null, row.id, row.topic_id, row.language)}>
                     <ConfirmSubmitButton
                       confirmMessage="Delete this summary entirely? The next student to open this topic will trigger a fresh one."
-                      className="rounded-lg border border-border px-3 py-1.5 font-medium text-foreground/60 hover:bg-brand/5"
+                      className="rounded-lg border border-border px-3 py-1.5 font-medium text-foreground/75 hover:bg-brand/5"
                     >
                       Delete
                     </ConfirmSubmitButton>

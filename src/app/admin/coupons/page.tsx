@@ -27,7 +27,7 @@ export default async function CouponsPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold">Coupons</h1>
-      <p className="mt-1 max-w-2xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-2xl text-sm text-foreground/75">
         Single-use discount codes — a student enters one on the{" "}
         <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/subscribe</code> page to knock a percentage
         off their subscription price, or activate for free outright with a 100% code. Each code works exactly
@@ -36,7 +36,7 @@ export default async function CouponsPage() {
 
       <form action={generateCouponCodes} className="mt-6 flex items-end gap-2">
         <div>
-          <label htmlFor="count" className="block text-xs font-medium text-foreground/60">
+          <label htmlFor="count" className="block text-xs font-medium text-foreground/75">
             How many codes?
           </label>
           <input
@@ -50,7 +50,7 @@ export default async function CouponsPage() {
           />
         </div>
         <div>
-          <label htmlFor="discountPercent" className="block text-xs font-medium text-foreground/60">
+          <label htmlFor="discountPercent" className="block text-xs font-medium text-foreground/75">
             Discount %
           </label>
           <input
@@ -64,7 +64,7 @@ export default async function CouponsPage() {
           />
         </div>
         <div>
-          <label htmlFor="expiresAt" className="block text-xs font-medium text-foreground/60">
+          <label htmlFor="expiresAt" className="block text-xs font-medium text-foreground/75">
             Expires (optional)
           </label>
           <input
@@ -81,7 +81,7 @@ export default async function CouponsPage() {
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-foreground/40">
+          <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-foreground/62">
             <tr>
               <th className="px-4 py-2 font-medium">Code</th>
               <th className="px-4 py-2 font-medium">Discount</th>
@@ -98,12 +98,12 @@ export default async function CouponsPage() {
               return (
                 <tr key={coupon.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-2 font-mono">{coupon.code}</td>
-                  <td className="px-4 py-2 text-foreground/70">
+                  <td className="px-4 py-2 text-foreground/82">
                     {coupon.discount_percent === 100 ? "100% (Free)" : `${coupon.discount_percent}% off`}
                   </td>
                   <td className="px-4 py-2">
                     {coupon.used_by ? (
-                      <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/60">
+                      <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/75">
                         Used
                       </span>
                     ) : isExpired ? (
@@ -112,19 +112,19 @@ export default async function CouponsPage() {
                       <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">Unused</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-foreground/70">
+                  <td className="px-4 py-2 text-foreground/82">
                     {coupon.used_by
                       ? `${nameById.get(coupon.used_by) ?? "—"} · ${new Date(coupon.used_at!).toLocaleDateString()}`
                       : "—"}
                   </td>
-                  <td className="px-4 py-2 text-foreground/50">
+                  <td className="px-4 py-2 text-foreground/68">
                     {coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : "Never"}
                   </td>
-                  <td className="px-4 py-2 text-foreground/50">{new Date(coupon.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-foreground/68">{new Date(coupon.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-2 text-right">
                     {!coupon.used_by && (
                       <form action={revokeCouponCode.bind(null, coupon.id)}>
-                        <button className="text-xs text-foreground/40 hover:underline">Revoke</button>
+                        <button className="text-xs text-foreground/62 hover:underline">Revoke</button>
                       </form>
                     )}
                   </td>
@@ -133,7 +133,7 @@ export default async function CouponsPage() {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-sm text-foreground/50">
+                <td colSpan={7} className="px-4 py-6 text-center text-sm text-foreground/68">
                   No coupon codes yet.
                 </td>
               </tr>

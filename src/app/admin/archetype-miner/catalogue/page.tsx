@@ -9,7 +9,7 @@ const DECISION_COLOR: Record<string, string> = {
   REVISE: "bg-blue-100 text-blue-700",
   MERGE: "bg-purple-100 text-purple-700",
   SPLIT: "bg-purple-100 text-purple-700",
-  REMOVE: "bg-foreground/10 text-foreground/60",
+  REMOVE: "bg-foreground/10 text-foreground/75",
   REVIEW: "bg-yellow-100 text-yellow-700",
 };
 
@@ -83,7 +83,7 @@ export default async function ArchetypeCatalogPage({
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Archetype catalogue</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Every mined archetype accumulated across ALL pipeline runs, grouped by board and grade/year
         (and by subject within each) -- not scoped to any one run. By default this shows only
         archetypes actually accepted into their own catalogue (status reviewed/final, decision
@@ -100,7 +100,7 @@ export default async function ArchetypeCatalogPage({
       </p>
 
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <select
             name="board"
@@ -115,7 +115,7 @@ export default async function ArchetypeCatalogPage({
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <select
             name="grade"
@@ -130,7 +130,7 @@ export default async function ArchetypeCatalogPage({
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1.5 pb-2 text-xs text-foreground/60">
+        <label className="flex items-center gap-1.5 pb-2 text-xs text-foreground/75">
           <input type="checkbox" name="all" value="1" defaultChecked={showAll} className="h-4 w-4" />
           Show everything (including candidate/REVIEW/MERGE/REMOVE)
         </label>
@@ -144,7 +144,7 @@ export default async function ArchetypeCatalogPage({
         )}
       </form>
 
-      <p className="mt-4 text-xs text-foreground/40">{rows.length} archetype(s) shown.</p>
+      <p className="mt-4 text-xs text-foreground/62">{rows.length} archetype(s) shown.</p>
 
       <div className="mt-4 space-y-8">
         {Array.from(grouped.entries()).map(([boardName, byGrade]) => (
@@ -153,11 +153,11 @@ export default async function ArchetypeCatalogPage({
             <div className="mt-3 space-y-6 border-l-2 border-border pl-4">
               {Array.from(byGrade.entries()).map(([gradeName, bySubject]) => (
                 <div key={gradeName}>
-                  <h3 className="text-sm font-semibold text-foreground/80">Grade / year {gradeName}</h3>
+                  <h3 className="text-sm font-semibold text-foreground/88">Grade / year {gradeName}</h3>
                   <div className="mt-2 space-y-4">
                     {Array.from(bySubject.entries()).map(([subjectName, subjectRows]) => (
                       <div key={subjectName} className="rounded-xl border border-border bg-surface">
-                        <h4 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/50">
+                        <h4 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/68">
                           {subjectName} ({subjectRows.length})
                         </h4>
                         <div className="divide-y divide-border">
@@ -174,17 +174,17 @@ export default async function ArchetypeCatalogPage({
                                   <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{row.status}</span>
                                   {row.critic_decision && (
                                     <span
-                                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${DECISION_COLOR[row.critic_decision] ?? "bg-foreground/10 text-foreground/60"}`}
+                                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${DECISION_COLOR[row.critic_decision] ?? "bg-foreground/10 text-foreground/75"}`}
                                     >
                                       {row.critic_decision}
                                     </span>
                                   )}
-                                  <span className="text-xs text-foreground/40">
+                                  <span className="text-xs text-foreground/62">
                                     confidence {a.mining_confidence?.toFixed(2)}
                                   </span>
                                 </div>
-                                <p className="mt-1 text-sm text-foreground/70">{a.learning_objective}</p>
-                                <p className="mt-1 text-xs text-foreground/50">{a.invariant_reasoning_structure}</p>
+                                <p className="mt-1 text-sm text-foreground/82">{a.learning_objective}</p>
+                                <p className="mt-1 text-xs text-foreground/68">{a.invariant_reasoning_structure}</p>
                                 {a.variations.length > 0 && (
                                   <ul className="mt-2 flex flex-wrap gap-1.5">
                                     {a.variations.map((v) => (
@@ -198,7 +198,7 @@ export default async function ArchetypeCatalogPage({
                                     ))}
                                   </ul>
                                 )}
-                                <p className="mt-2 text-xs text-foreground/40">
+                                <p className="mt-2 text-xs text-foreground/62">
                                   {a.stats.question_count} question(s) · {a.supporting_question_ids.length} supporting
                                   id(s)
                                   {!a.generator_usable && " · not yet generator-usable"} ·{" "}
@@ -207,7 +207,7 @@ export default async function ArchetypeCatalogPage({
                                   </Link>
                                 </p>
                                 {a.critic_rationale && (
-                                  <p className="mt-1 text-xs text-foreground/50">
+                                  <p className="mt-1 text-xs text-foreground/68">
                                     <span className="font-medium">Critic:</span> {a.critic_rationale}
                                   </p>
                                 )}
@@ -224,7 +224,7 @@ export default async function ArchetypeCatalogPage({
           </div>
         ))}
         {rows.length === 0 && (
-          <p className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground/50">
+          <p className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-foreground/68">
             No archetypes match this filter yet.
           </p>
         )}

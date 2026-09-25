@@ -16,7 +16,7 @@ export function CouponForm() {
 
   return (
     <form action={formAction} className="mt-6 border-t border-border pt-4">
-      <label htmlFor="coupon-code" className="block text-xs font-medium text-foreground/60">
+      <label htmlFor="coupon-code" className="block text-xs font-medium text-foreground/75">
         Have a discount code?
       </label>
       <div className="mt-1.5 flex gap-2">

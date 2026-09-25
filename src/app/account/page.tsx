@@ -93,7 +93,7 @@ export default async function AccountPage() {
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <Link
         href="/dashboard"
-        className="text-sm text-foreground/50 hover:text-foreground"
+        className="text-sm text-foreground/68 hover:text-foreground"
       >
         ← Back to dashboard
       </Link>
@@ -104,16 +104,16 @@ export default async function AccountPage() {
         <h2 className="text-sm font-semibold">Account information</h2>
         <dl className="mt-3 space-y-2 text-sm">
           <div className="flex justify-between gap-4">
-            <dt className="text-foreground/50">Name</dt>
+            <dt className="text-foreground/68">Name</dt>
             <dd className="text-right">{profile?.full_name ?? "—"}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-foreground/50">Email</dt>
+            <dt className="text-foreground/68">Email</dt>
             <dd className="text-right">{user.email}</dd>
           </div>
           {staff && (
             <div className="flex justify-between gap-4">
-              <dt className="text-foreground/50">Role</dt>
+              <dt className="text-foreground/68">Role</dt>
               <dd className="text-right">
                 {ROLE_LABEL[profile?.role ?? "user"]}
               </dd>
@@ -122,23 +122,23 @@ export default async function AccountPage() {
           {subscription && board && grade ? (
             <>
               <div className="flex justify-between gap-4">
-                <dt className="text-foreground/50">Board · Grade</dt>
+                <dt className="text-foreground/68">Board · Grade</dt>
                 <dd className="text-right">
                   {board.name} · {grade.name}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="text-foreground/50">Medium</dt>
+                <dt className="text-foreground/68">Medium</dt>
                 <dd className="text-right">{subscription.medium}</dd>
               </div>
               {subjectNames.length > 0 && (
                 <div className="flex justify-between gap-4">
-                  <dt className="text-foreground/50">Subjects</dt>
+                  <dt className="text-foreground/68">Subjects</dt>
                   <dd className="text-right">{subjectNames.join(", ")}</dd>
                 </div>
               )}
               <div className="flex justify-between gap-4">
-                <dt className="text-foreground/50">Subscription status</dt>
+                <dt className="text-foreground/68">Subscription status</dt>
                 <dd className="text-right capitalize">
                   {subscription.status.replace("_", " ")}
                 </dd>
@@ -147,7 +147,7 @@ export default async function AccountPage() {
           ) : (
             !staff && (
               <div className="flex justify-between gap-4">
-                <dt className="text-foreground/50">Subscription</dt>
+                <dt className="text-foreground/68">Subscription</dt>
                 <dd className="text-right">
                   <Link
                     href="/onboarding"
@@ -201,7 +201,7 @@ function UsageCard({
   return (
     <div className="mt-8 rounded-xl border border-border bg-surface p-6">
       <h2 className="text-sm font-semibold">AI tutoring usage this month</h2>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         {unlimited ? (
           <>
             <span className="font-medium">

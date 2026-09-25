@@ -161,7 +161,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
   return (
     <div>
       <div className="mt-4 flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Board
           <select
             value={board}
@@ -180,7 +180,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Grade / year
           <select
             value={grade}
@@ -198,7 +198,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Subject
           <select
             value={subject}
@@ -213,7 +213,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Search chapter text
           <input
             value={search}
@@ -224,7 +224,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
         </label>
       </div>
 
-      <p className="mt-3 text-xs text-foreground/60">
+      <p className="mt-3 text-xs text-foreground/75">
         {filtered.length} chapter value(s) shown ({totalQuestions} question(s) total) — of {entries.length} unmatched across the whole
         catalogue.
       </p>
@@ -232,7 +232,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
       <div className="mt-3 overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[900px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-border bg-foreground/5 text-left text-xs uppercase tracking-wide text-foreground/50">
+            <tr className="border-b border-border bg-foreground/5 text-left text-xs uppercase tracking-wide text-foreground/68">
               <th className="px-3 py-2">Board / Grade / Subject</th>
               <th className="px-3 py-2">Mined chapter</th>
               <th className="px-3 py-2">Count</th>
@@ -248,7 +248,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
               const rowError = rowErrors.get(key);
               return (
                 <tr key={key} className="border-b border-border align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-foreground/70">
+                  <td className="whitespace-nowrap px-3 py-2 text-foreground/82">
                     {entry.boardName} · Grade {entry.gradeName}
                     <br />
                     {entry.subjectName}
@@ -257,19 +257,19 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
                   <td className="px-3 py-2">{entry.questionCount}</td>
                   <td className="px-3 py-2">
                     {entry.sampleQuestions.length === 0 ? (
-                      <span className="text-xs text-foreground/40">No sample text available</span>
+                      <span className="text-xs text-foreground/62">No sample text available</span>
                     ) : (
                       entry.sampleQuestions.map((s) => (
                         <details key={s.ref} className="mb-1">
                           <summary className="cursor-pointer text-xs text-brand hover:underline">Sample</summary>
-                          <p className="mt-1 max-w-sm whitespace-pre-wrap text-xs text-foreground/70">{s.text}</p>
+                          <p className="mt-1 max-w-sm whitespace-pre-wrap text-xs text-foreground/82">{s.text}</p>
                         </details>
                       ))
                     )}
                   </td>
                   <td className="px-3 py-2">
                     {entry.acceptableValues.length === 0 ? (
-                      <span className="text-xs text-foreground/40">No syllabus_topics rows for this scope</span>
+                      <span className="text-xs text-foreground/62">No syllabus_topics rows for this scope</span>
                     ) : (
                       <div className="flex items-center gap-2">
                         <select
@@ -308,7 +308,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
                       disabled={pending}
                       title="Mark reviewed -- genuinely no real syllabus match"
                       onClick={() => void handleIgnore(entry)}
-                      className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-foreground/60 hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-foreground/75 hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {pending ? "…" : "Ignore"}
                     </button>

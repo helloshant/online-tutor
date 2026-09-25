@@ -78,19 +78,19 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
 
   return (
     <div>
-      <Link href="/admin/broadcasts" className="text-xs text-foreground/50 hover:underline">
+      <Link href="/admin/broadcasts" className="text-xs text-foreground/68 hover:underline">
         ← Broadcasts
       </Link>
       <div className="mt-1 flex items-center gap-2">
         <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
           {TYPE_LABELS[broadcast.type as BroadcastType]}
         </span>
-        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/60">
+        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/75">
           {broadcast.status}
         </span>
         <h1 className="text-lg font-semibold">{broadcast.title}</h1>
       </div>
-      <p className="mt-1 text-xs text-foreground/50">
+      <p className="mt-1 text-xs text-foreground/68">
         {[scope.boards?.name ?? "All boards", scope.grades?.name ?? "All grades", scope.subjects?.name ?? "All subjects", broadcast.medium ?? "All mediums"].join(" · ")}
       </p>
       <p className="mt-3 max-w-2xl whitespace-pre-wrap rounded-xl border border-border bg-surface p-3 text-sm">
@@ -154,7 +154,7 @@ async function SendButton({ broadcastId, type }: { broadcastId: string; type: Br
       >
         Send now
       </button>
-      {hint && <p className="mt-1 text-xs text-foreground/50">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-foreground/68">{hint}</p>}
     </div>
   );
 }
@@ -172,15 +172,15 @@ async function TestQuestionsSection({ broadcastId, isDraft }: { broadcastId: str
     <div className="mt-4">
       <h2 className="text-sm font-semibold">Questions</h2>
       <div className="mt-2 space-y-2">
-        {rows.length === 0 && <p className="text-sm text-foreground/50">No questions yet.</p>}
+        {rows.length === 0 && <p className="text-sm text-foreground/68">No questions yet.</p>}
         {rows.map((q, i) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm">
             <div>
               <p className="font-medium">
-                {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/40">({q.max_score} pt)</span>
+                {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
               </p>
               {q.question_type === "mcq" && q.options && (
-                <ul className="mt-1 text-xs text-foreground/60">
+                <ul className="mt-1 text-xs text-foreground/75">
                   {q.options.map((opt, idx) => (
                     <li key={idx} className={idx === q.correct_option ? "font-medium text-green-700" : undefined}>
                       {idx === q.correct_option ? "✓ " : "· "}
@@ -190,7 +190,7 @@ async function TestQuestionsSection({ broadcastId, isDraft }: { broadcastId: str
                 </ul>
               )}
               {q.question_type === "short_answer" && (
-                <p className="mt-1 text-xs text-foreground/50">Short answer -- graded manually after submission.</p>
+                <p className="mt-1 text-xs text-foreground/68">Short answer -- graded manually after submission.</p>
               )}
             </div>
             {isDraft && (
@@ -226,7 +226,7 @@ async function ResultsSection({ broadcastId, type }: { broadcastId: string; type
   return (
     <div className="mt-6">
       <h2 className="text-sm font-semibold">Reach</h2>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         Sent to {recipientCount ?? 0} student{recipientCount === 1 ? "" : "s"} · read by {readCount ?? 0}
       </p>
 
@@ -252,7 +252,7 @@ async function ExamPaperSection({
     <div className="mt-4">
       <h2 className="text-sm font-semibold">Question paper</h2>
       <div className="mt-2 space-y-1">
-        {paths.length === 0 && <p className="text-sm text-foreground/50">Nothing uploaded yet.</p>}
+        {paths.length === 0 && <p className="text-sm text-foreground/68">Nothing uploaded yet.</p>}
         {paths.map((path, i) => (
           <div key={path} className="flex items-center gap-2 text-sm">
             {urlByPath.has(path) ? (
@@ -260,7 +260,7 @@ async function ExamPaperSection({
                 File {i + 1}
               </a>
             ) : (
-              <span className="text-foreground/50">File {i + 1} (link expired -- reload the page)</span>
+              <span className="text-foreground/68">File {i + 1} (link expired -- reload the page)</span>
             )}
             {isDraft && (
               <form action={removeExamPaperFile.bind(null, broadcastId, path)}>
@@ -292,11 +292,11 @@ async function ExamQuestionsSection({ broadcastId, isDraft }: { broadcastId: str
     <div className="mt-4">
       <h2 className="text-sm font-semibold">Questions (marks to grade against the uploaded answer sheet)</h2>
       <div className="mt-2 space-y-2">
-        {rows.length === 0 && <p className="text-sm text-foreground/50">No questions yet.</p>}
+        {rows.length === 0 && <p className="text-sm text-foreground/68">No questions yet.</p>}
         {rows.map((q, i) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm">
             <p className="font-medium">
-              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/40">({q.max_score} pt)</span>
+              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
             </p>
             {isDraft && (
               <form action={deleteExamQuestion.bind(null, broadcastId, q.id)}>
@@ -349,12 +349,12 @@ async function ExamResults({ broadcastId }: { broadcastId: string }) {
     <div className="mt-4">
       <h2 className="text-sm font-semibold">Submissions ({submissionRows.length})</h2>
       <div className="mt-2 space-y-3">
-        {submissionRows.length === 0 && <p className="text-sm text-foreground/50">No answer sheets submitted yet.</p>}
+        {submissionRows.length === 0 && <p className="text-sm text-foreground/68">No answer sheets submitted yet.</p>}
         {submissionRows.map((s) => (
           <div key={s.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-medium">{nameById.get(s.user_id) ?? "Student"}</p>
-              <span className="text-xs text-foreground/60">
+              <span className="text-xs text-foreground/75">
                 {s.status === "graded"
                   ? `${s.total_score ?? 0}/${s.max_possible_score ?? 0}`
                   : "awaiting grading"}
@@ -367,7 +367,7 @@ async function ExamResults({ broadcastId }: { broadcastId: string }) {
                     Answer sheet {i + 1}
                   </a>
                 ) : (
-                  <span key={path} className="text-foreground/50">
+                  <span key={path} className="text-foreground/68">
                     Answer sheet {i + 1} (link expired -- reload)
                   </span>
                 )
@@ -376,7 +376,7 @@ async function ExamResults({ broadcastId }: { broadcastId: string }) {
             <form action={gradeExamSubmission.bind(null, broadcastId, s.id)} className="mt-2 space-y-1.5 border-t border-border pt-2">
               {questionRows.map((q) => (
                 <div key={q.id} className="flex items-center gap-2">
-                  <label className="flex-1 text-xs text-foreground/70">{q.question}</label>
+                  <label className="flex-1 text-xs text-foreground/82">{q.question}</label>
                   <input
                     name={`score-${q.id}`}
                     type="number"
@@ -424,13 +424,13 @@ async function FeedbackResults({ broadcastId }: { broadcastId: string }) {
   return (
     <div className="mt-4">
       <h2 className="text-sm font-semibold">
-        Feedback ({rows.length}) {avg !== null && <span className="font-normal text-foreground/50">· avg {avg.toFixed(1)}/5</span>}
+        Feedback ({rows.length}) {avg !== null && <span className="font-normal text-foreground/68">· avg {avg.toFixed(1)}/5</span>}
       </h2>
       <div className="mt-2 space-y-2">
-        {rows.length === 0 && <p className="text-sm text-foreground/50">No responses yet.</p>}
+        {rows.length === 0 && <p className="text-sm text-foreground/68">No responses yet.</p>}
         {rows.map((r, i) => (
           <div key={i} className="rounded-lg border border-border bg-surface p-3 text-sm">
-            <p className="text-xs text-foreground/50">
+            <p className="text-xs text-foreground/68">
               {nameById.get(r.user_id) ?? "Student"} · {r.rating ? `${r.rating}/5` : "no rating"} ·{" "}
               {new Date(r.created_at).toLocaleString()}
             </p>
@@ -485,14 +485,14 @@ async function TestResults({ broadcastId }: { broadcastId: string }) {
     <div className="mt-4">
       <h2 className="text-sm font-semibold">Attempts ({attemptRows.length})</h2>
       <div className="mt-2 space-y-2">
-        {attemptRows.length === 0 && <p className="text-sm text-foreground/50">No attempts yet.</p>}
+        {attemptRows.length === 0 && <p className="text-sm text-foreground/68">No attempts yet.</p>}
         {attemptRows.map((a) => {
           const pending = pendingByAttempt.get(a.id) ?? [];
           return (
             <div key={a.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-medium">{nameById.get(a.user_id) ?? "Student"}</p>
-                <span className="text-xs text-foreground/60">
+                <span className="text-xs text-foreground/75">
                   {a.status === "graded"
                     ? `${a.total_score ?? 0}/${a.max_possible_score ?? 0}`
                     : `${a.total_score ?? 0}/${a.max_possible_score ?? 0} (awaiting grading)`}
@@ -504,7 +504,7 @@ async function TestResults({ broadcastId }: { broadcastId: string }) {
                     const q = questionById.get(p.question_id);
                     return (
                       <div key={p.id}>
-                        <p className="text-xs font-medium text-foreground/70">{q?.question}</p>
+                        <p className="text-xs font-medium text-foreground/82">{q?.question}</p>
                         <p className="mt-0.5 whitespace-pre-wrap text-sm">{p.answer_text}</p>
                         <form action={gradeShortAnswer.bind(null, broadcastId, p.id)} className="mt-1 flex items-center gap-2">
                           <input

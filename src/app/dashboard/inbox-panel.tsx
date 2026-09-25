@@ -63,10 +63,10 @@ export function InboxPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
       <div className={`min-h-0 overflow-y-auto border-border p-3 sm:w-72 sm:shrink-0 sm:border-r ${selected ? "hidden sm:block" : ""}`}>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/40">Inbox</h2>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">Inbox</h2>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {items === null && !error && <p className="text-sm text-foreground/50">Loading…</p>}
-        {items?.length === 0 && <p className="text-sm text-foreground/50">Nothing here yet.</p>}
+        {items === null && !error && <p className="text-sm text-foreground/68">Loading…</p>}
+        {items?.length === 0 && <p className="text-sm text-foreground/68">Nothing here yet.</p>}
         <ul className="space-y-1">
           {items?.map((item) => (
             <li key={item.recipientId}>
@@ -81,7 +81,7 @@ export function InboxPanel() {
                   {!item.readAt && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-label="Unread" />}
                   <span className={`truncate font-medium ${item.recipientId === selectedId ? "text-white" : ""}`}>{item.title}</span>
                 </span>
-                <span className={`block text-xs ${item.recipientId === selectedId ? "text-white/70" : "text-foreground/50"}`}>
+                <span className={`block text-xs ${item.recipientId === selectedId ? "text-white/70" : "text-foreground/68"}`}>
                   {TYPE_LABELS[item.type]} · {new Date(item.createdAt).toLocaleDateString()}
                 </span>
               </button>
@@ -92,17 +92,17 @@ export function InboxPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {!selected ? (
-          <p className="text-sm text-foreground/50">Select an item from your inbox.</p>
+          <p className="text-sm text-foreground/68">Select an item from your inbox.</p>
         ) : (
           <div>
-            <button type="button" onClick={() => setSelectedId(null)} className="mb-2 text-xs text-foreground/50 hover:underline sm:hidden">
+            <button type="button" onClick={() => setSelectedId(null)} className="mb-2 text-xs text-foreground/68 hover:underline sm:hidden">
               ← Inbox
             </button>
             <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
               {TYPE_LABELS[selected.type]}
             </span>
             <h1 className="mt-1 text-base font-semibold">{selected.title}</h1>
-            <p className="mt-2 max-w-2xl whitespace-pre-wrap text-sm text-foreground/80">{selected.body}</p>
+            <p className="mt-2 max-w-2xl whitespace-pre-wrap text-sm text-foreground/88">{selected.body}</p>
 
             {selected.type === "feedback" && <FeedbackForm broadcastId={selected.broadcastId} />}
             {selected.type === "test" && <TestSection broadcastId={selected.broadcastId} />}
@@ -148,7 +148,7 @@ function FeedbackForm({ broadcastId }: { broadcastId: string }) {
             onClick={() => setRating(n)}
             aria-label={`${n} star${n === 1 ? "" : "s"}`}
             className={`h-8 w-8 rounded-lg border text-sm font-medium transition ${
-              rating !== null && n <= rating ? "border-brand bg-brand text-white" : "border-border text-foreground/50 hover:bg-brand/5"
+              rating !== null && n <= rating ? "border-brand bg-brand text-white" : "border-border text-foreground/68 hover:bg-brand/5"
             }`}
           >
             {n}
@@ -263,7 +263,7 @@ function TestSection({ broadcastId }: { broadcastId: string }) {
         return (
           <div key={q.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
             <p className="font-medium">
-              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/40">({q.max_score} pt)</span>
+              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
             </p>
             {q.question_type === "mcq" ? (
               <div className="mt-2 space-y-1">
@@ -281,7 +281,7 @@ function TestSection({ broadcastId }: { broadcastId: string }) {
                 ))}
               </div>
             ) : isSubmitted ? (
-              <p className="mt-2 text-foreground/70">{existing?.answer_text || "(no answer)"}</p>
+              <p className="mt-2 text-foreground/82">{existing?.answer_text || "(no answer)"}</p>
             ) : (
               <textarea
                 rows={2}
@@ -290,7 +290,7 @@ function TestSection({ broadcastId }: { broadcastId: string }) {
               />
             )}
             {isSubmitted && q.question_type === "short_answer" && existing?.score !== null && (
-              <p className="mt-1 text-xs text-foreground/50">Scored {existing?.score}/{q.max_score}</p>
+              <p className="mt-1 text-xs text-foreground/68">Scored {existing?.score}/{q.max_score}</p>
             )}
           </div>
         );
@@ -401,7 +401,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
             </button>
           </>
         ) : (
-          <p className="text-sm text-foreground/50">Loading…</p>
+          <p className="text-sm text-foreground/68">Loading…</p>
         )}
       </div>
     );
@@ -414,9 +414,9 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
   return (
     <div className="mt-4 max-w-xl space-y-4">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">Question paper</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">Question paper</h3>
         {paperUrls.length === 0 ? (
-          <p className="mt-1 text-sm text-foreground/50">Link expired -- reopen this exam to refresh it.</p>
+          <p className="mt-1 text-sm text-foreground/68">Link expired -- reopen this exam to refresh it.</p>
         ) : (
           <div className="mt-1 flex flex-wrap gap-3 text-sm">
             {paperUrls.map((url, i) => (
@@ -430,11 +430,11 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
 
       {questions.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">Questions</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">Questions</h3>
           <ul className="mt-1 space-y-1 text-sm">
             {questions.map((q, i) => (
               <li key={q.id}>
-                {i + 1}. {q.question} <span className="text-xs text-foreground/40">({q.max_score} pt)</span>
+                {i + 1}. {q.question} <span className="text-xs text-foreground/62">({q.max_score} pt)</span>
                 {submission?.status === "graded" && (
                   <span className="ml-2 text-xs font-medium text-brand">
                     scored {scoreByQuestion.get(q.id) ?? 0}/{q.max_score}
@@ -451,7 +451,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
           {submission.status === "graded"
             ? `Score: ${submission.totalScore ?? 0}/${submission.maxPossibleScore ?? 0}`
             : "Submitted -- awaiting grading."}
-          {submission.feedback && <span className="mt-1 block text-foreground/70">{submission.feedback}</span>}
+          {submission.feedback && <span className="mt-1 block text-foreground/82">{submission.feedback}</span>}
         </p>
       )}
       {submission && submission.fileUrls.length > 0 && (
@@ -466,7 +466,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
 
       {canResubmit && (
         <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/40">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">
             {submission ? "Replace your answer sheet" : "Upload your answer sheet"}
           </h3>
           <input

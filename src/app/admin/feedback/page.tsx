@@ -68,7 +68,7 @@ export default async function FeedbackPage({
   return (
     <div>
       <h1 className="text-lg font-semibold">Feedback</h1>
-      <p className="mt-1 text-sm text-foreground/60">
+      <p className="mt-1 text-sm text-foreground/75">
         👍/👎 students leave on a chat reply, topic summary, or exercise while they&apos;re looking at
         it -- the one place a live reaction reaches this panel, distinct from the review queues below
         that gate content before it&apos;s ever shown to anyone.
@@ -77,13 +77,13 @@ export default async function FeedbackPage({
       <div className="mt-4 flex gap-4 text-sm">
         <Link
           href="/admin/feedback"
-          className={`rounded-full px-3 py-1 font-medium ${status === "open" ? "bg-brand text-white" : "border border-border text-foreground/60 hover:text-foreground"}`}
+          className={`rounded-full px-3 py-1 font-medium ${status === "open" ? "bg-brand text-white" : "border border-border text-foreground/75 hover:text-foreground"}`}
         >
           Open{openDownCount ? ` (${openDownCount} flagged)` : ""}
         </Link>
         <Link
           href="/admin/feedback?status=resolved"
-          className={`rounded-full px-3 py-1 font-medium ${status === "resolved" ? "bg-brand text-white" : "border border-border text-foreground/60 hover:text-foreground"}`}
+          className={`rounded-full px-3 py-1 font-medium ${status === "resolved" ? "bg-brand text-white" : "border border-border text-foreground/75 hover:text-foreground"}`}
         >
           Resolved
         </Link>
@@ -91,7 +91,7 @@ export default async function FeedbackPage({
 
       <div className="mt-4 space-y-3">
         {sortedRows.length === 0 && (
-          <p className="text-sm text-foreground/50">
+          <p className="text-sm text-foreground/68">
             {status === "open" ? "No open feedback." : "No resolved feedback yet."}
           </p>
         )}
@@ -109,7 +109,7 @@ export default async function FeedbackPage({
                       {KIND_LABELS[row.kind] ?? row.kind}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-foreground/50">
+                  <p className="mt-1 text-xs text-foreground/68">
                     {name} · {DATE_FORMATTER.format(new Date(row.created_at))}
                   </p>
                 </div>
@@ -120,12 +120,12 @@ export default async function FeedbackPage({
                 </form>
               </div>
 
-              {row.question && <p className="mt-3 text-xs font-medium text-foreground/60">{row.question}</p>}
-              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/80">
+              {row.question && <p className="mt-3 text-xs font-medium text-foreground/75">{row.question}</p>}
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-background p-3 text-foreground/88">
                 {row.content_snapshot}
               </p>
               {row.note && (
-                <p className="mt-2 text-xs text-foreground/70">
+                <p className="mt-2 text-xs text-foreground/82">
                   <span className="font-medium">Student note:</span> {row.note}
                 </p>
               )}

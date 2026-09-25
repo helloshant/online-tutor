@@ -34,7 +34,7 @@ export function EditAnswerForm({
         Edit question/answer
       </summary>
       <form action={formAction} encType="multipart/form-data" className="mt-2 space-y-2">
-        <p className="text-xs text-foreground/60">
+        <p className="text-xs text-foreground/75">
           <code className="rounded bg-brand/10 px-1 py-0.5">[IMAGE 1]</code>,{" "}
           <code className="rounded bg-brand/10 px-1 py-0.5">[IMAGE 2]</code>, … stand in below for
           this row&apos;s existing images (in the order shown further down) — move one to reposition

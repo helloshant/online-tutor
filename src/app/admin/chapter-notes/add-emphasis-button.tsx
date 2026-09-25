@@ -19,7 +19,7 @@ export function AddEmphasisButton({ id }: { id: string }) {
       </button>
       {state.error && <p className="mt-1 text-xs text-red-600">{state.error}</p>}
       {state.success && (
-        <p className="mt-1 text-xs text-foreground/50">
+        <p className="mt-1 text-xs text-foreground/68">
           {!state.verifiedChunks && !state.failedChunks
             ? "Nothing to change."
             : !state.verifiedChunks

@@ -58,7 +58,7 @@ export function SubmitOcrForm() {
   return (
     <div className="space-y-4">
       <form action={ocrFormAction} encType="multipart/form-data" className="space-y-3 rounded-xl border border-border bg-surface p-4">
-        <label className="flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="flex flex-col gap-1 text-xs text-foreground/75">
           Image(s) or PDF to OCR -- select several at once for a batch (e.g. a .docx&apos;s own embedded image
           fragments, extracted by hand, or a whole scanned book as one large PDF). Each file&apos;s text is labeled
           with its filename and kept in the order you selected them. Up to 75MB per file, 200 files max -- a large PDF
@@ -78,7 +78,7 @@ export function SubmitOcrForm() {
         >
           {ocrPending ? "Running OCR…" : "Run OCR"}
         </button>
-        <p className="text-xs text-foreground/40">
+        <p className="text-xs text-foreground/62">
           A batch of many files (or a large book PDF split into several page ranges) can take a while -- the button
           stays on &quot;Running OCR…&quot; the whole time, there is no separate progress indicator.
         </p>
@@ -95,12 +95,12 @@ export function SubmitOcrForm() {
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground/70 hover:bg-brand/5"
+                  className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground/82 hover:bg-brand/5"
                 >
                   {copied ? "Copied!" : "Copy to clipboard"}
                 </button>
               </div>
-              <p className="mt-1 text-xs text-foreground/50">
+              <p className="mt-1 text-xs text-foreground/68">
                 Review (and edit, if needed) before using it -- OCR isn&apos;t perfect, especially on a poor-quality
                 scan. For a single paper, paste it into the raw-text field on the{" "}
                 <Link href="/admin/archetype-miner" className="text-brand hover:underline">
@@ -118,7 +118,7 @@ export function SubmitOcrForm() {
           )}
 
           <div className="rounded-xl border border-border bg-surface">
-            <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/50">
+            <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/68">
               Per-file results ({ocrState.result.fileResults.filter((f) => f.ok).length}/{ocrState.result.fileResults.length}{" "}
               succeeded)
             </h3>
@@ -127,7 +127,7 @@ export function SubmitOcrForm() {
                 <div key={f.fileName} className="flex items-center gap-2 px-4 py-2 text-sm">
                   <span className={f.ok ? "text-green-600" : "text-red-600"}>{f.ok ? "✓" : "✗"}</span>
                   <span className="font-mono text-xs">{f.fileName}</span>
-                  {f.note && <span className="text-xs text-foreground/50">— {f.note}</span>}
+                  {f.note && <span className="text-xs text-foreground/68">— {f.note}</span>}
                 </div>
               ))}
             </div>
@@ -136,7 +136,7 @@ export function SubmitOcrForm() {
           {text.trim() && (
             <div className="rounded-xl border border-border bg-surface p-4">
               <h2 className="text-sm font-semibold">Split into chapters</h2>
-              <p className="mt-1 text-xs text-foreground/50">
+              <p className="mt-1 text-xs text-foreground/68">
                 For a whole scanned book: finds each real chapter&apos;s starting point in the text above and splits
                 it into one chunk per chapter, in the exact JSON shape the Chapter Notes admin page&apos;s own{" "}
                 <Link href="/admin/chapter-notes" className="text-brand hover:underline">
@@ -196,11 +196,11 @@ export function SubmitOcrForm() {
                       </ul>
                     </div>
                   )}
-                  <ol className="space-y-1 text-xs text-foreground/60">
+                  <ol className="space-y-1 text-xs text-foreground/75">
                     {segmentState.result.chunks.map((c) => (
                       <li key={c.chapter_number}>
                         {c.chapter_number}. {c.chapter_title}{" "}
-                        <span className="text-foreground/40">({c.text.length.toLocaleString()} characters)</span>
+                        <span className="text-foreground/62">({c.text.length.toLocaleString()} characters)</span>
                       </li>
                     ))}
                   </ol>

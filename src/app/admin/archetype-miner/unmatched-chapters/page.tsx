@@ -45,7 +45,7 @@ export default async function UnmatchedChaptersPage() {
       </Link>
 
       <h1 className="mt-4 text-xl font-semibold">Unmatched chapters</h1>
-      <p className="mt-1 max-w-3xl text-sm text-foreground/60">
+      <p className="mt-1 max-w-3xl text-sm text-foreground/75">
         Every already-mined chapter value, across every board/grade/subject, that doesn&apos;t exactly
         match this app&apos;s own curated syllabus_topics wording -- the same values curriculum
         reconciliation&apos;s own LLM pass tries first, but with real sample question text so a human

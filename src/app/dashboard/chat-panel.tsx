@@ -310,7 +310,7 @@ const MessageBubble = memo(function MessageBubble({
           />
         )}
         {isRegenerating ? (
-          <span className="text-foreground/40">
+          <span className="text-foreground/62">
             <LoadingIndicator label="Translating…" />
           </span>
         ) : (
@@ -1027,7 +1027,7 @@ export function ChatPanel({
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3">
         <div>
           <h1 className="text-sm font-semibold">{subject.name}</h1>
-          <p className="text-xs text-foreground/50">
+          <p className="text-xs text-foreground/68">
             {isStaffUser && !medium
               ? "Staff access: unrestricted, not limited to any one syllabus."
               : `Answers are limited to this subject's syllabus, in ${
@@ -1053,7 +1053,7 @@ export function ChatPanel({
               className={`rounded-full px-2.5 py-1 font-medium transition ${
                 !preferEnglish
                   ? "bg-brand text-white"
-                  : "text-foreground/60 hover:text-foreground"
+                  : "text-foreground/75 hover:text-foreground"
               }`}
             >
               {medium}
@@ -1065,7 +1065,7 @@ export function ChatPanel({
               className={`rounded-full px-2.5 py-1 font-medium transition ${
                 preferEnglish
                   ? "bg-brand text-white"
-                  : "text-foreground/60 hover:text-foreground"
+                  : "text-foreground/75 hover:text-foreground"
               }`}
             >
               English
@@ -1077,10 +1077,10 @@ export function ChatPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div ref={contentRef} className="space-y-4">
           {loadingHistory && (
-            <p className="text-sm text-foreground/40">Loading chat history…</p>
+            <p className="text-sm text-foreground/62">Loading chat history…</p>
           )}
           {!loadingHistory && timeline.length === 0 && (
-            <p className="text-sm text-foreground/40">
+            <p className="text-sm text-foreground/62">
               Ask your first {subject.name} question below to get started.
             </p>
           )}
@@ -1111,7 +1111,7 @@ export function ChatPanel({
           )}
           {sending && (
             <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/40">
+              <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/62">
                 <LoadingIndicator label="Thinking…" />
               </div>
             </div>
@@ -1135,7 +1135,7 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => setSelectedImage(null)}
-              className="text-xs text-foreground/50 hover:text-foreground"
+              className="text-xs text-foreground/68 hover:text-foreground"
             >
               Remove
             </button>
@@ -1156,7 +1156,7 @@ export function ChatPanel({
             disabled={sending}
             title="Attach a screenshot or photo"
             aria-label="Attach a screenshot or photo"
-            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
+            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/75 transition hover:text-foreground disabled:opacity-60"
           >
             📎
           </button>
@@ -1183,7 +1183,7 @@ export function ChatPanel({
             disabled={sending}
             title="Scan a question with your camera"
             aria-label="Scan a question with your camera"
-            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/60 transition hover:text-foreground disabled:opacity-60"
+            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground/75 transition hover:text-foreground disabled:opacity-60"
           >
             📷
           </button>

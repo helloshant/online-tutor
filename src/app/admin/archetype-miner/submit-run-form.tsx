@@ -37,9 +37,9 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
   return (
     <form action={formAction} encType="multipart/form-data" className="space-y-4 border-t border-border p-4">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/50">Education context</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/68">Education context</h3>
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Education stage
             <select
               name="educationStage"
@@ -51,11 +51,11 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
               <option value="undergraduate">Undergraduate</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Grade / year (e.g. &quot;10&quot;, &quot;UG-2&quot;)
             <input name="gradeOrYear" required className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Curriculum source type
             <select
               name="curriculumSourceType"
@@ -66,7 +66,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
               <option value="university_program">University program</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Curriculum source name (e.g. &quot;CBSE&quot;, &quot;Anna University B.Tech CSE&quot;)
             <input
               name="curriculumSourceName"
@@ -74,24 +74,24 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
               className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Country / region (optional)
             <input name="countryOrRegion" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Subject / course
             <input name="subjectOrCourse" required className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/60">
+          <label className="flex flex-col gap-1 text-xs text-foreground/75">
             Program / stream (optional)
             <input name="programOrStream" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-foreground/60">
+          <label className="flex items-center gap-1.5 text-xs text-foreground/75">
             <input type="checkbox" name="taxonomySupplied" className="h-4 w-4" />A curriculum taxonomy is available for
             this source
           </label>
         </div>
-        <label className="mt-3 flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="mt-3 flex flex-col gap-1 text-xs text-foreground/75">
           Curriculum taxonomy text (optional — leave blank to use a saved taxonomy for this curriculum source, if one
           exists; see &quot;Curriculum taxonomies&quot; above)
           <textarea
@@ -103,8 +103,8 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
       </div>
 
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/50">Input</h3>
-        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/68">Input</h3>
+        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/75">
           LLM provider for this run
           <select
             name="llmProvider"
@@ -119,7 +119,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
             <option value="azure-openai">Azure OpenAI</option>
           </select>
         </label>
-        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/75">
           Input kind
           <select
             name="inputKind"
@@ -131,7 +131,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           </select>
         </label>
 
-        <p className="mt-3 text-xs text-foreground/40">
+        <p className="mt-3 text-xs text-foreground/62">
           Fill in ONE of the two sections below, matching your chosen input kind.
         </p>
 
@@ -191,7 +191,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           placeholder="Paste the raw extracted paper text here (for input kind: raw paper text)"
           className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs"
         />
-        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/60">
+        <label className="mt-2 flex flex-col gap-1 text-xs text-foreground/75">
           Or upload the paper as one or more PDF/DOCX files instead of pasting text above (input kind: raw paper
           text) — select several to submit them together as one run, each becoming its own paper. Up to 15MB each,
           20 files max. Every file shares the paper-metadata fields below (subject/year/board/set code/...); if your
