@@ -33,6 +33,14 @@ export async function restateQuestionForStorage(
       message: trimmed,
       maxTokens: RESTATEMENT_MAX_TOKENS,
       event,
+      // Never shown to the asking student -- only used to key future
+      // fuzzy-match lookups for OTHER students' similar questions, and
+      // this function already fails closed (returns null, caller skips the
+      // write) on any empty/malformed response, independent of model
+      // quality. Worst case from a weaker model here is a slightly worse
+      // future match rate, not a wrong answer shown to anyone. See llm.ts's
+      // own LlmTier comment.
+      tier: "economy",
     });
     const restated = text.trim();
     return restated || null;

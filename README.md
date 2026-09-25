@@ -2158,11 +2158,24 @@ cp services/vision-ocr/.env.example services/vision-ocr/.env.local
 - `LLM_PROVIDER` — `anthropic` (default) or `azure-openai`. Only fill in the section for
   whichever one you pick:
   - **Anthropic**: `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
-    `ANTHROPIC_MODEL` is optional and defaults to Anthropic's current flagship model.
   - **Azure OpenAI**: `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` from your Azure OpenAI
-    resource's Keys and Endpoint page, `AZURE_OPENAI_CHAT_DEPLOYMENT` (the deployment name you
-    gave the model in Azure AI Foundry, e.g. `gpt-4o`), and `AZURE_OPENAI_API_VERSION` (e.g.
-    `2024-08-01-preview`).
+    resource's Keys and Endpoint page, and `AZURE_OPENAI_API_VERSION` (e.g. `2024-08-01-preview`).
+- **Model tiers** (`src/llm.ts`'s own `LlmTier`) — every LLM call picks one of three tiers matched
+  to its stakes/volume (`flagship`: chat tutoring, exercise-attempt grading, practice-paper vision
+  grading; `standard`: exercise/practice-paper generation, topic summaries — the highest-volume
+  tier, up to 41 calls for one practice paper; `economy`: the answer-bank restatement rewrite, the
+  admin chapter-notes emphasis pass — neither ever shown directly to the student who triggered it).
+  All six vars below are optional overrides with a working default, so none needs to be set:
+  - **Anthropic**: `ANTHROPIC_MODEL_FLAGSHIP` / `_STANDARD` / `_ECONOMY` — model ids are stable,
+    portable strings, so tiering works immediately here with no extra setup (defaults:
+    `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5`, all already priced in
+    `services/observability/src/pricing.ts`).
+  - **Azure OpenAI**: `AZURE_OPENAI_DEPLOYMENT_FLAGSHIP` / `_STANDARD` / `_ECONOMY` — Azure
+    bills/routes per *deployment* (a name you chose in the Azure Portal), not a portable model id,
+    so there's no universal "standard" deployment name to default to the way Anthropic's model ids
+    allow. All three default to this app's one existing deployment (`gpt-4o`) — tiering is a
+    genuine no-op on Azure, every tier resolving to the same place, until you provision real
+    additional deployments (e.g. a cheaper `gpt-4o-mini` for `ECONOMY`) and point these at them.
 
 **`services/observability/.env.local`** (the usage/cost tracking service):
 

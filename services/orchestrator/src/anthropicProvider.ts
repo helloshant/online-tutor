@@ -1,10 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
 
-const DEFAULT_MODEL = "claude-opus-4-8";
-
-export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
-
 let cachedClient: Anthropic | null = null;
 
 function getClient(): Anthropic {
@@ -26,8 +22,10 @@ export async function getAnthropicReply(params: {
   message: string;
   maxTokens: number;
   image?: ImageAttachment | null;
+  // The tier-resolved model id -- see llm.ts's own LlmTier comment.
+  model: string;
 }): Promise<LlmReply> {
-  const { systemPrompt, history, message, maxTokens, image } = params;
+  const { systemPrompt, history, message, maxTokens, image, model } = params;
   const client = getClient();
 
   // A screenshot/photo is read directly by the model (vision), not OCR'd
@@ -50,7 +48,7 @@ export async function getAnthropicReply(params: {
     : message;
 
   const response = await client.messages.create({
-    model: ANTHROPIC_MODEL,
+    model,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [...history, { role: "user" as const, content: userContent }],
@@ -81,8 +79,9 @@ export async function getAnthropicGradingReply(params: {
   systemPrompt: string;
   images: ImageAttachment[];
   maxTokens: number;
+  model: string;
 }): Promise<LlmReply> {
-  const { systemPrompt, images, maxTokens } = params;
+  const { systemPrompt, images, maxTokens, model } = params;
   const client = getClient();
 
   const userContent: Anthropic.MessageParam["content"] = [
@@ -101,7 +100,7 @@ export async function getAnthropicGradingReply(params: {
   ];
 
   const response = await client.messages.create({
-    model: ANTHROPIC_MODEL,
+    model,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: "user" as const, content: userContent }],

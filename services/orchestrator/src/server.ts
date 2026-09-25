@@ -326,6 +326,8 @@ app.post(
             subjectId: body.subjectId,
             question: body.message.trim() || "[Image question]",
           },
+          // Chat tutoring -- see llm.ts's own LlmTier comment.
+          tier: "flagship",
         });
         const response: ChatOrchestrationResponse = {
           reply: text,
@@ -552,6 +554,8 @@ app.post(
           question: studentBody.message.trim() || "[Image question]",
           grounded: referenceChunks.length > 0,
         },
+        // Chat tutoring -- see llm.ts's own LlmTier comment.
+        tier: "flagship",
       });
 
       if (scope) {
@@ -837,6 +841,11 @@ app.post(
           // no student/subject to attribute this to at all (the request is
           // just `{ content }`, see this route's own validation above).
           event: { loggable: false },
+          // Lowest-risk tier -- this pass already verifies its own output
+          // against the original and falls back to the unchanged text on
+          // any mismatch (stripEmphasisForComparison below), independent of
+          // model quality. See llm.ts's own LlmTier comment.
+          tier: "economy",
         });
         if (
           stripEmphasisForComparison(text) === stripEmphasisForComparison(chunk)
@@ -1066,6 +1075,9 @@ app.post(
           subjectId: body.subjectId,
           question: `topic-summary: ${body.chapter} / ${body.topic}`,
         },
+        // High volume, quality still matters -- see llm.ts's own LlmTier
+        // comment.
+        tier: "standard",
       });
 
       await upsertTopicSummary(body.topicId, responseLanguage, text);
@@ -1345,6 +1357,9 @@ app.post(
           medium: scope.medium,
           question: `topic-exercises: ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
         },
+        // High volume, quality still matters -- see llm.ts's own LlmTier
+        // comment.
+        tier: "standard",
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -1689,6 +1704,9 @@ app.post(
           medium: scope.medium,
           question: `topic-exercises/generate-for-concept: ${body.chapter} / ${body.topic} (${concept.term})`,
         },
+        // High volume, quality still matters -- see llm.ts's own LlmTier
+        // comment.
+        tier: "standard",
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -1876,6 +1894,9 @@ app.post(
           medium: scope.medium,
           question: `topic-exercises/generate: ${body.chapter} / ${body.topic} (${chosen.name})`,
         },
+        // High volume, quality still matters -- see llm.ts's own LlmTier
+        // comment.
+        tier: "standard",
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -2156,6 +2177,12 @@ async function generatePracticePaperQuestion(params: {
       medium: scope.medium,
       question: `practice-paper/generate: ${topic.chapter} / ${topic.topic} (${type}, ${difficulty})`,
     },
+    // The highest-volume tier by far -- up to 41 calls per paper -- so it's
+    // where per-token savings compound the most; quality still matters
+    // (a bad worked-solution key misleads a student self-checking), just
+    // not at the flagship level a live grading judgment needs. See llm.ts's
+    // own LlmTier comment.
+    tier: "standard",
   });
 
   const [exercise] = parseGeneratedExercises(text);
@@ -2430,6 +2457,10 @@ app.post(
           medium,
           question: `practice-paper/evaluate: ${gradingQuestions.length} questions`,
         },
+        // A live judgment on a real student's photographed answer sheet --
+        // directly determines their actual score, never the place to cut
+        // cost. See llm.ts's own LlmTier comment.
+        tier: "flagship",
       });
 
       const parsed = parsePracticePaperGrading(

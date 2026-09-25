@@ -1,16 +1,23 @@
 import { AzureOpenAI } from "openai";
 import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
 
-const DEFAULT_DEPLOYMENT = "gpt-4o";
 const DEFAULT_API_VERSION = "2024-08-01-preview";
 
-export const AZURE_OPENAI_DEPLOYMENT =
-  process.env.AZURE_OPENAI_CHAT_DEPLOYMENT || DEFAULT_DEPLOYMENT;
+// Azure OpenAI bills/routes per DEPLOYMENT -- the SDK bakes the deployment
+// into the client at construction time (it builds request URLs like
+// /openai/deployments/{deployment}/chat/completions), not per individual
+// request the way a plain "model" field would work for Anthropic or the
+// OpenAI public API. Tiering (see llm.ts's own LlmTier) means a single
+// request can now ask for any of up to three different deployments, so this
+// caches one client PER deployment actually used, rather than the single
+// module-level client this used to be -- each tier still only ever pays for
+// one client's worth of setup, the first time that specific deployment is
+// requested.
+const cachedClients = new Map<string, AzureOpenAI>();
 
-let cachedClient: AzureOpenAI | null = null;
-
-function getClient(): AzureOpenAI {
-  if (!cachedClient) {
+function getClient(deployment: string): AzureOpenAI {
+  let client = cachedClients.get(deployment);
+  if (!client) {
     const apiKey = process.env.AZURE_OPENAI_API_KEY;
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
     if (!apiKey)
@@ -18,14 +25,15 @@ function getClient(): AzureOpenAI {
     if (!endpoint)
       throw new Error("Missing AZURE_OPENAI_ENDPOINT environment variable");
 
-    cachedClient = new AzureOpenAI({
+    client = new AzureOpenAI({
       apiKey,
       endpoint,
       apiVersion: process.env.AZURE_OPENAI_API_VERSION || DEFAULT_API_VERSION,
-      deployment: AZURE_OPENAI_DEPLOYMENT,
+      deployment,
     });
+    cachedClients.set(deployment, client);
   }
-  return cachedClient;
+  return client;
 }
 
 const FALLBACK_TEXT =
@@ -37,9 +45,11 @@ export async function getAzureOpenAIReply(params: {
   message: string;
   maxTokens: number;
   image?: ImageAttachment | null;
+  // The tier-resolved deployment name -- see llm.ts's own LlmTier comment.
+  model: string;
 }): Promise<LlmReply> {
-  const { systemPrompt, history, message, maxTokens, image } = params;
-  const client = getClient();
+  const { systemPrompt, history, message, maxTokens, image, model } = params;
+  const client = getClient(model);
 
   // OpenAI's vision format: an image_url part with a data: URI, alongside
   // the caption if one was typed -- same reasoning as the Anthropic
@@ -55,7 +65,7 @@ export async function getAzureOpenAIReply(params: {
     : message;
 
   const completion = await client.chat.completions.create({
-    model: AZURE_OPENAI_DEPLOYMENT,
+    model,
     max_tokens: maxTokens,
     messages: [
       { role: "system", content: systemPrompt },
@@ -68,7 +78,7 @@ export async function getAzureOpenAIReply(params: {
     // The deployment name, not the underlying base model -- Azure bills and
     // rate-limits against the deployment, so that's the identifier the
     // observability service's pricing lookup needs.
-    model: AZURE_OPENAI_DEPLOYMENT,
+    model,
     usage: {
       promptTokens: completion.usage?.prompt_tokens ?? 0,
       completionTokens: completion.usage?.completion_tokens ?? 0,
@@ -88,9 +98,10 @@ export async function getAzureOpenAIGradingReply(params: {
   systemPrompt: string;
   images: ImageAttachment[];
   maxTokens: number;
+  model: string;
 }): Promise<LlmReply> {
-  const { systemPrompt, images, maxTokens } = params;
-  const client = getClient();
+  const { systemPrompt, images, maxTokens, model } = params;
+  const client = getClient(model);
 
   const userContent = [
     ...images.map((image) => ({
@@ -104,7 +115,7 @@ export async function getAzureOpenAIGradingReply(params: {
   ];
 
   const completion = await client.chat.completions.create({
-    model: AZURE_OPENAI_DEPLOYMENT,
+    model,
     max_tokens: maxTokens,
     response_format: { type: "json_object" },
     messages: [
@@ -114,7 +125,7 @@ export async function getAzureOpenAIGradingReply(params: {
   });
   return {
     text: completion.choices[0]?.message?.content ?? GRADING_FALLBACK_TEXT,
-    model: AZURE_OPENAI_DEPLOYMENT,
+    model,
     usage: {
       promptTokens: completion.usage?.prompt_tokens ?? 0,
       completionTokens: completion.usage?.completion_tokens ?? 0,

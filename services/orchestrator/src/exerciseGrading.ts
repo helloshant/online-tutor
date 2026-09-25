@@ -47,6 +47,10 @@ export async function gradeExerciseAnswer(params: {
     message: "Grade this attempt now.",
     maxTokens: MAX_TOKENS,
     event,
+    // A live judgment on a student's own attempt, feeding directly into
+    // their mastery tracking -- never the place to cut cost. See llm.ts's
+    // own LlmTier comment.
+    tier: "flagship",
   });
 
   const verdictMatch = text.match(VERDICT_LINE);
