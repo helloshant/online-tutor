@@ -1362,7 +1362,47 @@ app.post(
         tier: "standard",
       });
 
-      const parsed = parseGeneratedExercises(text);
+      let parsed = parseGeneratedExercises(text);
+
+      // Reported directly: a request for EXERCISE_GENERATION_COUNT (5)
+      // exercises came back with exactly 1 -- confirmed live against
+      // chat_events for that exact call: 633 of the 4096-token budget
+      // used, so the model wasn't cut off, it simply stopped generating
+      // on its own despite the explicit "Produce all 5, not fewer" line
+      // describeCountReminder already adds (this is the SAME under-
+      // production failure that reminder was added for -- it just doesn't
+      // fully close the gap on its own). One bounded retry with the exact
+      // same prompt, merging both attempts' exercises (deduplicated by
+      // question text, capped at the requested count) -- free on the
+      // common case (first attempt already reached the full count skips
+      // this entirely) and meaningfully improves the odds of reaching it
+      // when the model under-produces.
+      if (parsed.length < EXERCISE_GENERATION_COUNT) {
+        const { text: retryText } = await getChatReply({
+          systemPrompt,
+          history: [],
+          message: "Generate the exercises now.",
+          maxTokens: EXERCISE_MAX_TOKENS,
+          event: {
+            loggable: true,
+            userId: body.userId,
+            mode: "student",
+            boardId: scope.boardId,
+            gradeId: scope.gradeId,
+            subjectId: scope.subjectId,
+            medium: scope.medium,
+            question: `topic-exercises (retry, got ${parsed.length}/${EXERCISE_GENERATION_COUNT}): ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
+          },
+          tier: "standard",
+        });
+        const seen = new Set(parsed.map((p) => p.question));
+        for (const exercise of parseGeneratedExercises(retryText)) {
+          if (parsed.length >= EXERCISE_GENERATION_COUNT) break;
+          if (seen.has(exercise.question)) continue;
+          seen.add(exercise.question);
+          parsed = [...parsed, exercise];
+        }
+      }
 
       // Only recorded once generation actually produced something -- if
       // parsing came back empty, the student wasn't shown anything despite
