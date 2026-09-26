@@ -90,7 +90,7 @@ export default async function AccountPage() {
         .then((r) => r.data ?? 0);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
       <Link
         href="/dashboard"
         className="text-sm text-foreground/68 hover:text-foreground"
@@ -98,11 +98,11 @@ export default async function AccountPage() {
         ← Back to dashboard
       </Link>
 
-      <h1 className="mt-4 text-lg font-semibold">Account</h1>
+      <h1 className="mt-3 text-lg font-semibold">Account</h1>
 
-      <div className="mt-6 rounded-xl border border-border bg-surface p-6">
+      <div className="mt-4 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold">Account information</h2>
-        <dl className="mt-3 space-y-2 text-sm">
+        <dl className="mt-2.5 space-y-1.5 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-foreground/68">Name</dt>
             <dd className="text-right">{profile?.full_name ?? "—"}</dd>
@@ -169,7 +169,7 @@ export default async function AccountPage() {
         />
       )}
 
-      <div className="mt-8 rounded-xl border border-border bg-surface p-6">
+      <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold">Change password</h2>
         <NewPasswordForm
           action={changePassword}
@@ -199,7 +199,7 @@ function UsageCard({
   const overLimit = !unlimited && usedThisMonth >= limit;
 
   return (
-    <div className="mt-8 rounded-xl border border-border bg-surface p-6">
+    <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
       <h2 className="text-sm font-semibold">AI tutoring usage this month</h2>
       <p className="mt-1 text-sm text-foreground/75">
         {unlimited ? (
