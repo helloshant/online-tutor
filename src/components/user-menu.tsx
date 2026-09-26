@@ -47,7 +47,7 @@ export function UserMenu({ userName }: { userName: string }) {
           👤
         </span>
         <span className="hidden sm:inline">{userName}</span>
-        <span aria-hidden="true" className="text-[10px] text-foreground/62">
+        <span aria-hidden="true" className="text-[10px] text-foreground/65">
           ▾
         </span>
       </button>

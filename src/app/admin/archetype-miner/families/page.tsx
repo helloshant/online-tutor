@@ -65,7 +65,7 @@ export default async function ArchetypeFamiliesPage() {
               </span>
             </div>
             <p className="mt-1.5 text-sm text-foreground/82">{f.progression_notes}</p>
-            <p className="mt-2 text-xs text-foreground/62">
+            <p className="mt-2 text-xs text-foreground/65">
               {f.member_archetype_ids.length} member archetype(s): {f.member_archetype_ids.join(", ")}
             </p>
           </div>

@@ -54,7 +54,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
               {runRow.education_context.education_stage} · grade/year {runRow.education_context.grade_or_year}
               {runRow.education_context.program_or_stream && ` · ${runRow.education_context.program_or_stream}`}
             </p>
-            <p className="mt-1 text-xs text-foreground/62">
+            <p className="mt-1 text-xs text-foreground/65">
               Submitted {new Date(runRow.created_at).toLocaleString()}
               {runRow.completed_at && ` · finished ${new Date(runRow.completed_at).toLocaleString()}`}
               {" · "}
@@ -178,7 +178,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
                       {row.critic_decision}
                     </span>
                   )}
-                  <span className="text-xs text-foreground/62">confidence {a.mining_confidence?.toFixed(2)}</span>
+                  <span className="text-xs text-foreground/65">confidence {a.mining_confidence?.toFixed(2)}</span>
                 </div>
                 <p className="mt-1 text-sm text-foreground/82">{a.learning_objective}</p>
                 <p className="mt-1 text-xs text-foreground/68">{a.invariant_reasoning_structure}</p>
@@ -195,7 +195,7 @@ export default async function ArchetypeMinerRunPage({ params }: { params: Promis
                     ))}
                   </ul>
                 )}
-                <p className="mt-2 text-xs text-foreground/62">
+                <p className="mt-2 text-xs text-foreground/65">
                   {a.stats.question_count} question(s) · {a.supporting_question_ids.length} supporting id(s)
                   {!a.generator_usable && " · not yet generator-usable"}
                 </p>

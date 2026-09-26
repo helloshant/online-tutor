@@ -63,7 +63,7 @@ export function InboxPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
       <div className={`min-h-0 overflow-y-auto border-border p-3 sm:w-72 sm:shrink-0 sm:border-r ${selected ? "hidden sm:block" : ""}`}>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">Inbox</h2>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">Inbox</h2>
         {error && <p className="text-sm text-red-600">{error}</p>}
         {items === null && !error && <p className="text-sm text-foreground/68">Loading…</p>}
         {items?.length === 0 && <p className="text-sm text-foreground/68">Nothing here yet.</p>}
@@ -263,7 +263,7 @@ function TestSection({ broadcastId }: { broadcastId: string }) {
         return (
           <div key={q.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
             <p className="font-medium">
-              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
+              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/65">({q.max_score} pt)</span>
             </p>
             {q.question_type === "mcq" ? (
               <div className="mt-2 space-y-1">
@@ -414,7 +414,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
   return (
     <div className="mt-4 max-w-xl space-y-4">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">Question paper</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/65">Question paper</h3>
         {paperUrls.length === 0 ? (
           <p className="mt-1 text-sm text-foreground/68">Link expired -- reopen this exam to refresh it.</p>
         ) : (
@@ -430,11 +430,11 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
 
       {questions.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">Questions</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/65">Questions</h3>
           <ul className="mt-1 space-y-1 text-sm">
             {questions.map((q, i) => (
               <li key={q.id}>
-                {i + 1}. {q.question} <span className="text-xs text-foreground/62">({q.max_score} pt)</span>
+                {i + 1}. {q.question} <span className="text-xs text-foreground/65">({q.max_score} pt)</span>
                 {submission?.status === "graded" && (
                   <span className="ml-2 text-xs font-medium text-brand">
                     scored {scoreByQuestion.get(q.id) ?? 0}/{q.max_score}
@@ -466,7 +466,7 @@ function ExamSection({ broadcastId }: { broadcastId: string }) {
 
       {canResubmit && (
         <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/62">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground/65">
             {submission ? "Replace your answer sheet" : "Upload your answer sheet"}
           </h3>
           <input

@@ -113,7 +113,7 @@ export default async function ArchetypeTaxonomiesPage() {
           <button className="rounded-lg bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
             Save
           </button>
-          <p className="text-xs text-foreground/62">
+          <p className="text-xs text-foreground/65">
             Saving with the same type + name + region as an existing row updates it in place
             (upsert), it doesn&apos;t create a duplicate.
           </p>
@@ -126,7 +126,7 @@ export default async function ArchetypeTaxonomiesPage() {
             <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
               {t.curriculum_source_name}
               {t.country_or_region && ` (${t.country_or_region})`}{" "}
-              <span className="text-xs font-normal text-foreground/62">
+              <span className="text-xs font-normal text-foreground/65">
                 {t.curriculum_source_type === "school_board" ? "school board" : "university program"} · updated{" "}
                 {new Date(t.updated_at).toLocaleDateString()}
               </span>

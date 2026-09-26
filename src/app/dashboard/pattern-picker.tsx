@@ -318,7 +318,7 @@ export function PatternPicker({
 
   return (
     <div className="mt-4 border-t border-border pt-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">
         Practice a specific pattern
       </p>
       {generateError && (
@@ -483,7 +483,7 @@ export function PatternPicker({
                 A distinct highlighted color (matching the difficulty
                 pills' own identical fix just above) makes the current
                 selection read as a clear, deliberate state instead. */}
-            <span className="text-xs text-foreground/62">
+            <span className="text-xs text-foreground/65">
               Type: {active.type ? EXERCISE_TYPE_LABELS[active.type] : "Any"}
             </span>
             {EXERCISE_TYPES.map((t) => (
@@ -536,7 +536,7 @@ export function PatternPicker({
             <button
               type="button"
               onClick={() => setActive(null)}
-              className="ml-auto text-xs text-foreground/62 hover:underline"
+              className="ml-auto text-xs text-foreground/65 hover:underline"
             >
               Hide
             </button>

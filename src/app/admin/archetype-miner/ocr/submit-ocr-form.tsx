@@ -78,7 +78,7 @@ export function SubmitOcrForm() {
         >
           {ocrPending ? "Running OCR…" : "Run OCR"}
         </button>
-        <p className="text-xs text-foreground/62">
+        <p className="text-xs text-foreground/65">
           A batch of many files (or a large book PDF split into several page ranges) can take a while -- the button
           stays on &quot;Running OCR…&quot; the whole time, there is no separate progress indicator.
         </p>
@@ -200,7 +200,7 @@ export function SubmitOcrForm() {
                     {segmentState.result.chunks.map((c) => (
                       <li key={c.chapter_number}>
                         {c.chapter_number}. {c.chapter_title}{" "}
-                        <span className="text-foreground/62">({c.text.length.toLocaleString()} characters)</span>
+                        <span className="text-foreground/65">({c.text.length.toLocaleString()} characters)</span>
                       </li>
                     ))}
                   </ol>

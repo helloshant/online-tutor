@@ -290,7 +290,7 @@ export default async function ObservabilityPage() {
                   <td className="px-4 py-3">
                     {USD_FORMATTER.format(row.costUsd)}
                     {row.unpriced > 0 && (
-                      <span className="ml-1 text-xs text-foreground/62">(+{row.unpriced} unpriced)</span>
+                      <span className="ml-1 text-xs text-foreground/65">(+{row.unpriced} unpriced)</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -349,7 +349,7 @@ export default async function ObservabilityPage() {
                   <td className="px-4 py-3">
                     {row.unlimited ? "Unlimited" : row.limit.toLocaleString()}
                     {row.hasOverride && !row.unlimited && (
-                      <span className="ml-1 text-xs text-foreground/62">(override)</span>
+                      <span className="ml-1 text-xs text-foreground/65">(override)</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -364,7 +364,7 @@ export default async function ObservabilityPage() {
                   </td>
                   <td className="px-4 py-3">
                     {row.unlimited ? (
-                      <span className="text-foreground/62">—</span>
+                      <span className="text-foreground/65">—</span>
                     ) : row.overLimit ? (
                       <span className="font-medium text-red-600">Over limit</span>
                     ) : row.pctUsed >= 80 ? (
@@ -421,14 +421,14 @@ export default async function ObservabilityPage() {
                     <td className="px-4 py-3 font-medium">{row.name}</td>
                     <td className="px-4 py-3">{row.total.toLocaleString()}</td>
                     <td className="px-4 py-3">
-                      {row.reused.toLocaleString()} <span className="text-xs text-foreground/62">({pct(row.reused)})</span>
+                      {row.reused.toLocaleString()} <span className="text-xs text-foreground/65">({pct(row.reused)})</span>
                     </td>
                     <td className="px-4 py-3">
-                      {row.grounded.toLocaleString()} <span className="text-xs text-foreground/62">({pct(row.grounded)})</span>
+                      {row.grounded.toLocaleString()} <span className="text-xs text-foreground/65">({pct(row.grounded)})</span>
                     </td>
                     <td className="px-4 py-3">
                       {row.ungrounded.toLocaleString()}{" "}
-                      <span className="text-xs text-foreground/62">({pct(row.ungrounded)})</span>
+                      <span className="text-xs text-foreground/65">({pct(row.ungrounded)})</span>
                     </td>
                     <td className="px-4 py-3">{row.rejected.toLocaleString()}</td>
                   </tr>
@@ -454,7 +454,7 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
     <div className="rounded-xl border border-border bg-surface p-4">
       <p className="text-xs uppercase tracking-wide text-foreground/68">{label}</p>
       <p className="mt-1 text-2xl font-semibold">{value}</p>
-      {sub && <p className="mt-1 text-xs text-foreground/62">{sub}</p>}
+      {sub && <p className="mt-1 text-xs text-foreground/65">{sub}</p>}
     </div>
   );
 }

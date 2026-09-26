@@ -45,7 +45,7 @@ export default async function UserObservabilityPage({
       </Link>
       <h1 className="mt-2 text-xl font-semibold">{profile?.full_name ?? "—"}</h1>
       <p className="text-sm text-foreground/75">{authUser?.user?.email ?? "(no email)"}</p>
-      <p className="mt-1 text-xs text-foreground/62">Most recent 300 queries.</p>
+      <p className="mt-1 text-xs text-foreground/65">Most recent 300 queries.</p>
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full min-w-[900px] text-left text-sm">

@@ -207,10 +207,10 @@ export function TopicPractice({
         emptyLabel && <p className="text-foreground/68">{emptyLabel}</p>
       ) : (
         <>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/65">
             Relevant exercises
           </p>
-          <p className="mb-3 text-xs text-foreground/62">
+          <p className="mb-3 text-xs text-foreground/65">
             Try each one yourself first -- the worked solution shows once you
             check your answer.
           </p>
@@ -243,7 +243,7 @@ export function TopicPractice({
                         {state.feedback}
                       </p>
                       <div className="rounded-lg bg-background p-3 text-foreground/88">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                           Solution
                         </p>
                         <p className="whitespace-pre-wrap">

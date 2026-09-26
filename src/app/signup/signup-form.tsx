@@ -13,7 +13,7 @@ export function SignupForm() {
     <div className="mt-6 space-y-4">
       <GoogleSignInButton next="/onboarding" />
 
-      <div className="flex items-center gap-3 text-xs text-foreground/62">
+      <div className="flex items-center gap-3 text-xs text-foreground/65">
         <div className="h-px flex-1 bg-border" />
         or
         <div className="h-px flex-1 bg-border" />

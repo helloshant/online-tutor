@@ -241,7 +241,7 @@ export function DashboardShell({
             className={`flex items-center ${subjectsCollapsed ? "justify-center" : "justify-between"}`}
           >
             {!subjectsCollapsed && (
-              <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+              <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                 {subjectsHeading}
               </h2>
             )}
@@ -306,7 +306,7 @@ export function DashboardShell({
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           {mainTab === "subjects" ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+              <h1 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                 {subjectsHeading}
               </h1>
               {subjects.length === 0 ? (
@@ -381,7 +381,7 @@ export function DashboardShell({
                       : "hidden"
                   }
                 >
-                  <p className="mb-3 text-xs text-foreground/62">
+                  <p className="mb-3 text-xs text-foreground/65">
                     Tap a topic to drop its summary into the chat.
                   </p>
                   <TopicList

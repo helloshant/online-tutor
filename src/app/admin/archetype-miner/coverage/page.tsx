@@ -125,7 +125,7 @@ export default async function ArchetypeCoveragePage({
       )}
 
       {scopeChosen && (
-        <p className="mt-4 text-xs text-foreground/62">
+        <p className="mt-4 text-xs text-foreground/65">
           {rows.length} archetype(s) across {chapterEntries.length} chapter(s) shown.
         </p>
       )}
@@ -136,7 +136,7 @@ export default async function ArchetypeCoveragePage({
           return (
             <div key={chapterName}>
               <h2 className="text-lg font-semibold">
-                {chapterName} <span className="text-sm font-normal text-foreground/62">({chapterCount})</span>
+                {chapterName} <span className="text-sm font-normal text-foreground/65">({chapterCount})</span>
               </h2>
               <div className="mt-3 space-y-4 border-l-2 border-border pl-4">
                 {Array.from(byTopic.entries()).map(([topicName, topicRows]) => (
@@ -157,13 +157,13 @@ export default async function ArchetypeCoveragePage({
                                   {row.critic_decision}
                                 </span>
                               )}
-                              <span className="text-xs text-foreground/62">
+                              <span className="text-xs text-foreground/65">
                                 confidence {a.mining_confidence?.toFixed(2)}
                               </span>
                             </div>
                             <p className="mt-1 text-sm text-foreground/82">{a.learning_objective}</p>
                             <p className="mt-1 text-xs text-foreground/68">{a.invariant_reasoning_structure}</p>
-                            <p className="mt-2 text-xs text-foreground/62">
+                            <p className="mt-2 text-xs text-foreground/65">
                               {/* years_observed is typed as number[] but a handful of real rows (mostly
                                   un-critiqued "candidate" ones, invisible under the default filter) have
                                   it stored as null instead of [] -- confirmed live, e.g.

@@ -81,7 +81,7 @@ export default async function CouponsPage() {
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-foreground/62">
+          <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-foreground/65">
             <tr>
               <th className="px-4 py-2 font-medium">Code</th>
               <th className="px-4 py-2 font-medium">Discount</th>
@@ -124,7 +124,7 @@ export default async function CouponsPage() {
                   <td className="px-4 py-2 text-right">
                     {!coupon.used_by && (
                       <form action={revokeCouponCode.bind(null, coupon.id)}>
-                        <button className="text-xs text-foreground/62 hover:underline">Revoke</button>
+                        <button className="text-xs text-foreground/65 hover:underline">Revoke</button>
                       </form>
                     )}
                   </td>

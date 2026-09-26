@@ -310,7 +310,7 @@ const MessageBubble = memo(function MessageBubble({
           />
         )}
         {isRegenerating ? (
-          <span className="text-foreground/62">
+          <span className="text-foreground/65">
             <LoadingIndicator label="Translating…" />
           </span>
         ) : (
@@ -1077,10 +1077,10 @@ export function ChatPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div ref={contentRef} className="space-y-4">
           {loadingHistory && (
-            <p className="text-sm text-foreground/62">Loading chat history…</p>
+            <p className="text-sm text-foreground/65">Loading chat history…</p>
           )}
           {!loadingHistory && timeline.length === 0 && (
-            <p className="text-sm text-foreground/62">
+            <p className="text-sm text-foreground/65">
               Ask your first {subject.name} question below to get started.
             </p>
           )}
@@ -1111,7 +1111,7 @@ export function ChatPanel({
           )}
           {sending && (
             <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/62">
+              <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2 text-sm text-foreground/65">
                 <LoadingIndicator label="Thinking…" />
               </div>
             </div>

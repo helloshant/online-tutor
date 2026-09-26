@@ -257,7 +257,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
                   <td className="px-3 py-2">{entry.questionCount}</td>
                   <td className="px-3 py-2">
                     {entry.sampleQuestions.length === 0 ? (
-                      <span className="text-xs text-foreground/62">No sample text available</span>
+                      <span className="text-xs text-foreground/65">No sample text available</span>
                     ) : (
                       entry.sampleQuestions.map((s) => (
                         <details key={s.ref} className="mb-1">
@@ -269,7 +269,7 @@ export function UnmatchedChaptersTable({ entries }: { entries: UnmatchedChapterE
                   </td>
                   <td className="px-3 py-2">
                     {entry.acceptableValues.length === 0 ? (
-                      <span className="text-xs text-foreground/62">No syllabus_topics rows for this scope</span>
+                      <span className="text-xs text-foreground/65">No syllabus_topics rows for this scope</span>
                     ) : (
                       <div className="flex items-center gap-2">
                         <select

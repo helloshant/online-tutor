@@ -197,7 +197,7 @@ export default async function AdminCatalogPage({
 
         <div className="mt-5 max-h-80 overflow-y-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-foreground/62">
+            <thead className="text-xs uppercase text-foreground/65">
               <tr>
                 <th className="py-1.5">Board</th>
                 <th className="py-1.5">Grade</th>
@@ -356,12 +356,12 @@ export default async function AdminCatalogPage({
               </form>
             </details>
 
-            <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+            <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/65">
               {(topics ?? []).length} {medium} topic{(topics ?? []).length === 1 ? "" : "s"}
             </p>
             <div className="mt-2 max-h-[28rem] overflow-y-auto rounded-lg border border-border">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-surface text-xs uppercase text-foreground/62">
+                <thead className="sticky top-0 bg-surface text-xs uppercase text-foreground/65">
                   <tr>
                     <th className="px-3 py-2">Chapter</th>
                     <th className="px-3 py-2">Topic</th>

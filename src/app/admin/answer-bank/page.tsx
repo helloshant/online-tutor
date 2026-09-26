@@ -467,7 +467,7 @@ export default async function AnswerBankPage({
                     question: row.question,
                   })}
                 >
-                  <button className="text-foreground/62 hover:underline">Delete</button>
+                  <button className="text-foreground/65 hover:underline">Delete</button>
                 </form>
               </div>
             </div>

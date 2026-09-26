@@ -17,7 +17,7 @@ const TYPE_LABELS: Record<BroadcastType, string> = {
 const STATUS_STYLES: Record<BroadcastStatus, string> = {
   draft: "bg-foreground/10 text-foreground/75",
   sent: "bg-green-100 text-green-700",
-  closed: "bg-foreground/10 text-foreground/62",
+  closed: "bg-foreground/10 text-foreground/65",
 };
 
 type BroadcastRow = {

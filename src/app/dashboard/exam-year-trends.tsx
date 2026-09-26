@@ -105,7 +105,7 @@ export function ExamYearTrends({
 
   return (
     <div>
-      <p className="mb-2 px-2 text-xs text-foreground/62">
+      <p className="mb-2 px-2 text-xs text-foreground/65">
         Topics that had a real, mined question in the year(s) you pick below. Tap a topic to see it in chat.
       </p>
 
@@ -169,7 +169,7 @@ export function ExamYearTrends({
                             </span>
                           )}
                         </span>
-                        <span className="shrink-0 text-[10px] font-medium text-foreground/62">{row.years.join(", ")}</span>
+                        <span className="shrink-0 text-[10px] font-medium text-foreground/65">{row.years.join(", ")}</span>
                       </button>
                       {/* Informational only, not its own click target -- there's
                           no finer-grained selection this app's chat flow
@@ -184,7 +184,7 @@ export function ExamYearTrends({
                               className="flex items-center justify-between gap-2 px-2 py-0.5 text-xs text-foreground/68"
                             >
                               <span>{st.topic}</span>
-                              <span className="shrink-0 text-[10px] text-foreground/55">{st.years.join(", ")}</span>
+                              <span className="shrink-0 text-[10px] text-foreground/65">{st.years.join(", ")}</span>
                             </li>
                           ))}
                         </ul>

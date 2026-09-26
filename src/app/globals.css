@@ -1,21 +1,28 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f7fb;
-  /* A near-black with a deliberate cool indigo cast (90% of the old flat
-     #16181d blended with 10% of the new --brand below) rather than flat
-     neutral gray -- every text-foreground/NN muted-text usage across the
-     app (labels, captions, secondary copy) inherits this tint, so the
-     whole app's "quiet" text reads as richer/cooler instead of washed-out,
-     with zero change needed in any component file. */
-  --foreground: #1b1b2e;
-  /* Indigo-700/800 (Tailwind's own stops) instead of 600/700 -- one step
-     deeper for more visual weight on every button/link/active-tab, while
-     staying unmistakably the same indigo brand family. */
-  --brand: #4338ca;
-  --brand-dark: #3730a3;
+  /* Warm off-white (Tailwind's own stone-50), not stark white and not the
+     previous cool lavender-gray -- reduces glare/eye strain on long reading
+     sessions, which matters here since students spend real time reading
+     dense syllabus/chat text, often at night. */
+  --background: #fafaf9;
+  /* Soft charcoal (Tailwind's own slate-800), not pure black -- pure black
+     on a light background is measurably harsher to read over long
+     sessions than a softened dark tone (the same reasoning Kindle/most
+     reading-focused apps use). */
+  --foreground: #1e293b;
+  /* A calm blue (Tailwind's own blue-600/700), replacing the previous
+     indigo -- the most consistently used accent across major EdTech
+     platforms (Khan Academy, Google Classroom, Coursera) specifically
+     because it reads as focus/trust/calm rather than competing for
+     attention with the green/red correct-answer feedback already used
+     elsewhere in the app. */
+  --brand: #2563eb;
+  --brand-dark: #1d4ed8;
   --surface: #ffffff;
-  --border: #e5e7eb;
+  /* Tailwind's own stone-200 -- warmer, matching the new background family
+     instead of the previous cool gray. */
+  --border: #e7e5e4;
 }
 
 @theme inline {

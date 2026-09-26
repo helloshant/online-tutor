@@ -70,7 +70,7 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/62">
+      <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/65">
         TutorOps — built for students, by subject, by syllabus.
       </footer>
     </div>

@@ -162,7 +162,7 @@ export default async function TopicSummariesPage({
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-foreground/62">
+                <span className="text-foreground/65">
                   Updated {new Date(row.updated_at).toLocaleString()}
                 </span>
                 <div className="ml-auto flex gap-2">

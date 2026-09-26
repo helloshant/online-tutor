@@ -144,7 +144,7 @@ export default async function ArchetypeCatalogPage({
         )}
       </form>
 
-      <p className="mt-4 text-xs text-foreground/62">{rows.length} archetype(s) shown.</p>
+      <p className="mt-4 text-xs text-foreground/65">{rows.length} archetype(s) shown.</p>
 
       <div className="mt-4 space-y-8">
         {Array.from(grouped.entries()).map(([boardName, byGrade]) => (
@@ -179,7 +179,7 @@ export default async function ArchetypeCatalogPage({
                                       {row.critic_decision}
                                     </span>
                                   )}
-                                  <span className="text-xs text-foreground/62">
+                                  <span className="text-xs text-foreground/65">
                                     confidence {a.mining_confidence?.toFixed(2)}
                                   </span>
                                 </div>
@@ -198,7 +198,7 @@ export default async function ArchetypeCatalogPage({
                                     ))}
                                   </ul>
                                 )}
-                                <p className="mt-2 text-xs text-foreground/62">
+                                <p className="mt-2 text-xs text-foreground/65">
                                   {a.stats.question_count} question(s) · {a.supporting_question_ids.length} supporting
                                   id(s)
                                   {!a.generator_usable && " · not yet generator-usable"} ·{" "}

@@ -89,7 +89,7 @@ export default async function AdminUserDetailPage({
         <div>
           <h1 className="text-xl font-semibold">{profile?.full_name ?? "Unnamed user"}</h1>
           <p className="mt-1 text-sm text-foreground/75">{authUser.user.email}</p>
-          <p className="mt-1 text-xs text-foreground/62">
+          <p className="mt-1 text-xs text-foreground/65">
             Joined {new Date(authUser.user.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -121,7 +121,7 @@ export default async function AdminUserDetailPage({
         ) : (
           <span className="rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground/82">
             {ROLE_LABEL[targetRole]}
-            <span className="ml-2 text-xs text-foreground/62">(only a superadmin can change this)</span>
+            <span className="ml-2 text-xs text-foreground/65">(only a superadmin can change this)</span>
           </span>
         )}
       </div>
@@ -317,7 +317,7 @@ function UsageLimitCard({
         <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
           Save
         </button>
-        <p className="w-full text-xs text-foreground/62">
+        <p className="w-full text-xs text-foreground/65">
           Leave blank to use the platform default. Enter 0 for unlimited. Any other number replaces the
           default with this student&apos;s own monthly cap.
         </p>
@@ -527,7 +527,7 @@ function BoardGradeEditor({
           <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
             Save board / grade
           </button>
-          <p className="text-xs text-foreground/62">
+          <p className="text-xs text-foreground/65">
             Subjects not offered under the new board/grade are dropped automatically. If none of the
             current subjects carry over, the change is blocked -- adjust subjects for the target
             board/grade separately first.
@@ -597,7 +597,7 @@ async function SubjectEditor({
           <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
             Save subjects
           </button>
-          <p className="text-xs text-foreground/62">At least one subject must stay selected.</p>
+          <p className="text-xs text-foreground/65">At least one subject must stay selected.</p>
         </div>
       </form>
     </details>

@@ -177,7 +177,7 @@ async function TestQuestionsSection({ broadcastId, isDraft }: { broadcastId: str
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm">
             <div>
               <p className="font-medium">
-                {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
+                {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/65">({q.max_score} pt)</span>
               </p>
               {q.question_type === "mcq" && q.options && (
                 <ul className="mt-1 text-xs text-foreground/75">
@@ -296,7 +296,7 @@ async function ExamQuestionsSection({ broadcastId, isDraft }: { broadcastId: str
         {rows.map((q, i) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm">
             <p className="font-medium">
-              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/62">({q.max_score} pt)</span>
+              {i + 1}. {q.question} <span className="text-xs font-normal text-foreground/65">({q.max_score} pt)</span>
             </p>
             {isDraft && (
               <form action={deleteExamQuestion.bind(null, broadcastId, q.id)}>

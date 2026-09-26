@@ -78,7 +78,7 @@ export function FeedbackButtons({
   }
 
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-foreground/62">
+    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-foreground/65">
       <button
         type="button"
         onClick={() => handleThumb("up")}

@@ -578,7 +578,7 @@ export function TopicSummaryMessage({
           it to sit narrower than the space it has. */}
       <div className="w-full space-y-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-foreground/62">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground/65">
             {topic.chapter}
           </p>
           <p className="font-semibold">{topic.topic}</p>
@@ -636,7 +636,7 @@ export function TopicSummaryMessage({
               </>
             ) : selectedExerciseTopic === null ? (
               <>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                   {topic.chapter} — pick a topic for exercises
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -659,7 +659,7 @@ export function TopicSummaryMessage({
             ) : (
               <>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground/62">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground/65">
                     Exercises — {selectedExerciseTopic.topic}
                   </p>
                   {/* Omitted when chapterTopics only ever held this one
@@ -670,7 +670,7 @@ export function TopicSummaryMessage({
                     <button
                       type="button"
                       onClick={handleBackToChapterTopics}
-                      className="shrink-0 text-xs text-foreground/62 hover:underline"
+                      className="shrink-0 text-xs text-foreground/65 hover:underline"
                     >
                       ← All topics in this chapter
                     </button>
@@ -687,7 +687,7 @@ export function TopicSummaryMessage({
                   // moment subtopics comes back empty, skipping this pill
                   // row entirely (see its own comment).
                   <>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                       {selectedExerciseTopic.topic} — pick a sub-topic
                     </p>
                     <div className="flex flex-wrap gap-1.5">
@@ -731,7 +731,7 @@ export function TopicSummaryMessage({
                       <button
                         type="button"
                         onClick={handleBackToSubtopics}
-                        className="mb-2 text-xs text-foreground/62 hover:underline"
+                        className="mb-2 text-xs text-foreground/65 hover:underline"
                       >
                         ← Different sub-topic
                       </button>
@@ -753,7 +753,7 @@ export function TopicSummaryMessage({
                       <>
                         {topicTags.length > 0 && (
                           <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-foreground/62">
+                            <span className="text-xs text-foreground/65">
                               Refine by tag:
                             </span>
                             {topicTags.map((t) => (
@@ -778,7 +778,7 @@ export function TopicSummaryMessage({
                               <button
                                 type="button"
                                 onClick={clearTagFilter}
-                                className="text-xs text-foreground/62 hover:underline"
+                                className="text-xs text-foreground/65 hover:underline"
                               >
                                 Clear
                               </button>
@@ -802,7 +802,7 @@ export function TopicSummaryMessage({
                             </p>
                           ) : (
                             <>
-                              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/62">
+                              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground/65">
                                 Relevant exercises — &quot;{activeTagFilter}
                                 &quot;
                               </p>
@@ -949,7 +949,7 @@ export function TopicSummaryMessage({
                                 the sticky preference for the plain button
                                 above AND immediately generates one more
                                 batch at that type, same one-click feel. */}
-                            <span className="self-center text-xs text-foreground/62">
+                            <span className="self-center text-xs text-foreground/65">
                               Type:
                             </span>
                             {EXERCISE_TYPES.map((t) => (

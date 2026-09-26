@@ -131,7 +131,7 @@ export function SubmitRunForm({ defaultLlmProvider }: { defaultLlmProvider: Arch
           </select>
         </label>
 
-        <p className="mt-3 text-xs text-foreground/62">
+        <p className="mt-3 text-xs text-foreground/65">
           Fill in ONE of the two sections below, matching your chosen input kind.
         </p>
 
