@@ -24,9 +24,17 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 // -- confirmed directly against a live sample spanning many chapters, not
 // assumed. In the order tried:
 //   1. A leading Bengali or English label ("শব্দ:", "নাম:", "সূত্র:",
-//      "সূত্রের নাম:", "Term:", "Formula:", "Law:") -- stripped before the
-//      checks below run, so e.g. "শব্দ: *X* -- অর্থ: ..." and "*X*: ..."
-//      (no label) both reach the same italic check next.
+//      "সূত্রের নাম:", "রাশি:", "পদ:", "সূত্র/নীতি:", "সূত্র/নিয়ম:", "Term:",
+//      "Formula:", "Law:") -- stripped before the checks below run, so e.g.
+//      "শব্দ: *X* -- অর্থ: ..." and "*X*: ..." (no label) both reach the
+//      same italic check next. The label itself is sometimes bold-wrapped
+//      on its own line as "**রাশি:**\n**X** -- ..." (confirmed live, not
+//      hypothetical -- e.g. a Physical Science surface-tension/viscosity
+//      chunk written this way): matched as one unit (opening ** through
+//      closing **, both required together) so the closing ** can't be
+//      mistaken for the *opening* ** of the real term that follows on the
+//      next line -- a plain permissive "few asterisks either side" pattern
+//      would eat that opening ** too and break the bold-term check below.
 //   2. A **bold** term at the very start, e.g. "**Microsporogenesis** -- ...".
 //   3. A *italic* term at the very start, e.g. "শব্দ: *তড়িৎ আধান* -- অর্থ: ..."
 //      (after label-stripping) or "*মেন্ডেলিফের পর্যায় সূত্র*: ..." (no label).
@@ -38,7 +46,11 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 // plausible-length term (no separator at all within FALLBACK_LABEL_LENGTH*2
 // characters, or the label-stripped remainder itself is empty) -- never
 // dropped, just less cleanly labeled in that case.
-const LEADING_LABEL_PATTERN = /^(?:শব্দ|নাম|সূত্রের\s*নাম|সূত্র|Term|Formula|Law)\s*[:：]\s*/i;
+const LABEL_WORDS = "শব্দ|নাম|সূত্রের\\s*নাম|সূত্র\\s*/\\s*(?:নীতি|নিয়ম)|সূত্র|রাশি|পদ|Term|Formula|Law";
+const LEADING_LABEL_PATTERN = new RegExp(
+  `^(?:\\*\\*(?:${LABEL_WORDS})\\s*[:：]\\*\\*|(?:${LABEL_WORDS})\\s*[:：])\\s*`,
+  "i",
+);
 const BOLD_TERM_PATTERN = /^\*\*([^*]+)\*\*/;
 const ITALIC_TERM_PATTERN = /^\*([^*]+)\*/;
 // Whichever of these appears FIRST in the (label-stripped) remainder ends
