@@ -62,6 +62,22 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 // number into the bold term itself, e.g. "**২.B জনন**" or "**৩.A বংশগতি**"
 // (confirmed live) -- stripped from whichever candidate wins above so the
 // displayed term is just "জনন"/"বংশগতি", not "২.B জনন".
+// Two more real conventions, both confirmed live:
+//   - A bold term immediately followed by its own English gloss in
+//     parentheses, THEN the separator, e.g. "**নয়া ল্যামার্কবাদ**
+//     (Neo-Lamarckism): ..." -- deriveTerm's own BOLD_TERM_PATTERN already
+//     captures just "নয়া ল্যামার্কবাদ" correctly (the parenthetical sits
+//     outside the ** pair), but the paragraph wasn't being recognized as a
+//     new concept's *start* for splitIntoConceptBlocks, since the
+//     concept-start check required the separator immediately after the
+//     closing ** with nothing in between.
+//   - A **Term ending in its own colon, closing ** right after** with no
+//     label word involved, e.g. "**পিথাগোরাসের উপপাদ্য:** যেকোনো সমকোণী
+//     ত্রিভুজে..." (the definition continues as plain text outside the
+//     bold span, unlike LABEL_AND_TERM_IN_BOLD_PATTERN above, which needs
+//     both label AND term inside the same bold span). BOLD_TERM_PATTERN
+//     already captures this term too, just with the colon still attached
+//     -- stripped alongside the numbering prefix below.
 const LABEL_WORDS = "শব্দ|নাম|সূত্রের\\s*নাম|সূত্র\\s*/\\s*(?:নীতি|নিয়ম)|সূত্র|রাশি|পদ|পরিভাষা|Term|Formula|Law";
 const LEADING_LABEL_PATTERN = new RegExp(
   `^(?:\\*\\*(?:${LABEL_WORDS})\\s*[:：]\\*\\*|\\*\\*(?:${LABEL_WORDS})\\*\\*\\s*[:：]|(?:${LABEL_WORDS})\\s*[:：])\\s*`,
@@ -81,13 +97,14 @@ const SEPARATOR_PATTERN = /\s--\s|\s—\s|।|:|：/;
 const FALLBACK_LABEL_LENGTH = 60;
 const MAX_PLAUSIBLE_TERM_LENGTH = 80;
 const NUMBERING_PREFIX_PATTERN = /^[০-৯0-9]+\s*\.\s*[A-Za-zঅ-হ]\s+/;
+const TRAILING_COLON_PATTERN = /\s*[:：]\s*$/;
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
 }
 
-function stripNumberingPrefix(term: string): string {
-  return term.replace(NUMBERING_PREFIX_PATTERN, "").trim();
+function cleanTerm(term: string): string {
+  return term.replace(NUMBERING_PREFIX_PATTERN, "").replace(TRAILING_COLON_PATTERN, "").trim();
 }
 
 function truncatedSnippet(content: string): string {
@@ -100,20 +117,20 @@ function deriveTerm(content: string): string {
   const trimmed = content.trim();
 
   const labelAndTermInBold = trimmed.match(LABEL_AND_TERM_IN_BOLD_PATTERN);
-  if (labelAndTermInBold) return stripNumberingPrefix(labelAndTermInBold[1].trim());
+  if (labelAndTermInBold) return cleanTerm(labelAndTermInBold[1].trim());
 
   const withoutLabel = trimmed.replace(LEADING_LABEL_PATTERN, "");
 
   const bold = withoutLabel.match(BOLD_TERM_PATTERN);
-  if (bold) return stripNumberingPrefix(bold[1].trim());
+  if (bold) return cleanTerm(bold[1].trim());
 
   const italic = withoutLabel.match(ITALIC_TERM_PATTERN);
-  if (italic) return stripNumberingPrefix(italic[1].trim());
+  if (italic) return cleanTerm(italic[1].trim());
 
   const separator = withoutLabel.match(SEPARATOR_PATTERN);
   if (separator && separator.index !== undefined && separator.index > 0) {
     const candidate = withoutLabel.slice(0, separator.index).trim();
-    if (candidate.length > 0 && candidate.length <= MAX_PLAUSIBLE_TERM_LENGTH) return stripNumberingPrefix(candidate);
+    if (candidate.length > 0 && candidate.length <= MAX_PLAUSIBLE_TERM_LENGTH) return cleanTerm(candidate);
   }
 
   return truncatedSnippet(content);
@@ -136,15 +153,27 @@ function deriveTerm(content: string): string {
 // else (an elaborating paragraph, a trailing "exercise questions" summary)
 // stays attached to whichever block precedes it, same as today for a
 // single-concept row with multiple paragraphs.
-const BOLD_CONCEPT_START_PATTERN = /^\*\*[^*]+\*\*\s*(?:--|—|[:：])/;
-const ITALIC_CONCEPT_START_PATTERN = /^\*[^*]+\*\s*(?:--|—|[:：])/;
+// The optional "(...)" allows a bold/italic term immediately followed by
+// its own English gloss before the separator, e.g. "**নয়া ল্যামার্কবাদ**
+// (Neo-Lamarckism): ..." (confirmed live, a Biology Evolution chunk with
+// five such paragraphs back to back) -- deriveTerm's own BOLD_TERM_PATTERN
+// already ignores the parenthetical (it sits outside the ** pair), this
+// only widens what counts as a new concept's *start* for splitting.
+const BOLD_CONCEPT_START_PATTERN = /^\*\*[^*]+\*\*\s*(?:\([^)]*\)\s*)?(?:--|—|[:：])/;
+const ITALIC_CONCEPT_START_PATTERN = /^\*[^*]+\*\s*(?:\([^)]*\)\s*)?(?:--|—|[:：])/;
+// A bold term ending in its own colon, closing ** right after (see the
+// comment above LABEL_WORDS) -- any term, not just a recognized label
+// word, so this is deliberately broader than LEADING_LABEL_PATTERN's own
+// "**LABEL:**" branch.
+const BOLD_TERM_ENDING_IN_COLON_PATTERN = /^\*\*[^*]+[:：]\*\*/;
 
 function looksLikeNewConcept(paragraph: string): boolean {
   return (
     LEADING_LABEL_PATTERN.test(paragraph) ||
     LABEL_AND_TERM_IN_BOLD_PATTERN.test(paragraph) ||
     BOLD_CONCEPT_START_PATTERN.test(paragraph) ||
-    ITALIC_CONCEPT_START_PATTERN.test(paragraph)
+    ITALIC_CONCEPT_START_PATTERN.test(paragraph) ||
+    BOLD_TERM_ENDING_IN_COLON_PATTERN.test(paragraph)
   );
 }
 
