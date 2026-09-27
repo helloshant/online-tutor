@@ -39,7 +39,14 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 //      variant uses) so the closing ** can't be mistaken for the *opening*
 //      ** of the real term that follows -- a plain permissive "few
 //      asterisks either side" pattern would eat that opening ** too and
-//      break the bold-term check below.
+//      break the bold-term check below. A third variant bolds the label
+//      AND the term together as one span, e.g. "**রাশি: স্কেলার রাশি** --
+//      ..." (confirmed live -- a Physical Science measurement-instruments
+//      chunk) -- checked as its own pattern before any label-stripping
+//      runs, since neither of the two branches above fits (the closing **
+//      is neither right after the label's colon nor right after the label
+//      word alone) and BOLD_TERM_PATTERN would otherwise capture the whole
+//      span, label included, as the term.
 //   2. A **bold** term at the very start, e.g. "**Microsporogenesis** -- ...".
 //   3. A *italic* term at the very start, e.g. "শব্দ: *তড়িৎ আধান* -- অর্থ: ..."
 //      (after label-stripping) or "*মেন্ডেলিফের পর্যায় সূত্র*: ..." (no label).
@@ -58,6 +65,10 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 const LABEL_WORDS = "শব্দ|নাম|সূত্রের\\s*নাম|সূত্র\\s*/\\s*(?:নীতি|নিয়ম)|সূত্র|রাশি|পদ|পরিভাষা|Term|Formula|Law";
 const LEADING_LABEL_PATTERN = new RegExp(
   `^(?:\\*\\*(?:${LABEL_WORDS})\\s*[:：]\\*\\*|\\*\\*(?:${LABEL_WORDS})\\*\\*\\s*[:：]|(?:${LABEL_WORDS})\\s*[:：])\\s*`,
+  "i",
+);
+const LABEL_AND_TERM_IN_BOLD_PATTERN = new RegExp(
+  `^\\*\\*(?:${LABEL_WORDS})\\s*[:：]\\s*([^*]+)\\*\\*`,
   "i",
 );
 const BOLD_TERM_PATTERN = /^\*\*([^*]+)\*\*/;
@@ -86,7 +97,12 @@ function truncatedSnippet(content: string): string {
 }
 
 function deriveTerm(content: string): string {
-  const withoutLabel = content.trim().replace(LEADING_LABEL_PATTERN, "");
+  const trimmed = content.trim();
+
+  const labelAndTermInBold = trimmed.match(LABEL_AND_TERM_IN_BOLD_PATTERN);
+  if (labelAndTermInBold) return stripNumberingPrefix(labelAndTermInBold[1].trim());
+
+  const withoutLabel = trimmed.replace(LEADING_LABEL_PATTERN, "");
 
   const bold = withoutLabel.match(BOLD_TERM_PATTERN);
   if (bold) return stripNumberingPrefix(bold[1].trim());
@@ -126,6 +142,7 @@ const ITALIC_CONCEPT_START_PATTERN = /^\*[^*]+\*\s*(?:--|—|[:：])/;
 function looksLikeNewConcept(paragraph: string): boolean {
   return (
     LEADING_LABEL_PATTERN.test(paragraph) ||
+    LABEL_AND_TERM_IN_BOLD_PATTERN.test(paragraph) ||
     BOLD_CONCEPT_START_PATTERN.test(paragraph) ||
     ITALIC_CONCEPT_START_PATTERN.test(paragraph)
   );
