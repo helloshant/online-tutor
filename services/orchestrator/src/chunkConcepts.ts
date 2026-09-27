@@ -50,6 +50,10 @@ const CONCEPT_FIELD_TYPES = ["key_definitions", "formulas_and_laws", "formulas",
 // plausible-length term (no separator at all within FALLBACK_LABEL_LENGTH*2
 // characters, or the label-stripped remainder itself is empty) -- never
 // dropped, just less cleanly labeled in that case.
+// Separately, some Biology/Life-Science chunks bake a chapter/subsection
+// number into the bold term itself, e.g. "**২.B জনন**" or "**৩.A বংশগতি**"
+// (confirmed live) -- stripped from whichever candidate wins above so the
+// displayed term is just "জনন"/"বংশগতি", not "২.B জনন".
 const LABEL_WORDS = "শব্দ|নাম|সূত্রের\\s*নাম|সূত্র\\s*/\\s*(?:নীতি|নিয়ম)|সূত্র|রাশি|পদ|পরিভাষা|Term|Formula|Law";
 const LEADING_LABEL_PATTERN = new RegExp(
   `^(?:\\*\\*(?:${LABEL_WORDS})\\s*[:：]\\*\\*|\\*\\*(?:${LABEL_WORDS})\\*\\*\\s*[:：]|(?:${LABEL_WORDS})\\s*[:：])\\s*`,
@@ -64,9 +68,14 @@ const ITALIC_TERM_PATTERN = /^\*([^*]+)\*/;
 const SEPARATOR_PATTERN = /\s--\s|\s—\s|।|:|：/;
 const FALLBACK_LABEL_LENGTH = 60;
 const MAX_PLAUSIBLE_TERM_LENGTH = 80;
+const NUMBERING_PREFIX_PATTERN = /^[০-৯0-9]+\s*\.\s*[A-Za-zঅ-হ]\s+/;
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
+}
+
+function stripNumberingPrefix(term: string): string {
+  return term.replace(NUMBERING_PREFIX_PATTERN, "").trim();
 }
 
 function truncatedSnippet(content: string): string {
@@ -79,15 +88,15 @@ function deriveTerm(content: string): string {
   const withoutLabel = content.trim().replace(LEADING_LABEL_PATTERN, "");
 
   const bold = withoutLabel.match(BOLD_TERM_PATTERN);
-  if (bold) return bold[1].trim();
+  if (bold) return stripNumberingPrefix(bold[1].trim());
 
   const italic = withoutLabel.match(ITALIC_TERM_PATTERN);
-  if (italic) return italic[1].trim();
+  if (italic) return stripNumberingPrefix(italic[1].trim());
 
   const separator = withoutLabel.match(SEPARATOR_PATTERN);
   if (separator && separator.index !== undefined && separator.index > 0) {
     const candidate = withoutLabel.slice(0, separator.index).trim();
-    if (candidate.length > 0 && candidate.length <= MAX_PLAUSIBLE_TERM_LENGTH) return candidate;
+    if (candidate.length > 0 && candidate.length <= MAX_PLAUSIBLE_TERM_LENGTH) return stripNumberingPrefix(candidate);
   }
 
   return truncatedSnippet(content);
