@@ -110,7 +110,12 @@ function cleanTerm(term: string): string {
 function truncatedSnippet(content: string): string {
   const trimmed = content.trim();
   const snippet = trimmed.slice(0, FALLBACK_LABEL_LENGTH);
-  return trimmed.length > FALLBACK_LABEL_LENGTH ? `${snippet}…` : snippet;
+  const truncated = trimmed.length > FALLBACK_LABEL_LENGTH ? `${snippet}…` : snippet;
+  // A raw ** or * from truncating mid-markdown is never meaningful content
+  // here -- always emphasis syntax -- so it's safe to just drop every
+  // asterisk from this display-only fallback rather than leave it visibly
+  // broken in the picker (confirmed live).
+  return truncated.replace(/\*/g, "");
 }
 
 function deriveTerm(content: string): string {
@@ -197,6 +202,25 @@ function splitIntoConceptBlocks(content: string): string[] {
     }
   }
   blocks.push(current.join("\n\n"));
+
+  // A chapter-overview/narrative lead-in paragraph (no recognized marker)
+  // only ever ends up as its OWN block above because nothing precedes it
+  // to attach to -- every other non-concept-start paragraph in this
+  // function already attaches to whichever block precedes it. Confirmed
+  // live: a WBBSE Physical Science "শব্দ (Sound)" chunk opening with a
+  // two-sentence chapter-overview paragraph, followed by four clean
+  // "রাশি: Term -- সংজ্ঞা: ..." concepts, surfaced that overview as its
+  // own sub-topic pick -- with deriveTerm's raw, unstripped-markdown
+  // truncated-snippet fallback as its "term", visibly broken in the
+  // picker. Appending it to the first REAL concept's own block instead
+  // (rather than discarding it -- it's still useful grounding context)
+  // fixes this without changing anything when there's no real concept to
+  // attach it to (a single-block, single-concept chunk is left alone).
+  if (blocks.length > 1 && !looksLikeNewConcept(paragraphs[0])) {
+    const overview = blocks.shift() as string;
+    blocks[0] = `${blocks[0]}\n\n${overview}`;
+  }
+
   return blocks;
 }
 
