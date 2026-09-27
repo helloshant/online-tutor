@@ -151,13 +151,19 @@ export function resolveAnswerBankMedium(subjectCode: string, studentMedium: Medi
 // Hindi regardless of which cohort's rows it drew from. Reported live: an
 // English-medium student's Hindi topic summary was coming back entirely in
 // English prose, because nothing downstream had ever asked this question
-// separately from "what medium is this student's own content in."
+// separately from "what medium is this student's own content in." Sanskrit
+// has the exact same shape (reported directly: CBSE Sanskrit exercises for
+// an English-medium student were generated entirely in English) -- added
+// here for the same reason, even though "Sanskrit" is otherwise never a
+// real medium value anywhere else in the schema (see Medium's own comment
+// in src/lib/supabase/types.ts).
 // Deliberately excludes ENG -- see resolveResponseLanguage's own
 // English-specific branch below for why that one needs a student choice
 // instead of an unconditional rule.
 const FIXED_RESPONSE_LANGUAGE_SUBJECT: Partial<Record<string, Medium>> = {
   HN: "Hindi",
   BE: "Bengali",
+  SN: "Sanskrit",
 };
 
 // What human language a chat reply / topic summary / exercise should

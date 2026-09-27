@@ -204,6 +204,7 @@ const ENGLISH_SUBJECT_CODE = "ENG";
 const FIXED_RESPONSE_LANGUAGE_SUBJECT: Partial<Record<string, Medium>> = {
   HN: "Hindi",
   BE: "Bengali",
+  SN: "Sanskrit",
 };
 
 const ALLOWED_IMAGE_TYPES = new Set([

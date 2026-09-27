@@ -1,4 +1,10 @@
-export type Medium = "English" | "Hindi" | "Bengali";
+// "Sanskrit" is valid here even though it's never a real student-cohort
+// medium (mirrors src/lib/supabase/types.ts's own Medium in the web app --
+// see that file's comment for the full reasoning). Only chat_events.medium
+// and answered_questions.medium ever persist a responseLanguage-derived
+// value (see migration 0049_sanskrit_response_language.sql); every other
+// `medium` field here is always a real cohort value from the web app.
+export type Medium = "English" | "Hindi" | "Bengali" | "Sanskrit";
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type SyllabusTopic = { chapter: string; topic: string };
 

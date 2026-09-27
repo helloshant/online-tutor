@@ -14,7 +14,18 @@ import type {
   ReviewQueueRow,
 } from "../archetypeMinerTypes";
 
-export type Medium = "English" | "Hindi" | "Bengali";
+// "Sanskrit" is valid here even though it's never a real student-cohort
+// medium (subscriptions/syllabus_topics/chat_messages/broadcasts/
+// practice_papers all still only ever hold English/Hindi/Bengali, each
+// enforced by its own DB check constraint plus a local VALID_MEDIUMS-style
+// array at every call site that creates one of those rows) -- this type is
+// also reused for responseLanguage (see studentScope.ts's own
+// resolveResponseLanguage and FIXED_RESPONSE_LANGUAGE_SUBJECT), where
+// Sanskrit legitimately is a fixed value, same as Hindi/Bengali. Only two
+// tables ever persist a responseLanguage-derived medium value --
+// chat_events and answered_questions (see migration
+// 0049_sanskrit_response_language.sql) -- and both allow it.
+export type Medium = "English" | "Hindi" | "Bengali" | "Sanskrit";
 export type SubscriptionStatus =
   | "pending_payment"
   | "active"
