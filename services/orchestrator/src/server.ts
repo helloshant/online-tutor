@@ -1749,7 +1749,45 @@ app.post(
         tier: "standard",
       });
 
-      const parsed = parseGeneratedExercises(text);
+      let parsed = parseGeneratedExercises(text);
+
+      // Same under-production retry as /v1/topic-exercises just above (see
+      // its own comment) -- this sibling endpoint requests
+      // CONCEPT_EXERCISE_COUNT (2) but had no retry at all, so the model
+      // stopping early (reported directly: a WBBSE concept pick asking for
+      // 2 came back with just 1) silently shipped whatever it got, unlike
+      // the archetype-grounded path right above it. One bounded retry with
+      // the exact same prompt, merging both attempts' exercises
+      // (deduplicated by question text, capped at the requested count) --
+      // free on the common case (first attempt already reached the full
+      // count skips this entirely).
+      if (parsed.length < CONCEPT_EXERCISE_COUNT) {
+        const { text: retryText } = await getChatReply({
+          systemPrompt,
+          history: [],
+          message: "Generate the exercises now.",
+          maxTokens: EXERCISE_MAX_TOKENS,
+          event: {
+            loggable: true,
+            userId: body.userId,
+            mode: "student",
+            boardId: scope.boardId,
+            gradeId: scope.gradeId,
+            subjectId: scope.subjectId,
+            medium: scope.medium,
+            question: `topic-exercises/generate-for-concept (retry, got ${parsed.length}/${CONCEPT_EXERCISE_COUNT}): ${body.chapter} / ${body.topic} (${concept.term})`,
+          },
+          tier: "standard",
+        });
+        const seen = new Set(parsed.map((p) => p.question));
+        for (const exercise of parseGeneratedExercises(retryText)) {
+          if (parsed.length >= CONCEPT_EXERCISE_COUNT) break;
+          if (seen.has(exercise.question)) continue;
+          seen.add(exercise.question);
+          parsed = [...parsed, exercise];
+        }
+      }
+
       const stored: ExerciseItem[] = [];
       for (const exercise of parsed) {
         // requestedType, when set, wins over the model's own self-reported
