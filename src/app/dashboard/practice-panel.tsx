@@ -20,11 +20,11 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
 // Same local-mirror convention as ExerciseType above. Wire values match the
 // orchestrator's own DifficultyLevel ("Easy" | "Medium" | "Hard") exactly --
 // only the UI labels differ ("Moderate"/"Difficult" read better to a student
-// than "Medium"/"Hard"). "Difficult" is deliberately the top of the slider,
-// not a separate "Very difficult" step -- the orchestrator's own prompt
+// than "Medium"/"Hard"). "Difficult" is deliberately the top option, not a
+// separate "Very difficult" choice -- the orchestrator's own prompt
 // instruction for "Hard" already asks for "difficult to very difficult"
-// questions (see prompts.ts's describeDifficultyLevel), so the slider's top
-// end already covers that range rather than needing a fourth step.
+// questions (see prompts.ts's describeDifficultyLevel), so that top option
+// already covers that range rather than needing a fourth choice.
 type Difficulty = "Easy" | "Medium" | "Hard";
 const DIFFICULTY_LEVELS: Difficulty[] = ["Easy", "Medium", "Hard"];
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
@@ -452,29 +452,30 @@ export function PracticePanel({
               </ul>
 
               <div className="mt-4">
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-semibold uppercase tracking-wide text-foreground/65">
-                    Difficulty
-                  </span>
-                  <span className="font-medium text-foreground/82">
-                    {DIFFICULTY_LABELS[difficulty]}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={DIFFICULTY_LEVELS.length - 1}
-                  step={1}
-                  value={DIFFICULTY_LEVELS.indexOf(difficulty)}
-                  onChange={(e) =>
-                    setDifficulty(DIFFICULTY_LEVELS[Number(e.target.value)])
-                  }
-                  className="w-full accent-brand"
-                />
-                <div className="mt-1 flex justify-between text-[10px] text-foreground/65">
-                  <span>Easy</span>
-                  <span>Moderate</span>
-                  <span>Difficult</span>
+                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground/65">
+                  Difficulty
+                </span>
+                <div className="flex gap-2">
+                  {DIFFICULTY_LEVELS.map((level) => (
+                    <label
+                      key={level}
+                      className={`flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm transition ${
+                        difficulty === level
+                          ? "border-brand bg-brand/10 font-medium text-brand"
+                          : "border-border text-foreground/75 hover:bg-foreground/5"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="difficulty"
+                        value={level}
+                        checked={difficulty === level}
+                        onChange={() => setDifficulty(level)}
+                        className="accent-brand"
+                      />
+                      {DIFFICULTY_LABELS[level]}
+                    </label>
+                  ))}
                 </div>
               </div>
 
