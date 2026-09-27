@@ -7,7 +7,7 @@ import { TableText } from "@/components/markdown-table";
 import { LoadingIndicator } from "@/components/loading-indicator";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { TopicPractice, type PracticeExerciseItem } from "./topic-practice";
-import type { SyllabusTopic } from "@/lib/supabase/types";
+import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 // The primary "Relevant Exercises" path -- always has a real, stable
 // answered_questions row id (see /v1/topic-exercises's own response
@@ -71,11 +71,29 @@ type SubtopicSelection = SubtopicOption | { kind: "all" };
 export function TopicSummaryMessage({
   topic,
   preferEnglish,
+  previewBoardId,
+  previewGradeId,
+  previewMedium,
   onSummaryLoaded,
   onExercisesChanged,
 }: {
   topic: SyllabusTopic;
   preferEnglish: boolean;
+  // Set for staff only, while previewing a specific board/grade/medium --
+  // null for a real student (whose scope is always subscription-derived)
+  // and for staff in unrestricted mode. Sent through to
+  // /api/answer-bank/tags the same way ChatPanel's own chat/exercise
+  // fetches already send previewBoardId/previewGradeId/previewMedium (see
+  // its own comment) -- that route independently re-validates these via
+  // resolveStaffPreviewScope, so a non-staff caller passing them is a
+  // no-op, not a privilege escalation. Reported directly: a staff member
+  // previewing any subject got a 403 on this tag lookup (the "Refine by
+  // tag" chips silently never appeared) because this component's own tag
+  // fetch never sent them at all, unlike every other staff-preview-aware
+  // fetch in this app.
+  previewBoardId?: string | null;
+  previewGradeId?: string | null;
+  previewMedium?: Medium | null;
   // Fired once the summary fetch settles (success or error), i.e. right
   // when this bubble grows from a small loading placeholder to its real,
   // often much taller, content. ChatPanel's own auto-scroll only re-runs
@@ -369,10 +387,17 @@ export function TopicSummaryMessage({
       // Best-effort -- if this fails, the tag chips just don't show, no
       // error surfaced (the exercises themselves loaded fine). The pattern
       // picker fetches its own data independently -- see TopicPractice/
-      // PatternPicker.
-      const tagsRes = await fetch(
-        `/api/answer-bank/tags?subjectId=${encodeURIComponent(target.subject_id)}&topicId=${encodeURIComponent(target.id)}`,
-      );
+      // PatternPicker. Sends the staff-preview scope (see this component's
+      // own previewBoardId/previewGradeId/previewMedium comment) the same
+      // way every other staff-preview-aware fetch does -- omitted (rather
+      // than sent empty) for a real student, matching /api/answer-bank/tags'
+      // own `url.searchParams.get(...)` null-means-"not staff previewing"
+      // read.
+      const tagsParams = new URLSearchParams({ subjectId: target.subject_id, topicId: target.id });
+      if (previewBoardId) tagsParams.set("boardId", previewBoardId);
+      if (previewGradeId) tagsParams.set("gradeId", previewGradeId);
+      if (previewMedium) tagsParams.set("medium", previewMedium);
+      const tagsRes = await fetch(`/api/answer-bank/tags?${tagsParams}`);
       const tagsBody = await tagsRes.json().catch(() => null);
       if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
         setTopicTags(tagsBody.tags);

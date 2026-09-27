@@ -1091,6 +1091,9 @@ export function ChatPanel({
                 key={entry.entryId}
                 topic={entry.topic}
                 preferEnglish={entry.preferEnglish}
+                previewBoardId={boardId}
+                previewGradeId={gradeId}
+                previewMedium={medium}
                 onSummaryLoaded={(summary) =>
                   handleTopicSummaryLoaded(entry.entryId, summary)
                 }
