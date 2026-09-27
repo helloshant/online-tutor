@@ -98,13 +98,28 @@ const FALLBACK_LABEL_LENGTH = 60;
 const MAX_PLAUSIBLE_TERM_LENGTH = 80;
 const NUMBERING_PREFIX_PATTERN = /^[০-৯0-9]+\s*\.\s*[A-Za-zঅ-হ]\s+/;
 const TRAILING_COLON_PATTERN = /\s*[:：]\s*$/;
+// Some non-Bengali content (confirmed live: a CBSE Physical Education
+// batch, generated against a template with no predefined field_type set
+// for that subject) bolds its heading as "**Title.**" -- a full stop
+// inside the bold span, closing immediately after -- rather than a colon.
+// Every such chunk confirmed so far is already its own single-block row
+// (no other paragraph to split from), so BOLD_TERM_PATTERN already finds
+// it without needing a new concept-start pattern -- this just strips the
+// trailing stop the same way the colon gets stripped, e.g. "Procedure
+// for drawing a Knock-Out fixture." -> "Procedure for drawing a
+// Knock-Out fixture".
+const TRAILING_STOP_PATTERN = /\s*[.।]\s*$/;
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
 }
 
 function cleanTerm(term: string): string {
-  return term.replace(NUMBERING_PREFIX_PATTERN, "").replace(TRAILING_COLON_PATTERN, "").trim();
+  return term
+    .replace(NUMBERING_PREFIX_PATTERN, "")
+    .replace(TRAILING_COLON_PATTERN, "")
+    .replace(TRAILING_STOP_PATTERN, "")
+    .trim();
 }
 
 function truncatedSnippet(content: string): string {
