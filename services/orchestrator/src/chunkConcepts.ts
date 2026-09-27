@@ -2,11 +2,12 @@
 // (WBBSE/ICSE -- confirmed zero archetypes for either board, see
 // /v1/topic-exercises/subtopics's own comment). There's no exam-derived
 // sub-topic data to fall back to there, but chapter content already writes
-// one concept per chunk for `key_definitions`/`formulas_and_laws`-style
-// field types -- close enough to a real sub-topic breakdown to use
-// directly, with no new admin curation step required. Same "read shared
-// tables directly, no extra HTTP hop" convention archetypeExercises.ts
-// already uses for this service's own Supabase connection.
+// one or more concepts per chunk for `key_definitions`/`formulas_and_laws`-
+// style field types (split apart below, see splitIntoConceptBlocks) --
+// close enough to a real sub-topic breakdown to use directly, with no new
+// admin curation step required. Same "read shared tables directly, no
+// extra HTTP hop" convention archetypeExercises.ts already uses for this
+// service's own Supabase connection.
 import { getSupabaseClient } from "./supabaseClient.js";
 import type { TopicConcept } from "./types.js";
 
@@ -102,14 +103,67 @@ function deriveTerm(content: string): string {
   return truncatedSnippet(content);
 }
 
+// A single chunk row sometimes batches several back-to-back definitions
+// under one field_type instead of one each, e.g. a Physics chunk covering
+// "series resistors", "parallel resistors", "electrical power", "watt", and
+// "kilowatt-hour" as five "শব্দ: **X** -- অর্থ: ..." paragraphs in one row
+// (confirmed live, not a hypothetical -- along with an 8-concept Maths
+// example covering distinct differential-equation definitions the same
+// way). deriveTerm() only ever reads the start of its input, so left
+// whole, a row like that surfaces as a single sub-topic pick under
+// whichever concept happened to be written first, silently hiding the
+// rest. A paragraph (blank-line-separated) that itself looks like a new
+// concept's opening -- by the same label/bold/italic signatures deriveTerm
+// already recognizes, just requiring the bold/italic case to be followed
+// by a real separator so a narrative aside that merely opens with a bold
+// phrase isn't mistaken for a new concept -- starts a new block; anything
+// else (an elaborating paragraph, a trailing "exercise questions" summary)
+// stays attached to whichever block precedes it, same as today for a
+// single-concept row with multiple paragraphs.
+const BOLD_CONCEPT_START_PATTERN = /^\*\*[^*]+\*\*\s*(?:--|—|[:：])/;
+const ITALIC_CONCEPT_START_PATTERN = /^\*[^*]+\*\s*(?:--|—|[:：])/;
+
+function looksLikeNewConcept(paragraph: string): boolean {
+  return (
+    LEADING_LABEL_PATTERN.test(paragraph) ||
+    BOLD_CONCEPT_START_PATTERN.test(paragraph) ||
+    ITALIC_CONCEPT_START_PATTERN.test(paragraph)
+  );
+}
+
+function splitIntoConceptBlocks(content: string): string[] {
+  const paragraphs = content
+    .trim()
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (paragraphs.length === 0) return [content];
+
+  const blocks: string[] = [];
+  let current = [paragraphs[0]];
+  for (let i = 1; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i];
+    if (looksLikeNewConcept(paragraph)) {
+      blocks.push(current.join("\n\n"));
+      current = [paragraph];
+    } else {
+      current.push(paragraph);
+    }
+  }
+  blocks.push(current.join("\n\n"));
+  return blocks;
+}
+
 type ConceptGroup = { id: string; term: string; content: string };
 
-// Groups this topic's own concept-eligible chunks by normalized term (a
-// concept can legitimately span more than one chunk -- e.g. its own
-// key_definitions entry AND a related formulas_and_laws entry) so one
-// concept id maps to ALL of its own chunk content, joined, as generation
-// grounding. Empty is normal for a chapter with no such chunks at all
-// (narrative/literature-style topics) -- never an error.
+// Groups this topic's own concept-eligible chunks -- split into individual
+// concept blocks first, since one row can hold several (see
+// splitIntoConceptBlocks) -- by normalized term (a concept can legitimately
+// span more than one chunk or block -- e.g. its own key_definitions entry
+// AND a related formulas_and_laws entry) so one concept id maps to ALL of
+// its own block content, joined, as generation grounding. Empty is normal
+// for a chapter with no such chunks at all (narrative/literature-style
+// topics) -- never an error.
 async function getConceptGroups(topicId: string): Promise<ConceptGroup[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -129,13 +183,15 @@ async function getConceptGroups(topicId: string): Promise<ConceptGroup[]> {
 
   const groups = new Map<string, ConceptGroup>();
   for (const row of data as { content: string; field_type: string | null }[]) {
-    const term = deriveTerm(row.content);
-    const key = normalize(term);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.content += `\n\n${row.content}`;
-    } else {
-      groups.set(key, { id: key, term, content: row.content });
+    for (const block of splitIntoConceptBlocks(row.content)) {
+      const term = deriveTerm(block);
+      const key = normalize(term);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.content += `\n\n${block}`;
+      } else {
+        groups.set(key, { id: key, term, content: block });
+      }
     }
   }
 
