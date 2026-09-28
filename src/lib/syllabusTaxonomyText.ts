@@ -30,14 +30,23 @@ export async function buildTaxonomyTextFromSyllabus(admin: SupabaseClient, board
   const { data: board } = await admin.from("boards").select("id").eq("name", boardName).maybeSingle();
   if (!board) return null;
 
+  // No medium filter: for a board like CBSE, every medium's rows describe
+  // the same chapters/topics, so this changes nothing there -- the
+  // chapter+topic dedup below already collapses the resulting identical
+  // pairs. But for a board like West Bengal Board, a grade+subject scope
+  // can have GENUINELY DIFFERENT syllabus_topics rows depending on medium
+  // (e.g. Bengali-medium History exists, English-medium History doesn't,
+  // for the exact same board/grade/subject) -- filtering to one medium
+  // silently produces an incomplete taxonomy for every subject that isn't
+  // offered in that medium, which then makes Stage 1 invent its own
+  // phrasing for that missing content instead of anchoring to the real
+  // syllabus wording (confirmed live: this is exactly what made every
+  // West Bengal Board mining run need a manual Curriculum reconciliation
+  // pass afterward).
   const { data, error } = await admin
     .from("syllabus_topics")
     .select("chapter, topic, grade:grades(name), subject:subjects(name)")
-    .eq("board_id", board.id)
-    // English only -- the syllabus structure itself (which chapters/topics
-    // exist) doesn't vary by medium, only which language a paper is in;
-    // including every medium would just triple up identical pairs.
-    .eq("medium", "English");
+    .eq("board_id", board.id);
   if (error || !data || data.length === 0) return null;
 
   type Row = { chapter: string; topic: string; grade: { name: string } | null; subject: { name: string } | null };
