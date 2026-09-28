@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { SIGNUP_CAMPAIGN_COOKIE, SIGNUP_SOURCE_COOKIE } from "@/lib/attribution";
+import { establishSingleSession } from "@/lib/singleSession";
 
 export interface SignupState {
   error?: string;
@@ -45,6 +46,10 @@ export async function signup(_prevState: SignupState, formData: FormData): Promi
       message: "Account created. Check your email to confirm it, then log in.",
     };
   }
+
+  // Makes this signup's own immediate session the account's one active
+  // device -- see that function's own comment.
+  await establishSingleSession(supabase, data.user!.id);
 
   redirect("/onboarding");
 }

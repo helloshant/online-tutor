@@ -55,6 +55,10 @@ export type Profile = {
   // params at all.
   signup_source: string | null;
   signup_campaign: string | null;
+  // The account's one active device right now -- see
+  // src/lib/singleSession.ts. Null for any account that hasn't signed in
+  // since this shipped (0050_single_device_session.sql).
+  current_session_id: string | null;
 };
 
 export type Board = {

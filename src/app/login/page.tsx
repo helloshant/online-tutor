@@ -4,9 +4,9 @@ import { LoginForm } from "./login-form";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; reason?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, reason } = await searchParams;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -18,6 +18,20 @@ export default async function LoginPage({
         <p className="mt-1 text-sm text-foreground/75">
           Log in to continue your Q&amp;A with your subjects.
         </p>
+
+        {/* Only one device can be signed into an account at a time (see
+            src/lib/singleSession.ts) -- this is where that lands someone
+            signed out of an older session, whether caught instantly (an
+            open tab kicked live) or on their next action (a tab that was
+            closed/idle and only found out on reopening). Not an error --
+            plain, non-alarming framing, since it's expected behavior, not
+            something that went wrong. */}
+        {reason === "signed_in_elsewhere" && (
+          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            You&apos;ve been signed out because this account was used to sign in on another device. Only one device
+            can be signed in at a time.
+          </p>
+        )}
 
         <LoginForm next={next} />
 

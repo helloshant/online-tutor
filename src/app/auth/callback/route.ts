@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { SIGNUP_CAMPAIGN_COOKIE, SIGNUP_SOURCE_COOKIE } from "@/lib/attribution";
+import { establishSingleSession } from "@/lib/singleSession";
 
 // Signups created in the last minute are treated as "just happened" -- a
 // generous margin for the exchange itself, not an attempt to catch anyone
@@ -21,6 +22,10 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error && data.user) {
+      // Makes this sign-in (Google OAuth, or a password-recovery link) the
+      // account's one active device -- see that function's own comment.
+      await establishSingleSession(supabase, data.user.id);
+
       // Google sign-in has no equivalent of signUp()'s options.data (see
       // src/app/signup/actions.ts for the native-password path), so this is
       // the earliest point the app can attach attribution to a new Google
