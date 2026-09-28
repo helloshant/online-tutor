@@ -173,6 +173,19 @@ in the supplied taxonomy, propose the closest reasonable concept name, set
 taxonomy_match = "no_match", and lower curriculum confidence accordingly. Do
 not silently invent a taxonomy node without flagging it.
 
+LANGUAGE: match the supplied taxonomy's own language/script for
+curriculum.chapter and curriculum.topic specifically (both a "matched"
+value copied from the taxonomy AND a "no_match" value you propose
+yourself) -- this app shows both fields directly to students, in their
+own study medium, so a taxonomy written in Bengali script means these two
+fields should be in Bengali script too, never translated into English by
+you along the way. This is independent of what language the question
+itself happens to be printed in (a Bengali-medium paper's taxonomy is
+still in Bengali even if a specific question borrows an English term).
+Every OTHER field below (learning_objective, reasoning_pattern, etc.) is
+internal to this pipeline, never shown to a student -- write those in
+English regardless, for consistency across every mining run.
+
 SUPPLIED CURRICULUM TAXONOMY
 ${curriculumTaxonomyText ?? "(none provided for this batch despite taxonomy_supplied=true -- treat as no_match)"}`
     : `No curriculum taxonomy document was supplied for this education_context
@@ -182,7 +195,16 @@ subject-matter knowledge and any syllabus/course-outline text provided with
 this batch. Cap curriculum confidence at 0.7 or below and set taxonomy_match
 = "no_match". If the course/subject is niche enough that classification is
 genuinely uncertain (e.g. a highly specialized final-year elective), add a
-free-text note to the flags array saying so.`;
+free-text note to the flags array saying so.
+
+LANGUAGE: this app shows curriculum.chapter and curriculum.topic directly
+to students, in their own study medium -- write both of these two fields
+in the SAME language/script the question's own raw_text/cleaned_text is
+written in (e.g. a Bengali-medium question gets Bengali-script chapter
+and topic values), never translated into English by you. Every OTHER
+field below (learning_objective, reasoning_pattern, etc.) is internal to
+this pipeline, never shown to a student -- write those in English
+regardless, for consistency across every mining run.`;
 
   return `ROLE
 You are an expert curriculum analyst and assessment designer, covering
@@ -367,8 +389,8 @@ Return EXACTLY these fields, no others:
   "question_id": "<echo the input SegmentedQuestion's own question_id, unchanged>",
   "curriculum": {
     "subject": "<e.g. Mathematics>",
-    "chapter": "<e.g. Quadratic Equations>",
-    "topic": "<e.g. Nature of Roots>",
+    "chapter": "<e.g. Quadratic Equations -- or, for a Bengali-medium question/taxonomy, e.g. ব্যাকরণ; see the LANGUAGE note above>",
+    "topic": "<e.g. Nature of Roots -- or, for a Bengali-medium question/taxonomy, e.g. সমাস; see the LANGUAGE note above>",
     "concept": "<e.g. Discriminant-based root classification>",
     "sub_concept": "<narrower than concept, or null>",
     "taxonomy_match": "matched" | "no_match"
