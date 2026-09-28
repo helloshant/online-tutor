@@ -984,6 +984,23 @@ all worth mapping:
    recognize case 2 -- don't require the unmatched label to visually
    resemble the syllabus name.
 
+   Case 2 applies just as much when a "syllabus" entry is a broad
+   ANALYTICAL THEME rather than a named chapter -- some boards' real
+   syllabi (e.g. a history syllabus organized by theme -- "Reform",
+   "Resistance and Rebellion", "Collective Action" -- rather than by
+   chronological chapter) genuinely work this way; that isn't a reason to
+   treat every specific unmatched event/person/movement as unplaceable.
+   Apply your own subject-matter knowledge of what actually happened
+   under each theme, the same confident way you would for a named
+   chapter: a specific event like "1857 Revolt" or "Santal Rebellion"
+   belongs under a theme literally named "Resistance and Rebellion:
+   Characteristics and Analysis"; "19th Century Reform Movements" or
+   "Bengal Renaissance" belongs under "Reform: Characteristics and
+   Review"; "Peasant and Worker Movements" belongs under a theme named
+   for exactly that. A theme's own name already tells you what real
+   content it covers -- don't require an unmatched label to look like a
+   paraphrase of it before you're willing to map it there.
+
 Do NOT force a mapping when an "unmatched" entry is genuinely NOT part of
 any listed chapter's real content:
 - A chapter genuinely since REMOVED from the current syllabus (real
