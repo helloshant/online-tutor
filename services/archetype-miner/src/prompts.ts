@@ -954,10 +954,22 @@ Two lists, both scoped to the same one board/grade/subject:
 TASK
 Map an "unmatched" value onto a "syllabus" value whenever a real question
 carrying that label genuinely belongs, as actual exam content, under that
-one syllabus chapter -- this covers TWO distinct cases, both real and
-both worth mapping:
+one syllabus chapter -- this covers THREE distinct cases, all real and
+all worth mapping:
 1. The SAME chapter, just worded, punctuated, or spelled differently
    ("Human Health and Diseases" -> "Human Health and Disease").
+1a. The SAME chapter, described in a DIFFERENT LANGUAGE or SCRIPT than
+    the syllabus entry -- this app mines exam papers in the student's own
+    medium (e.g. Bengali), so "unmatched" and "syllabus" will often be in
+    different languages/scripts for the exact same real content. A
+    difference in language is NOT a reason to withhold a mapping you'd
+    otherwise make with full confidence -- translate mentally, then map,
+    the same way you would if both were English:
+    ("Voice Change" -> "বাচ্য পরিবর্তন", "Grammar and Composition" ->
+    "ব্যাকরণ", "Translation and Interpretation" -> "অনুবাদ"). The
+    to_chapter you return is still copied verbatim from "syllabus" --
+    whatever script/language that entry is actually written in, never
+    translated or transliterated by you.
 2. A more specific SECTION or SUB-TOPIC that a student studies as PART OF
    one specific syllabus chapter, even though the label itself doesn't
    read as a paraphrase of the chapter name. For example, "Human Genome

@@ -295,19 +295,20 @@ async function requestMappings(unmatched: UnmatchedChapter[], acceptableValues: 
       mappings.push({ fromChapter: m.from_chapter, toChapter: m.to_chapter });
     }
   }
-  // Visibility for exactly the failure mode this file's own history has
-  // already hit twice (a fixed token budget silently truncating the whole
-  // response, and an unnormalized Unicode compare silently rejecting
-  // every Bengali-script target) -- a proposal count of 0 vs. a rejected
-  // count of 0 tell two completely different stories, and neither was
-  // visible in the logs before this.
-  if (data.length > 0) {
-    console.log(
-      `Curriculum reconciliation: model proposed ${data.length} mapping(s), ${mappings.length} accepted, ${rejectedCount} rejected` +
-        (rejectedSamples.length > 0 ? ` (target not a verbatim syllabus value, e.g. ${rejectedSamples.join(", ")})` : "") +
-        "."
-    );
-  }
+  // Visibility for exactly the failure modes this file's own history has
+  // already hit (a fixed token budget silently truncating the whole
+  // response; an unnormalized Unicode compare silently rejecting every
+  // Bengali-script target; the model itself confidently proposing
+  // NOTHING, e.g. because nothing in the prompt told it a language
+  // difference between "unmatched" and "syllabus" is still mappable) --
+  // "0 proposed" and "N proposed, 0 accepted" are completely different
+  // failures, and unconditional logging (not gated on data.length, which
+  // hid a genuinely empty response entirely) is what tells them apart.
+  console.log(
+    `Curriculum reconciliation: model proposed ${data.length} mapping(s), ${mappings.length} accepted, ${rejectedCount} rejected` +
+      (rejectedSamples.length > 0 ? ` (target not a verbatim syllabus value, e.g. ${rejectedSamples.join(", ")})` : "") +
+      "."
+  );
   return mappings;
 }
 
