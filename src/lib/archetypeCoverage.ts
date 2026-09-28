@@ -99,17 +99,42 @@ export async function getArchetypesWithChapterTopic(
 // returned all three lists fully independent of each other, which is how
 // e.g. "hindi"/"2026" (real data typos, since fixed) surfaced next to
 // subjects from completely unrelated grades on the cross-run-merge page.
+// PostgREST caps a single response at its own configured max-rows
+// (commonly 1000) regardless of how many rows actually match -- an
+// unbounded `.select()` like this one silently returns only the FIRST
+// page of that size, in whatever order the server happens to produce
+// (no ORDER BY here), rather than erroring or telling the caller more
+// exist. Confirmed live: with 3093 total accepted archetypes across the
+// catalogue, a freshly-mined subject (Physical Education, mined after
+// everything else already in the table) never appeared in this
+// function's own boards/grades/subjects lists at all -- silently
+// dropped, not filtered out by any real logic here. Paginates through
+// every row via `.range()` instead of trusting one request to return
+// everything, so this scales with the catalogue's real size rather than
+// whatever the server's own page-size default happens to be today.
+const FETCH_PAGE_SIZE = 1000;
+
+async function fetchAllAcceptedContexts(admin: SupabaseClient): Promise<EducationContext[]> {
+  const contexts: EducationContext[] = [];
+  for (let offset = 0; ; offset += FETCH_PAGE_SIZE) {
+    const { data } = await admin
+      .from("archetypes")
+      .select("education_context")
+      .in("status", ACCEPTED_STATUSES)
+      .in("critic_decision", ACCEPTED_DECISIONS)
+      .range(offset, offset + FETCH_PAGE_SIZE - 1);
+    const page = data ?? [];
+    contexts.push(...page.map((r) => r.education_context as EducationContext));
+    if (page.length < FETCH_PAGE_SIZE) break;
+  }
+  return contexts;
+}
+
 export async function getArchetypeFilterOptions(
   admin: SupabaseClient,
   scope: { board?: string; grade?: string } = {}
 ): Promise<{ boards: string[]; grades: string[]; subjects: string[] }> {
-  const { data } = await admin
-    .from("archetypes")
-    .select("education_context")
-    .in("status", ACCEPTED_STATUSES)
-    .in("critic_decision", ACCEPTED_DECISIONS);
-
-  const contexts = (data ?? []).map((r) => r.education_context as EducationContext);
+  const contexts = await fetchAllAcceptedContexts(admin);
   const distinct = (values: string[]) => Array.from(new Set(values)).sort();
 
   const boards = distinct(contexts.map((c) => c.curriculum_source.name));
