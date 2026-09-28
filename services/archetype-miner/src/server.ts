@@ -31,6 +31,12 @@ import {
   isOffScopeContentScanInProgress,
   type OffScopeScanPreview,
 } from "./offScopeContentScan.js";
+import {
+  previewTopicTranslation,
+  runTopicTranslation,
+  isTopicTranslationInProgress,
+  type TopicTranslationPreview,
+} from "./topicTranslation.js";
 import { segmentBookIntoChapters } from "./bookChapterSegmentation.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
@@ -650,6 +656,56 @@ app.post("/v1/curriculum-reconciliation/ignore", requireSharedSecret, async (req
     console.error(`Failed to mark chapter "${chapter}" as ignored:`, err);
     res.status(502).json({ error: "Failed to mark chapter as ignored" });
   }
+});
+
+// See topicTranslation.ts's own top comment for what this fixes -- a
+// run's curriculum.topic still in English despite its own curriculum.chapter
+// already being in the real study-medium script (via mining after the
+// LANGUAGE fix, or via Curriculum reconciliation above). Same scope shape,
+// same preview-first/fire-and-forget/in-memory-concurrency-guard posture
+// as every other admin-triggered pass in this file.
+app.get("/v1/topic-translation/preview", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.query as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  try {
+    const preview = await previewTopicTranslation(scope);
+    res.json({ ...preview, inProgress: isTopicTranslationInProgress() });
+  } catch (err) {
+    console.error("Failed to preview topic translation:", err);
+    res.status(502).json({ error: "Failed to preview topic translation" });
+  }
+});
+
+app.post("/v1/topic-translation/run", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  if (isTopicTranslationInProgress()) {
+    res.status(409).json({ error: "A topic translation pass is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: TopicTranslationPreview;
+  try {
+    preview = await previewTopicTranslation(scope);
+  } catch (err) {
+    console.error("Failed to preview topic translation before starting it:", err);
+    res.status(502).json({ error: "Failed to preview topic translation" });
+    return;
+  }
+  if (preview.translatableTopics === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runTopicTranslation(scope).catch((err) => {
+    console.error("Unhandled error in topic translation:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
 });
 
 // See offScopeContentScan.ts's own comment for what this catches -- a

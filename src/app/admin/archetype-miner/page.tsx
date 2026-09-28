@@ -61,6 +61,9 @@ export default async function ArchetypeMinerPage() {
           <Link href="/admin/archetype-miner/curriculum-reconciliation" className="text-brand hover:underline">
             Curriculum reconciliation
           </Link>
+          <Link href="/admin/archetype-miner/topic-translation" className="text-brand hover:underline">
+            Topic translation
+          </Link>
           <Link href="/admin/archetype-miner/unmatched-chapters" className="text-brand hover:underline">
             Unmatched chapters
           </Link>

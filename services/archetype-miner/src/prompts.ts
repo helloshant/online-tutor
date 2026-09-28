@@ -1057,6 +1057,73 @@ above (empty array if nothing in "unmatched" confidently matches
 anything in "syllabus"). No markdown, no explanatory prose.`;
 }
 
+// See topicTranslation.ts's own top comment for the full context: Stage 1
+// classified curriculum.topic in English for runs mined before this
+// pipeline's own LANGUAGE instruction was added (see buildAnalyzerPrompt
+// above), even for a curriculum source whose real study medium isn't
+// English -- and unlike curriculum.chapter, there's no real
+// syllabus_topics list to reconcile a fine-grained per-question topic
+// label against. This is a straight translation pass: given a topic
+// that's still in English next to a chapter that's already in the real
+// target script (post Curriculum reconciliation, or from the original
+// mining if it happened to match already), translate the topic into that
+// same script.
+export function buildTopicTranslationPrompt(): string {
+  return `ROLE
+You are translating already-mined, fine-grained exam-question TOPIC
+labels into the real study-medium script their own CHAPTER is already
+written in.
+
+INPUT
+A list of objects, each:
+- "topic": an already-mined curriculum.topic value, currently in
+  English, that needs translating.
+- "chapter": the real curriculum.chapter value real questions carrying
+  this topic are already filed under -- given as CONTEXT, so you know
+  which script/language to translate into and which subject area's own
+  vocabulary and conventions apply. Do not change or re-derive this
+  chapter value; you are only ever producing a translated_topic.
+- "count": how many real mined questions currently carry this exact
+  topic value (context only, not something to act on).
+
+TASK
+For each entry, translate "topic" into the SAME script/language
+"chapter" is already written in -- a real, natural phrase a student
+studying in that medium would recognize, not a mechanical word-for-word
+gloss. Use your own subject-matter knowledge of the real content:
+- Ordinary technical/subject vocabulary translates directly ("Waste
+  Management" next to a Bengali chapter -> "বর্জ্য ব্যবস্থাপনা", "Voice
+  Change" -> "বাচ্য পরিবর্তন").
+- A proper noun -- a person, place, book, or named event -- should be
+  given in that script's own real spelling/transliteration if it has one
+  in general use (a Bengali sentence about the poet normally spells his
+  name "রবীন্দ্রনাথ ঠাকুর", not left as "Rabindranath Tagore" in Latin
+  script) -- use your own knowledge of how that name is actually written
+  in the target script, not a mechanical letter-by-letter transliteration.
+- If a topic is already a short, self-contained phrase, keep the
+  translation similarly short -- you are translating the label, not
+  expanding it into a sentence or adding explanation.
+
+Skip (omit from your output entirely) any entry you are not genuinely
+confident translating -- e.g. a topic so vague or fragmentary
+("Unclear", "Unspecified", a bare "null") that translating it would just
+be inventing content that was never really there. Do not force a
+translation onto something that was already a placeholder in English.
+
+SCHEMA
+Return one entry per confident translation -- omit anything you're not
+confident about:
+{
+  "topic": "<verbatim, copied EXACTLY from the input topic>",
+  "translated_topic": "<your translation, in the same script as the given chapter>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of objects matching the SCHEMA above
+(empty array if nothing in the input can be confidently translated). No
+markdown, no explanatory prose.`;
+}
+
 // See offScopeContentScan.ts's own comment for the full context: a
 // retroactive sweep for the SAME thing OFF_SCOPE_CONTENT_FLAG now catches
 // at mining time going forward (see types.ts and buildAnalyzerPrompt's

@@ -16,6 +16,7 @@ import {
   attachChapterMapping,
   ignoreUnmatchedChapter,
   startOffScopeContentScan,
+  startTopicTranslation,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
 import { buildTaxonomyTextFromSyllabus } from "@/lib/syllabusTaxonomyText";
@@ -461,6 +462,36 @@ export async function runCurriculumReconciliationAction(formData: FormData): Pro
     console.error("Failed to start curriculum reconciliation:", err);
   }
   revalidatePath("/admin/archetype-miner/curriculum-reconciliation");
+}
+
+// See the service's own topicTranslation.ts for what this fixes --
+// curriculum.topic still in English on a run mined before this pipeline's
+// LANGUAGE instruction, even though curriculum.chapter for the same
+// questions is already in the real study-medium script. Same form-scope
+// shape as readCurriculumReconciliationFormScope above, for the same
+// reason.
+function readTopicTranslationFormScope(formData: FormData): { boardName: string; gradeName: string; subjectName: string } {
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName) {
+    throw new Error("Board, grade, and subject are all required.");
+  }
+  return { boardName, gradeName, subjectName };
+}
+
+export async function runTopicTranslationAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const scope = readTopicTranslationFormScope(formData);
+  try {
+    await startTopicTranslation(scope);
+  } catch (err) {
+    // Same reasoning as runCurriculumReconciliationAction's own catch --
+    // the button is disabled while a pass for this scope is running, so
+    // this should be rare.
+    console.error("Failed to start topic translation:", err);
+  }
+  revalidatePath("/admin/archetype-miner/topic-translation");
 }
 
 // The human-in-the-loop counterpart to runCurriculumReconciliationAction

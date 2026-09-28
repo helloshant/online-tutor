@@ -326,6 +326,69 @@ export async function startCurriculumReconciliation(
   return { started: body.started, unmatchedChapters: body.unmatchedChapters, affectedQuestions: body.affectedQuestions };
 }
 
+export type TopicTranslationScope = { boardName: string; gradeName: string; subjectName: string };
+export type TopicTranslationPreview = {
+  translatableTopics: number;
+  affectedQuestions: number;
+  inProgress: boolean;
+};
+
+// See the service's own topicTranslation.ts for what this fixes -- a run
+// mined before that pipeline's own LANGUAGE instruction was added still
+// carries curriculum.topic in English even though its curriculum.chapter
+// is already in the real study-medium script (via Curriculum
+// reconciliation above, or from mining), which shows up as a
+// student-facing sub-topic picker mixing scripts mid-page. Same scoped,
+// human-triggered, preview-first shape as Curriculum reconciliation, for
+// the same reason -- an LLM-driven rewrite of student-facing text
+// deserves a preview, not a blind sweep.
+export async function previewTopicTranslation(scope: TopicTranslationScope): Promise<TopicTranslationPreview> {
+  const params = new URLSearchParams(scope);
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/topic-translation/preview?${params}`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Topic translation preview failed with status ${res.status}`);
+  }
+  if (typeof body?.translatableTopics !== "number" || typeof body?.affectedQuestions !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return {
+    translatableTopics: body.translatableTopics,
+    affectedQuestions: body.affectedQuestions,
+    inProgress: Boolean(body.inProgress),
+  };
+}
+
+export async function startTopicTranslation(
+  scope: TopicTranslationScope
+): Promise<{ started: boolean; translatableTopics: number; affectedQuestions: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/topic-translation/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(scope),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Topic translation failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.translatableTopics !== "number" || typeof body?.affectedQuestions !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, translatableTopics: body.translatableTopics, affectedQuestions: body.affectedQuestions };
+}
+
 export type UnmatchedChapterEntry = {
   boardName: string;
   gradeName: string;
