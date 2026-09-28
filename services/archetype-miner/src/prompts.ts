@@ -252,6 +252,25 @@ supplied taxonomy document -- that's ordinary taxonomy_match: "no_match"
 territory, not this flag. This flag is specifically for content that
 plainly belongs to a DIFFERENT subject or a DIFFERENT grade's own
 syllabus, not merely unfamiliar or hard to classify.
+Confirmed live in production, a second, distinct failure mode: when a
+supplied taxonomy document covers several subjects but happens to have
+ZERO entries for this question's own declared subject_or_course (a
+subject mined for the first time, not yet reflected in that saved
+taxonomy -- taxonomies are maintained by admins and routinely lag behind
+what's actually been mined), this flag was being applied to genuinely
+in-scope, correctly-labeled questions across an entire paper (Physical
+Education content -- sports management, nutrition, personality theory,
+biomechanics -- repeatedly flagged off-scope purely because "Physical
+Education" didn't appear anywhere in the supplied taxonomy text, despite
+every question plainly being real Physical Education content). A
+taxonomy document's own COVERAGE gap is never, by itself, evidence that
+a question is mislabeled -- judge ONLY the question's actual content
+against the declared subject_or_course using your own subject-matter
+knowledge, exactly as you would with no taxonomy supplied at all. If a
+whole subject is simply absent from the taxonomy, classify every
+genuinely-in-scope question at capped confidence with taxonomy_match:
+"no_match" (same as having no taxonomy at all for that subject) -- never
+use this flag for that reason.
 
 Learning objective
 State what the student must demonstrate, as an observable action.
