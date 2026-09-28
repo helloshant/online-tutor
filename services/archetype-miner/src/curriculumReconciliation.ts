@@ -217,13 +217,38 @@ export async function previewCurriculumReconciliation(params: {
 
 type Mapping = { fromChapter: string; toChapter: string };
 
-// Every chapter mined for a scope this size can genuinely need mapping in
-// one call -- confirmed live, over 100 distinct variants against 13 real
-// syllabus chapters for a single scope. A model that gets this WRONG
-// (paraphrasing the target instead of copying it verbatim) is caught
-// below, not trusted -- so a generous token budget here just means more
-// GENUINE mappings get a chance to be found, not more risk.
+// A model that gets a mapping WRONG (paraphrasing the target instead of
+// copying it verbatim) is caught below, not trusted -- so a generous
+// token budget here just means more GENUINE mappings get a chance to be
+// found, not more risk.
 const MAX_TOKENS = 8000;
+
+// requestMappings' OUTPUT (the mapped {from_chapter, to_chapter} array,
+// not the input) is what MAX_TOKENS actually bounds -- and that scales
+// with how many of "unmatched" the model confidently maps, not with
+// "unmatched" itself. Confirmed live: for one real scope (West Bengal
+// Board Grade 10 Bengali) sending all 117 distinct unmatched values in
+// one call, against Bengali-script syllabus targets -- multi-byte, so
+// noticeably more expensive per mapped pair than the plain-English CBSE
+// case this file's history was originally tuned against -- left the
+// scope's mapped count completely unchanged after a full reconciliation
+// run (re-verified directly against archetype_question_signatures: 0 new
+// rows rewritten). getJsonCompletion's own truncation guard THROWS on a
+// cut-off response rather than silently accepting a partial array (see
+// that function's own comment on why), which is consistent with this: a
+// single oversized call hitting that ceiling aborts the WHOLE pass with
+// zero mappings applied, indistinguishable from the admin's own
+// perspective from "genuinely nothing to map." Batching keeps one call's
+// own output bounded regardless of how large a scope's unmatched set
+// grows to, so this can't reappear as that set grows further, whatever
+// the exact failure mode behind this specific case turns out to be.
+const UNMATCHED_BATCH_SIZE = 40;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size));
+  return batches;
+}
 
 async function requestMappings(unmatched: UnmatchedChapter[], acceptableValues: string[], provider: LlmProvider): Promise<Mapping[]> {
   const { data } = await getJsonCompletion({
@@ -338,7 +363,18 @@ async function runCurriculumReconciliationOnePass(params: {
   }
 
   const provider = getActiveLlmProvider();
-  const mappings = await requestMappings(unmatched, acceptableValues, provider);
+  const mappings: Mapping[] = [];
+  for (const batch of chunk(unmatched, UNMATCHED_BATCH_SIZE)) {
+    try {
+      mappings.push(...(await requestMappings(batch, acceptableValues, provider)));
+    } catch (err) {
+      // One batch failing (e.g. a truncated response that exhausted
+      // getJsonCompletion's own retries) shouldn't take the rest of this
+      // pass's batches down with it -- same reasoning insertInBatches in
+      // pipelineRunner.ts already applies to its own per-batch inserts.
+      console.error(`Curriculum reconciliation: batch of ${batch.length} unmatched chapter(s) failed:`, err);
+    }
+  }
 
   let questionsUpdated = 0;
   for (const mapping of mappings) {
