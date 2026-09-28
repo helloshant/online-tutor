@@ -389,6 +389,62 @@ export async function startTopicTranslation(
   return { started: body.started, translatableTopics: body.translatableTopics, affectedQuestions: body.affectedQuestions };
 }
 
+export type PatternTranslationScope = { boardName: string; gradeName: string; subjectName: string };
+export type PatternTranslationPreview = {
+  translatablePatterns: number;
+  inProgress: boolean;
+};
+
+// See the service's own patternTranslation.ts for what this fixes -- a
+// mined pattern's own student-facing name/explanation (Stage 2's output,
+// distinct from curriculum.chapter/topic) still in English despite its
+// supporting questions' curriculum.chapter already being reconciled to
+// the real study-medium script. Same scoped, human-triggered,
+// preview-first shape as Topic translation, for the same reason.
+export async function previewPatternTranslation(scope: PatternTranslationScope): Promise<PatternTranslationPreview> {
+  const params = new URLSearchParams(scope);
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/pattern-translation/preview?${params}`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Pattern translation preview failed with status ${res.status}`);
+  }
+  if (typeof body?.translatablePatterns !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return {
+    translatablePatterns: body.translatablePatterns,
+    inProgress: Boolean(body.inProgress),
+  };
+}
+
+export async function startPatternTranslation(scope: PatternTranslationScope): Promise<{ started: boolean; translatablePatterns: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/pattern-translation/run`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(scope),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Pattern translation failed to start with status ${res.status}`);
+  }
+  if (typeof body?.started !== "boolean" || typeof body?.translatablePatterns !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { started: body.started, translatablePatterns: body.translatablePatterns };
+}
+
 export type UnmatchedChapterEntry = {
   boardName: string;
   gradeName: string;

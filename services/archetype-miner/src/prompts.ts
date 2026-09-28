@@ -1151,6 +1151,91 @@ Return ONLY valid JSON: an array of objects matching the SCHEMA above
 markdown, no explanatory prose.`;
 }
 
+// See patternTranslation.ts's own top comment for the full context:
+// archetype.name and archetype.student_explanation (Stage 2's own output,
+// or the separate one-time backfill's) written in English before those
+// prompts' own LANGUAGE instructions were added, on an archetype whose
+// supporting questions' curriculum.chapter is already correctly
+// reconciled to the real study-medium script. Same translation-not-
+// matching shape as buildTopicTranslationPrompt above, extended to two
+// fields per item instead of one.
+export function buildPatternTranslationPrompt(): string {
+  return `ROLE
+You are translating an already-mined exam-question PATTERN's own
+student-facing name and plain-language explanation into the real
+study-medium script this app's own real syllabus catalogue is written in
+for this exact content area.
+
+INPUT
+A list of objects, each describing one already-mined pattern (an
+"archetype" internally -- this app's own term for a recurring exam
+question pattern):
+- "archetype_id": echo this back unchanged on your output; it's how your
+  answer is matched back to the item that asked for it.
+- "name": the pattern's own short, student-facing label -- present (a
+  string) only when it still needs translating; null when this
+  particular pattern's name is already fine and nothing is being asked
+  of you for it.
+- "student_explanation": 2-4 plain-language sentences explaining the
+  underlying concept, shown to a student alongside the pattern's name --
+  present only when it still needs translating; null the same way "name"
+  is.
+  At least one of "name"/"student_explanation" is always present (a
+  string) on every item; never both null.
+- "chapter": the real curriculum chapter this pattern's supporting
+  questions are already filed under -- given as SUBJECT-AREA context,
+  NOT necessarily a script sample (a real chapter name can itself be
+  Romanized even though its actual content is taught in a different
+  script).
+- "script_example": a real, genuine value from this exact scope's own
+  syllabus catalogue, already in the TARGET script -- trust this field
+  for which actual script/language to translate into, even when
+  "chapter" above is Romanized.
+
+TASK
+For each item, translate whichever of "name"/"student_explanation" is
+present (non-null) into the SAME script/language "script_example" is
+written in -- natural phrasing a student studying in that medium would
+recognize, not a mechanical word-for-word gloss. Use your own
+subject-matter knowledge of the real content ("chapter" tells you the
+subject area even when it's itself Romanized):
+- "name" is a short, action-oriented label (e.g. "Integrate pollution
+  effects on health with conservation strategies" next to a Bengali
+  script_example -> a similarly short, natural Bengali phrase covering
+  the same action -- do not expand it into a full sentence).
+- "student_explanation" is 2-4 plain-language sentences teaching the
+  underlying concept itself -- translate it as a real, natural
+  explanation a textbook in that language would use, preserving its
+  actual content and register, not a stiff literal rendering.
+- A proper noun -- a person, place, book, or named event mentioned in
+  either field -- should be given in the target script's own real
+  spelling/transliteration if it has one in general use, using your own
+  knowledge of how that name is actually written in that script, not a
+  mechanical letter-by-letter transliteration.
+
+Skip a field entirely (omit it from your output item, or omit the whole
+item if BOTH its present fields would be skipped) when you are not
+genuinely confident translating it -- e.g. a name or explanation so
+vague or fragmentary that translating it would just be inventing content
+that was never really there.
+
+SCHEMA
+Return one entry per item you have at least one confident translation
+for -- omit an item entirely if you're not confident about anything in
+it, and omit either translated field individually if you're only
+confident about the other one:
+{
+  "archetype_id": "<verbatim, copied EXACTLY from the input>",
+  "translated_name": "<your translation of name, in the same script as script_example -- omit if name was null or you're not confident>",
+  "translated_student_explanation": "<your translation of student_explanation, same script -- omit if it was null or you're not confident>"
+}
+
+OUTPUT
+Return ONLY valid JSON: an array of objects matching the SCHEMA above
+(empty array if nothing in the input can be confidently translated). No
+markdown, no explanatory prose.`;
+}
+
 // See offScopeContentScan.ts's own comment for the full context: a
 // retroactive sweep for the SAME thing OFF_SCOPE_CONTENT_FLAG now catches
 // at mining time going forward (see types.ts and buildAnalyzerPrompt's

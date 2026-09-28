@@ -37,6 +37,12 @@ import {
   isTopicTranslationInProgress,
   type TopicTranslationPreview,
 } from "./topicTranslation.js";
+import {
+  previewPatternTranslation,
+  runPatternTranslation,
+  isPatternTranslationInProgress,
+  type PatternTranslationPreview,
+} from "./patternTranslation.js";
 import { segmentBookIntoChapters } from "./bookChapterSegmentation.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
 import type { Archetype, EducationContext, PreSegmentedInput, RawPaperInput } from "./types.js";
@@ -704,6 +710,56 @@ app.post("/v1/topic-translation/run", requireSharedSecret, async (req: Request, 
   }
   void runTopicTranslation(scope).catch((err) => {
     console.error("Unhandled error in topic translation:", err);
+  });
+  res.status(202).json({ started: true, ...preview });
+});
+
+// See patternTranslation.ts's own top comment for what this fixes -- a
+// mined pattern's own archetype.name/student_explanation still in
+// English despite its supporting questions' curriculum.chapter already
+// being reconciled to the real study-medium script. Same scope shape,
+// same preview-first/fire-and-forget/in-memory-concurrency-guard posture
+// as every other admin-triggered pass in this file.
+app.get("/v1/pattern-translation/preview", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.query as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  try {
+    const preview = await previewPatternTranslation(scope);
+    res.json({ ...preview, inProgress: isPatternTranslationInProgress() });
+  } catch (err) {
+    console.error("Failed to preview pattern translation:", err);
+    res.status(502).json({ error: "Failed to preview pattern translation" });
+  }
+});
+
+app.post("/v1/pattern-translation/run", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  if (!scope) {
+    res.status(400).json({ error: "boardName, gradeName, and subjectName are all required" });
+    return;
+  }
+  if (isPatternTranslationInProgress()) {
+    res.status(409).json({ error: "A pattern translation pass is already in progress. Wait for it to finish before starting another." });
+    return;
+  }
+
+  let preview: PatternTranslationPreview;
+  try {
+    preview = await previewPatternTranslation(scope);
+  } catch (err) {
+    console.error("Failed to preview pattern translation before starting it:", err);
+    res.status(502).json({ error: "Failed to preview pattern translation" });
+    return;
+  }
+  if (preview.translatablePatterns === 0) {
+    res.json({ started: false, ...preview });
+    return;
+  }
+  void runPatternTranslation(scope).catch((err) => {
+    console.error("Unhandled error in pattern translation:", err);
   });
   res.status(202).json({ started: true, ...preview });
 });

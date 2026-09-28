@@ -17,6 +17,7 @@ import {
   ignoreUnmatchedChapter,
   startOffScopeContentScan,
   startTopicTranslation,
+  startPatternTranslation,
   type ArchetypeMinerLlmProvider,
 } from "@/lib/archetypeMinerClient";
 import { buildTaxonomyTextFromSyllabus } from "@/lib/syllabusTaxonomyText";
@@ -492,6 +493,35 @@ export async function runTopicTranslationAction(formData: FormData): Promise<voi
     console.error("Failed to start topic translation:", err);
   }
   revalidatePath("/admin/archetype-miner/topic-translation");
+}
+
+// See the service's own patternTranslation.ts for what this fixes -- a
+// mined pattern's own archetype.name/student_explanation still in
+// English despite its supporting questions' curriculum.chapter already
+// being reconciled to the real study-medium script. Same form-scope
+// shape as readTopicTranslationFormScope above, for the same reason.
+function readPatternTranslationFormScope(formData: FormData): { boardName: string; gradeName: string; subjectName: string } {
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName) {
+    throw new Error("Board, grade, and subject are all required.");
+  }
+  return { boardName, gradeName, subjectName };
+}
+
+export async function runPatternTranslationAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const scope = readPatternTranslationFormScope(formData);
+  try {
+    await startPatternTranslation(scope);
+  } catch (err) {
+    // Same reasoning as runTopicTranslationAction's own catch -- the
+    // button is disabled while a pass for this scope is running, so this
+    // should be rare.
+    console.error("Failed to start pattern translation:", err);
+  }
+  revalidatePath("/admin/archetype-miner/pattern-translation");
 }
 
 // The human-in-the-loop counterpart to runCurriculumReconciliationAction
