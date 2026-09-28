@@ -69,8 +69,17 @@ type SignatureRow = {
   signature: { flags?: string[]; curriculum?: { chapter?: string } };
 };
 
+// NFC-normalizing matters specifically for non-Latin scripts like Bengali:
+// the same visible character sequence (a conjunct, a matra) can be
+// represented by more than one underlying Unicode code-point sequence,
+// and a model regenerating a "verbatim copy" of a Bengali syllabus value
+// isn't guaranteed to reproduce the exact same one it was given -- two
+// byte-different strings that render identically would otherwise compare
+// as a mismatch here every single time, silently rejecting every
+// Bengali-script mapping requestMappings() proposes (see that function's
+// own acceptableKeys check). Harmless no-op for plain ASCII/English text.
 function normalize(s: string): string {
-  return s.trim().toLowerCase();
+  return s.trim().toLowerCase().normalize("NFC");
 }
 
 async function loadMinedChapters(params: { boardName: string; gradeName: string; subjectName: string }): Promise<SignatureRow[]> {
@@ -268,6 +277,8 @@ async function requestMappings(unmatched: UnmatchedChapter[], acceptableValues: 
 
   const acceptableKeys = new Set(acceptableValues.map(normalize));
   const mappings: Mapping[] = [];
+  let rejectedCount = 0;
+  const rejectedSamples: string[] = [];
   for (const item of data) {
     if (typeof item !== "object" || item === null) continue;
     const m = item as Record<string, unknown>;
@@ -276,9 +287,26 @@ async function requestMappings(unmatched: UnmatchedChapter[], acceptableValues: 
       // value -- a model that paraphrased the target instead of copying
       // it would otherwise introduce a BRAND NEW mismatch, defeating the
       // entire point of this pass.
-      if (!acceptableKeys.has(normalize(m.to_chapter))) continue;
+      if (!acceptableKeys.has(normalize(m.to_chapter))) {
+        rejectedCount++;
+        if (rejectedSamples.length < 5) rejectedSamples.push(`"${m.from_chapter}" -> "${m.to_chapter}"`);
+        continue;
+      }
       mappings.push({ fromChapter: m.from_chapter, toChapter: m.to_chapter });
     }
+  }
+  // Visibility for exactly the failure mode this file's own history has
+  // already hit twice (a fixed token budget silently truncating the whole
+  // response, and an unnormalized Unicode compare silently rejecting
+  // every Bengali-script target) -- a proposal count of 0 vs. a rejected
+  // count of 0 tell two completely different stories, and neither was
+  // visible in the logs before this.
+  if (data.length > 0) {
+    console.log(
+      `Curriculum reconciliation: model proposed ${data.length} mapping(s), ${mappings.length} accepted, ${rejectedCount} rejected` +
+        (rejectedSamples.length > 0 ? ` (target not a verbatim syllabus value, e.g. ${rejectedSamples.join(", ")})` : "") +
+        "."
+    );
   }
   return mappings;
 }
