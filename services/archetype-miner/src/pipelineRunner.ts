@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { runSegmenter, type SegmenterResult } from "./stage0Segmenter.js";
 import { runAnalyzer } from "./stage1Analyzer.js";
@@ -67,6 +68,79 @@ async function mergeStats(runId: string, patch: Partial<PipelineRunStats>) {
   const { data } = await supabase.from("archetype_pipeline_runs").select("stats").eq("id", runId).single();
   const current = (data?.stats as PipelineRunStats | undefined) ?? {};
   await updateRun(runId, { stats: { ...current, ...patch } });
+}
+
+const INSERT_BATCH_SIZE = 200;
+
+// A single unbounded `.insert()` of a large row set (a run's full
+// embeddings table, one vector per question, or its full archetype
+// catalogue) can exceed the database's own statement_timeout -- confirmed
+// live: three separate runs each logged "Failed to insert embeddings for
+// run <id>: canceling statement due to statement timeout" and lost that
+// run's persisted embeddings (clustering itself had already run on the
+// in-memory vectors by that point, so the RUN's own archetypes were fine,
+// but future cross-run-merge work over those runs has nothing to compare
+// against). Splits into fixed-size batches so one oversized statement
+// can't take the whole insert down -- returns the count that actually
+// committed, since a batch failure partway through still leaves the
+// earlier batches persisted (unlike one unbounded statement, which is
+// all-or-nothing). Logs, but does not throw, on a batch failure -- same
+// "log and keep going" posture every other insert in this file already
+// uses; a caller that needs to know whether everything landed checks the
+// returned count against `rows.length` itself (see the archetypes insert
+// below, which does exactly that for a way to see the difference).
+async function insertInBatches(
+  table: string,
+  rows: Record<string, unknown>[],
+  runId: string,
+  supabase: SupabaseClient
+): Promise<number> {
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
+    const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
+    const { error } = await supabase.from(table).insert(batch);
+    if (error) {
+      console.error(`Failed to insert into ${table} for run ${runId} (batch ${i / INSERT_BATCH_SIZE + 1}):`, error);
+      continue;
+    }
+    inserted += batch.length;
+  }
+  return inserted;
+}
+
+// Each cluster's own Stage 2 (Miner) call independently invents its
+// archetype_id, with no visibility into what any OTHER cluster in the
+// same run already named itself -- two different clusters plausibly
+// landing on the same natural-sounding slug (e.g. two distinct
+// "identify the year of X" clusters both producing
+// "identify-year-of-historical-event") is a real, observed outcome, not
+// a hypothetical. Confirmed live: exactly this collided the bulk insert
+// into `archetypes`, whose primary key is (run_id, archetype_id) -- a
+// single duplicate-key violation failed that ENTIRE insert statement
+// atomically, silently discarding every one of that run's archetypes
+// (not just the colliding one), while the run still reported "completed"
+// with stats.mined equal to the full attempted count and no error
+// anywhere. Mirrors renameCollidingIds' own approach for question_id
+// collisions during segmentation (same file, above) -- disambiguates
+// with a numeric suffix before anything reaches the database, rather
+// than trusting the model's own per-cluster naming to already be unique
+// run-wide. Mutates archetype_id in place on each candidate (both the
+// object AND, since callers build their DB row's own archetype_id column
+// from this same field, the row that gets inserted) so the two never
+// drift apart.
+function renameCollidingArchetypeIds(candidates: Archetype[]): void {
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    let id = candidate.archetype_id;
+    if (seen.has(id)) {
+      let suffix = 2;
+      while (seen.has(`${candidate.archetype_id}-${suffix}`)) suffix++;
+      id = `${candidate.archetype_id}-${suffix}`;
+      console.warn(`Archetype id collision within one run: renamed duplicate "${candidate.archetype_id}" to "${id}".`);
+      candidate.archetype_id = id;
+    }
+    seen.add(id);
+  }
 }
 
 const MAX_SPLIT_DEPTH = 2;
@@ -650,8 +724,7 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
           embedding: vector,
         };
       });
-      const { error } = await supabase.from("archetype_question_embeddings").insert(embeddingRows);
-      if (error) console.error(`Failed to insert embeddings for run ${runId}:`, error);
+      await insertInBatches("archetype_question_embeddings", embeddingRows, runId, supabase);
     }
 
     if (clusters.length > 0) {
@@ -710,8 +783,17 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
       );
     }
 
+    // Must run before building the insert rows below -- see this
+    // function's own comment on why a same-run collision is a real,
+    // observed outcome, not hypothetical, and mutates archetype_id in
+    // place so the row objects built next already carry the disambiguated
+    // id.
+    renameCollidingArchetypeIds(allCandidates);
+
+    let insertedCount = 0;
     if (allCandidates.length > 0) {
-      const { error } = await supabase.from("archetypes").insert(
+      insertedCount = await insertInBatches(
+        "archetypes",
         allCandidates.map((a) => ({
           archetype_id: a.archetype_id,
           run_id: runId,
@@ -720,12 +802,19 @@ async function executeRun(runId: string, params: SubmitRunParams, llmProvider: L
           status: a.status,
           critic_decision: a.critic_decision,
           mining_confidence: a.mining_confidence,
-        }))
+        })),
+        runId,
+        supabase
       );
-      if (error) console.error(`Failed to insert candidate archetypes for run ${runId}:`, error);
     }
     await queueForReview(runId, stage2ReviewCandidates);
-    await mergeStats(runId, { mined: allCandidates.length });
+    // Reflects what actually landed in the database, not what Stage 2
+    // produced -- see insertInBatches' own comment on why those two
+    // numbers can now legitimately differ (a batch failure) rather than
+    // always matching the way an unconditional allCandidates.length here
+    // used to silently claim even when the insert underneath it failed
+    // entirely.
+    await mergeStats(runId, { mined: insertedCount });
 
     // ---------------------------------------------------------------
     // Stage 3 -- Critic (one call over the whole run's candidate
