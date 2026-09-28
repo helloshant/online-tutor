@@ -538,6 +538,16 @@ Concise, concept-independent where possible, action-oriented, reusable.
 Good: "Determine parameter from root condition."
 Good: "Evaluate source reliability from contextual cues."
 Bad: "2021-style quadratic question." Bad: "Question involving k."
+LANGUAGE: name (and student_explanation, see its own SCHEMA field below)
+are shown DIRECTLY to students, as a pattern's own button label and its
+plain-language explanation -- write both in the SAME language/script this
+cluster's own curriculum.chapter/topic values are already in (see Stage
+1's own QuestionSignature.curriculum on each member question -- if those
+are Bengali script, name and student_explanation should be too), not
+translated into English by you. Every other field (concept,
+learning_objective, invariant_reasoning_structure, reasoning_pattern,
+etc.) is internal to this pipeline, never shown to a student -- keep
+those in English regardless, for consistency across every mining run.
 
 STATISTICS
 Calculate stats ONLY from the supplied cluster's questions. Do not infer
@@ -858,6 +868,13 @@ RULES
   actually at that stage would find clear, not over-simplified for a
   senior-secondary/undergraduate concept or over-technical for a
   secondary one.
+- LANGUAGE: student_explanation is shown directly to students, right
+  alongside this archetype's own name (also student-facing). Write it in
+  the SAME language/script that archetype's own name is already written
+  in -- a Bengali-script name gets a Bengali-script explanation, never
+  translated into English by you -- even though concept/learning_objective/
+  invariant_reasoning_structure (the fields you're reading, not writing)
+  stay in English regardless, since those are internal to this pipeline.
 - Never reference "this archetype," "this pattern," "this question
   type," or any exam-taxonomy language -- write as if explaining the
   idea itself to a student, in the same style as a good textbook aside,
