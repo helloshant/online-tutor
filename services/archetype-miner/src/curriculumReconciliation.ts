@@ -132,16 +132,22 @@ export async function loadAcceptableChapterValues(params: { boardName: string; g
   const ids = await resolveSyllabusScopeIds(supabase, params);
   if (!ids) return [];
 
+  // No medium filter: for a board like CBSE the syllabus structure is
+  // effectively English-medium only, so this is a no-op there. But for a
+  // board like West Bengal Board, the same grade/subject scope has
+  // genuinely DIFFERENT syllabus_topics rows depending on medium (e.g.
+  // Bengali-medium History vs. no English-medium History rows at all) --
+  // filtering to one medium silently returns zero acceptable values for
+  // every subject that isn't offered in that medium. Any redundant
+  // identical chapter/topic strings across mediums are deduped by the
+  // `seen` set below, so taking the union here is harmless even for
+  // boards where it changes nothing.
   const { data, error } = await supabase
     .from("syllabus_topics")
     .select("chapter, topic")
     .eq("board_id", ids.boardId)
     .eq("grade_id", ids.gradeId)
-    .eq("subject_id", ids.subjectId)
-    // English only -- the syllabus structure itself (which chapters/topics
-    // exist) doesn't vary by medium, only which language a paper is in;
-    // including every medium would just duplicate identical values.
-    .eq("medium", "English");
+    .eq("subject_id", ids.subjectId);
   if (error) {
     console.error("Curriculum reconciliation: failed to load syllabus_topics:", error);
     return [];
