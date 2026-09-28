@@ -2,7 +2,7 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { getJsonCompletion } from "./jsonCompletion.js";
 import { buildTopicTranslationPrompt } from "./prompts.js";
 import { getActiveLlmProvider, type LlmProvider } from "./llm.js";
-import { loadAcceptableChapterValues } from "./curriculumReconciliation.js";
+import { resolveSyllabusScopeIds } from "./curriculumReconciliation.js";
 
 // Stage 1 classifies curriculum.topic in whatever language it happens to
 // default to for a given run (see prompts.ts's own LANGUAGE note, added
@@ -20,17 +20,14 @@ import { loadAcceptableChapterValues } from "./curriculumReconciliation.js";
 // its own top comment on why chapter and topic are different granularities).
 //
 // Unlike chapter reconciliation, this has no fixed external "syllabus" list
-// to match against -- curriculum.topic is a fine, often near-unique
-// per-question label with no real syllabus_topics counterpart to copy
-// verbatim from. So this is a straight LLM TRANSLATION pass, not a
-// matching pass: for every scope whose real syllabus_topics catalogue
-// contains a non-English value at all (see resolveTargetScriptSamples
-// below -- this is a SCOPE-level check, not per-row: a row's own current
-// curriculum.chapter can legitimately be a Romanized umbrella name like
-// "Bhugol O Poribesh" even in a genuinely Bengali-medium scope, since
-// that's literally how some boards' own syllabus_topics rows are
-// structured), translate every still-English curriculum.topic into that
-// scope's real script.
+// to match a topic against directly -- curriculum.topic is a fine, often
+// near-unique per-question label with no real syllabus_topics counterpart
+// to copy verbatim from. So this is a straight LLM TRANSLATION pass, not
+// a matching pass, for a row whose own curriculum.chapter is ALREADY a
+// real, exact syllabus value (see loadScopeSyllabusContext below for why
+// that's the right eligibility signal, not whether the chapter looks
+// non-English) -- translate that row's still-English curriculum.topic
+// into the same real script the rest of this scope's syllabus uses.
 const PAGE_SIZE = 1000;
 
 type SignatureRow = {
@@ -45,6 +42,10 @@ type SignatureRow = {
 // signal for "already written in a non-English script" without needing to
 // hardcode which script in particular -- keeps this generic beyond Bengali.
 const NON_ASCII_RE = /[^\x00-\x7F]/;
+
+function normalize(s: string): string {
+  return s.trim().toLowerCase().normalize("NFC");
+}
 
 async function loadRows(params: { boardName: string; gradeName: string; subjectName: string }): Promise<SignatureRow[]> {
   const supabase = getSupabaseClient();
@@ -70,50 +71,111 @@ async function loadRows(params: { boardName: string; gradeName: string; subjectN
   return rows;
 }
 
-// Confirmed live: for West Bengal Board Grade 10 Geography, EVERY row's
-// curriculum.chapter is the syllabus's own umbrella chapter name --
-// "Bhugol O Poribesh" -- which is itself a ROMANIZED, ASCII string (the
-// real Bengali-script content lives entirely in syllabus_topics.topic,
-// e.g. "ভারত — ক. অবস্থান ও প্রশাসনিক বিভাগ"; History's own umbrella
-// chapter, "Swadesh Parichay o paribesh", is the same shape). Requiring a
-// ROW's OWN chapter to already be non-ASCII before treating its topic as
-// translatable silently skipped every one of these -- correctly
-// reconciled, just against a real syllabus chapter name that happens to
-// be Romanized, not evidence the scope itself is English-medium.
+// A board/grade/subject like West Bengal Board Grade 10 Mathematics can
+// be PARTIALLY reconciled: some rows' curriculum.chapter is already a
+// real syllabus value (e.g. "অনুপাত ও সমানুপাত..."), others' is still
+// Stage 1's own free invention in English ("Quadratic Equations",
+// "Coordinate Geometry") that Curriculum reconciliation hasn't resolved
+// yet. Confirmed live: translating a topic under an UNRESOLVED chapter,
+// with no real anchor for which actual syllabus content it belongs to,
+// meant every candidate's translation CONTEXT was either irrelevant or
+// (in an earlier version of this file) a single arbitrary sample reused
+// for every row regardless of subject matter -- and the model responded
+// by declining every single one across every batch, garbage-context-in,
+// nothing-out.
 //
-// The reliable signal is at the SCOPE level, not the row level: does this
-// board/grade/subject's real syllabus_topics catalogue contain ANY
-// non-ASCII value at all (chapter or topic)? If so, the scope has a real
-// non-English target script, and EVERY row whose curriculum.topic is
-// still ASCII is translatable, regardless of whether that row's own
-// current chapter happens to be Romanized or already non-ASCII.
-async function resolveTargetScriptSamples(params: { boardName: string; gradeName: string; subjectName: string }): Promise<string[]> {
-  const acceptableValues = await loadAcceptableChapterValues(params);
-  return acceptableValues.filter((v) => NON_ASCII_RE.test(v));
+// So eligibility is keyed off whether a row's OWN chapter is a REAL,
+// exact syllabus value (via the same acceptableKeys check Curriculum
+// reconciliation itself uses) -- regardless of whether that real value
+// happens to be Romanized (see topicsByChapter below) or already
+// non-ASCII. A chapter Stage 1 invented and reconciliation hasn't
+// resolved yet is skipped entirely here, not translated with a guess --
+// running Curriculum reconciliation again for this scope is what fixes
+// that, not this tool.
+type ScopeSyllabusContext = {
+  // Every real syllabus_topics chapter/topic value for this scope,
+  // normalized -- same union curriculumReconciliation.ts's own
+  // loadAcceptableChapterValues() builds, used the same way: a row's
+  // curriculum.chapter is "really reconciled" only if it's an exact,
+  // verbatim member of this set.
+  acceptableKeys: Set<string>;
+  // Real, non-ASCII topic values grouped by their own real chapter
+  // (normalized) -- lets a Romanized real chapter like "Bhugol O
+  // Poribesh" or "Ganit Prakash" still get SEVERAL genuinely relevant,
+  // same-chapter Bengali examples as translation context, instead of one
+  // unrelated sample pulled from anywhere in the scope.
+  topicsByChapter: Map<string, string[]>;
+  // Any real non-ASCII value at all for this scope, as a last-resort
+  // fallback -- only reached for a row whose own chapter is non-ASCII-free
+  // AND has no non-ASCII sibling topics of its own (rare: a real chapter
+  // whose own real topics are themselves still all-ASCII).
+  anyNonAsciiSample: string | null;
+};
+
+async function loadScopeSyllabusContext(params: {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+}): Promise<ScopeSyllabusContext> {
+  const supabase = getSupabaseClient();
+  const ids = await resolveSyllabusScopeIds(supabase, params);
+  if (!ids) return { acceptableKeys: new Set(), topicsByChapter: new Map(), anyNonAsciiSample: null };
+
+  const { data, error } = await supabase
+    .from("syllabus_topics")
+    .select("chapter, topic")
+    .eq("board_id", ids.boardId)
+    .eq("grade_id", ids.gradeId)
+    .eq("subject_id", ids.subjectId);
+  if (error || !data) {
+    if (error) console.error("Topic translation: failed to load syllabus_topics:", error);
+    return { acceptableKeys: new Set(), topicsByChapter: new Map(), anyNonAsciiSample: null };
+  }
+
+  const acceptableKeys = new Set<string>();
+  const topicsByChapter = new Map<string, string[]>();
+  let anyNonAsciiSample: string | null = null;
+  for (const row of data as { chapter: string; topic: string }[]) {
+    acceptableKeys.add(normalize(row.chapter));
+    acceptableKeys.add(normalize(row.topic));
+    if (NON_ASCII_RE.test(row.topic)) {
+      const key = normalize(row.chapter);
+      const list = topicsByChapter.get(key) ?? [];
+      if (!list.includes(row.topic)) list.push(row.topic);
+      topicsByChapter.set(key, list);
+      anyNonAsciiSample ??= row.topic;
+    }
+    if (NON_ASCII_RE.test(row.chapter)) anyNonAsciiSample ??= row.chapter;
+  }
+  return { acceptableKeys, topicsByChapter, anyNonAsciiSample };
 }
 
-type TranslatableTopic = { topic: string; chapterSample: string; count: number };
+// chapter is the row's own REAL syllabus chapter value, verbatim,
+// whatever script it's actually written in -- may be Romanized (e.g.
+// "Bhugol O Poribesh"), so it's kept separate from scriptExample rather
+// than conflated with it, to avoid telling the model something false
+// about what the real chapter name actually is.
+type TranslatableTopic = { topic: string; chapter: string; scriptExample: string; count: number };
 
 // Grouped by exact topic string (not by chapter) -- the same fine-grained
 // topic label can appear under one chapter across many questions, and
 // translating it once and applying it everywhere is both cheaper and more
-// consistent than re-translating it per question. chapterSample is kept
-// only as translation CONTEXT (which script/subject vocabulary to use),
-// not as part of the grouping key -- prefers the row's own chapter when
-// it's already non-ASCII (most specific), falling back to any real
-// non-ASCII syllabus value for this scope otherwise (still tells the
-// model which script/subject area to translate into).
-function computeTranslatable(rows: SignatureRow[], targetScriptSamples: string[]): TranslatableTopic[] {
-  if (targetScriptSamples.length === 0) return [];
+// consistent than re-translating it per question. chapter/scriptExample
+// are kept only as translation CONTEXT, not part of the grouping key.
+function computeTranslatable(rows: SignatureRow[], ctx: ScopeSyllabusContext): TranslatableTopic[] {
+  if (!ctx.anyNonAsciiSample) return [];
   const byTopic = new Map<string, TranslatableTopic>();
   for (const row of rows) {
     const chapter = row.signature?.curriculum?.chapter?.trim();
     const topic = row.signature?.curriculum?.topic?.trim();
     if (!chapter || !topic) continue;
     if (NON_ASCII_RE.test(topic)) continue;
+    if (!ctx.acceptableKeys.has(normalize(chapter))) continue;
+    const sameChapterTopics = ctx.topicsByChapter.get(normalize(chapter)) ?? [];
+    const scriptExample = NON_ASCII_RE.test(chapter) ? chapter : (sameChapterTopics[0] ?? ctx.anyNonAsciiSample);
     const existing = byTopic.get(topic);
     if (existing) existing.count++;
-    else byTopic.set(topic, { topic, chapterSample: NON_ASCII_RE.test(chapter) ? chapter : targetScriptSamples[0], count: 1 });
+    else byTopic.set(topic, { topic, chapter, scriptExample, count: 1 });
   }
   return Array.from(byTopic.values());
 }
@@ -129,8 +191,8 @@ export async function previewTopicTranslation(params: {
   gradeName: string;
   subjectName: string;
 }): Promise<TopicTranslationPreview> {
-  const [rows, targetScriptSamples] = await Promise.all([loadRows(params), resolveTargetScriptSamples(params)]);
-  const translatable = computeTranslatable(rows, targetScriptSamples);
+  const [rows, ctx] = await Promise.all([loadRows(params), loadScopeSyllabusContext(params)]);
+  const translatable = computeTranslatable(rows, ctx);
   return {
     translatableTopics: translatable.length,
     affectedQuestions: translatable.reduce((sum, t) => sum + t.count, 0),
@@ -158,7 +220,7 @@ async function requestTranslations(batch: TranslatableTopic[], provider: LlmProv
   const { data } = await getJsonCompletion({
     systemPrompt: buildTopicTranslationPrompt(),
     message: JSON.stringify({
-      topics: batch.map((t) => ({ topic: t.topic, chapter: t.chapterSample, count: t.count })),
+      topics: batch.map((t) => ({ topic: t.topic, chapter: t.chapter, script_example: t.scriptExample, count: t.count })),
     }),
     maxTokens: MAX_TOKENS,
     provider,
@@ -252,8 +314,8 @@ async function runTopicTranslationOnePass(params: {
   subjectName: string;
 }): Promise<TopicTranslationResult> {
   const supabase = getSupabaseClient();
-  const [rows, targetScriptSamples] = await Promise.all([loadRows(params), resolveTargetScriptSamples(params)]);
-  const translatable = computeTranslatable(rows, targetScriptSamples);
+  const [rows, ctx] = await Promise.all([loadRows(params), loadScopeSyllabusContext(params)]);
+  const translatable = computeTranslatable(rows, ctx);
 
   if (translatable.length === 0) {
     return { translated: 0, questionsUpdated: 0, untranslatedRemaining: 0 };

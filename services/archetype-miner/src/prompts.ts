@@ -1071,29 +1071,39 @@ anything in "syllabus"). No markdown, no explanatory prose.`;
 export function buildTopicTranslationPrompt(): string {
   return `ROLE
 You are translating already-mined, fine-grained exam-question TOPIC
-labels into the real study-medium script their own CHAPTER is already
-written in.
+labels into the real study-medium script this app's own real syllabus
+catalogue is written in for this exact content area.
 
 INPUT
 A list of objects, each:
 - "topic": an already-mined curriculum.topic value, currently in
   English, that needs translating.
 - "chapter": the real curriculum.chapter value real questions carrying
-  this topic are already filed under -- given as CONTEXT, so you know
-  which script/language to translate into and which subject area's own
-  vocabulary and conventions apply. Do not change or re-derive this
-  chapter value; you are only ever producing a translated_topic.
+  this topic are already filed under -- given as SUBJECT-AREA context
+  (which real chapter's content this topic belongs to), NOT necessarily
+  as a script sample -- some real chapter names are themselves Romanized
+  (e.g. a board's own umbrella chapter name written in Latin letters even
+  though its actual content is taught in Bengali). Do not change or
+  re-derive this value; you are only ever producing a translated_topic.
+- "script_example": a real, genuine value from this exact scope's own
+  syllabus catalogue, already in the TARGET script -- this is what tells
+  you which actual script/language to translate into and gives you real
+  vocabulary/spelling conventions from the same subject area to match.
+  Trust this field for script/language, even when "chapter" above is
+  Romanized.
 - "count": how many real mined questions currently carry this exact
   topic value (context only, not something to act on).
 
 TASK
 For each entry, translate "topic" into the SAME script/language
-"chapter" is already written in -- a real, natural phrase a student
+"script_example" is written in -- a real, natural phrase a student
 studying in that medium would recognize, not a mechanical word-for-word
-gloss. Use your own subject-matter knowledge of the real content:
+gloss. Use your own subject-matter knowledge of the real content (the
+"chapter" field tells you the subject area even when it's itself
+Romanized):
 - Ordinary technical/subject vocabulary translates directly ("Waste
-  Management" next to a Bengali chapter -> "বর্জ্য ব্যবস্থাপনা", "Voice
-  Change" -> "বাচ্য পরিবর্তন").
+  Management" next to a Bengali script_example -> "বর্জ্য ব্যবস্থাপনা",
+  "Voice Change" -> "বাচ্য পরিবর্তন").
 - A proper noun -- a person, place, book, or named event -- should be
   given in that script's own real spelling/transliteration if it has one
   in general use (a Bengali sentence about the poet normally spells his
@@ -1115,7 +1125,7 @@ Return one entry per confident translation -- omit anything you're not
 confident about:
 {
   "topic": "<verbatim, copied EXACTLY from the input topic>",
-  "translated_topic": "<your translation, in the same script as the given chapter>"
+  "translated_topic": "<your translation, in the same script as the given script_example>"
 }
 
 OUTPUT

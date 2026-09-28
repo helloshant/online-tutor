@@ -113,7 +113,10 @@ async function loadMinedChapters(params: { boardName: string; gradeName: string;
 // lives in a different service from that "server-only" web app util (see
 // this repo's own established convention for small duplicated helpers
 // across service boundaries, e.g. crossRunMerge.ts's own mostCommon()).
-async function resolveSyllabusScopeIds(
+// Exported for topicTranslation.ts's own use, same reasoning
+// loadAcceptableChapterValues below is exported for -- both files live in
+// this one service.
+export async function resolveSyllabusScopeIds(
   supabase: ReturnType<typeof getSupabaseClient>,
   params: { boardName: string; gradeName: string; subjectName: string }
 ): Promise<{ boardId: string; gradeId: string; subjectId: string } | null> {
