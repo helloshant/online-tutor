@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { ADMIN_PAGES, PASSWORD_EXPIRY_DAYS, requireAdminPage, requireSuperAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -295,6 +296,16 @@ export async function deleteUser(userId: string) {
   await admin.auth.admin.deleteUser(userId);
 
   revalidatePath("/admin");
+  // Reported directly: clicking Delete on /admin/users/[id] -- the page for
+  // the user this just deleted -- left the browser on that same now-dead
+  // URL. Submitting a form action re-renders the page it was submitted
+  // from unless the action itself navigates elsewhere, so this page's own
+  // loader ran again right after, found no such auth user any more, and
+  // hit its own `if (!authUser?.user) notFound()` -- a 404, not an error,
+  // but a broken redirect target either way. /admin is where every other
+  // mutation here already revalidates to (the user list itself), so it's
+  // the obvious place to actually send the browser too.
+  redirect("/admin");
 }
 
 // Lets an admin send a password reset link on a user's behalf (e.g. they're
