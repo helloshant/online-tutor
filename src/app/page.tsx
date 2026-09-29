@@ -3,7 +3,7 @@ import Link from "next/link";
 const FEATURES = [
   {
     title: "Board & grade aware",
-    body: "CBSE, ICSE, West Bengal Board and more — each with its own grade-specific syllabus.",
+    body: "CBSE, West Bengal Board and more — each with its own grade-specific syllabus.",
   },
   {
     title: "Subject-scoped Q&A",
@@ -11,7 +11,7 @@ const FEATURES = [
   },
   {
     title: "Answers in your language",
-    body: "English, Hindi, or Bengali — chosen once at subscription, honoured in every reply.",
+    body: "English, Sanskrit, or Bengali — chosen once at subscription, honoured in every reply.",
   },
   {
     title: "Simple, transparent pricing",
