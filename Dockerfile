@@ -1,4 +1,4 @@
-# TutorOps web app (Next.js). The LLM orchestration service lives in a
+# SyllabusMate web app (Next.js). The LLM orchestration service lives in a
 # separate image -- see services/orchestrator/Dockerfile -- this container
 # never talks to an LLM SDK directly, only to the orchestrator over HTTP.
 

@@ -59,7 +59,7 @@ export default async function SubscribePage({
             worded to hold for either case rather than assuming the
             former. */}
         <p className="mt-1 text-sm text-foreground/75">
-          Subscribe to keep using TutorOps beyond your free trial.
+          Subscribe to keep using SyllabusMate beyond your free trial.
         </p>
 
         {error && CALLBACK_ERROR_MESSAGES[error] && (

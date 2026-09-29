@@ -1,4 +1,4 @@
-# TutorOps payment service. Owns everything about turning a pending
+# SyllabusMate payment service. Owns everything about turning a pending
 # subscription into an active one: the CCAvenue integration (request
 # encryption, callback decryption/verification) and one-time coupon-code
 # generation/redemption. Kept as its own container -- separate from the web

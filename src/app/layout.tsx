@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { SingleSessionGuard } from "@/components/single-session-guard";
 
 export const metadata: Metadata = {
-  title: "TutorOps — Your Board, Your Syllabus, Your Tutor",
+  title: "SyllabusMate — Your Board, Your Syllabus, Your Tutor",
   description:
     "A chatops tutoring platform that keeps every answer inside your board's syllabus, in the language you choose.",
 };

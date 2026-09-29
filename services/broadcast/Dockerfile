@@ -1,4 +1,4 @@
-# TutorOps broadcast service. Owns the two operations around admin
+# SyllabusMate broadcast service. Owns the two operations around admin
 # broadcasts (announcements/promotions/feedback requests/tests) that
 # shouldn't trust a client: resolving which students a broadcast's
 # board/grade/subject/medium filter actually reaches, and scoring a

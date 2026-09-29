@@ -1,4 +1,4 @@
-# TutorOps LLM orchestration service. Owns system-prompt construction,
+# SyllabusMate LLM orchestration service. Owns system-prompt construction,
 # syllabus-relevance filtering, and LLM provider selection (Anthropic /
 # Azure OpenAI); kept as its own container so the provider/prompt layer can
 # be scaled, redeployed, or swapped independently of the web app.

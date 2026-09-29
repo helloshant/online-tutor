@@ -10,7 +10,7 @@ export default async function ResetPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-8 shadow-sm">
         <Link href="/" className="text-sm font-semibold text-brand">
-          TutorOps
+          SyllabusMate
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">Set a new password</h1>
 

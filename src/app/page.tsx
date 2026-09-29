@@ -23,7 +23,7 @@ export default function Home() {
   return (
     <div className="flex flex-1 flex-col bg-background">
       <header className="flex items-center justify-between px-6 py-5 sm:px-10">
-        <span className="text-lg font-semibold text-brand">TutorOps</span>
+        <span className="text-lg font-semibold text-brand">SyllabusMate</span>
         <nav className="flex items-center gap-4 text-sm font-medium">
           <Link href="/login" className="text-foreground/82 hover:text-foreground">
             Log in
@@ -42,7 +42,7 @@ export default function Home() {
           A tutor that knows exactly what you&apos;re supposed to be studying.
         </h1>
         <p className="mt-5 max-w-xl text-lg text-foreground/75">
-          Pick your board, grade, subjects, and language. TutorOps keeps every answer inside your
+          Pick your board, grade, subjects, and language. SyllabusMate keeps every answer inside your
           syllabus — nothing more, nothing off-topic.
         </p>
         <div className="mt-8 flex gap-3">
@@ -71,7 +71,7 @@ export default function Home() {
       </main>
 
       <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/65">
-        TutorOps — built for students, by subject, by syllabus.
+        SyllabusMate — built for students, by subject, by syllabus.
       </footer>
     </div>
   );

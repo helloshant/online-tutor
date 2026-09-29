@@ -203,7 +203,7 @@ export function DashboardShell({
     <div className="flex h-screen flex-col bg-background">
       <header className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-brand">TutorOps</span>
+          <span className="text-sm font-semibold text-brand">SyllabusMate</span>
           <span className="hidden text-xs text-foreground/68 sm:inline">
             {isStaffUser
               ? hasSyllabusScope

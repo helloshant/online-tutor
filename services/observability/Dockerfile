@@ -1,4 +1,4 @@
-# TutorOps observability service. Owns how orchestrator answer-pipeline
+# SyllabusMate observability service. Owns how orchestrator answer-pipeline
 # events (cache/database/llm/rejected hits) get recorded and priced --
 # kept as its own container so ingestion and future analytics/retention
 # jobs can be scaled or redeployed independently of the orchestrator.

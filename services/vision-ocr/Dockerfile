@@ -1,4 +1,4 @@
-# TutorOps vision-ocr service. Owns image preprocessing + OCR (Image
+# SyllabusMate vision-ocr service. Owns image preprocessing + OCR (Image
 # Processing -> Image-to-Text/Vision stages) for a scanned/photographed
 # paper -- kept out of both the web app and the archetype-miner service so
 # the Google Document AI credentials and the sharp/image-processing

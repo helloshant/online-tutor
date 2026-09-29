@@ -1,4 +1,4 @@
-# TutorOps archetype-miner service. Owns the 5-stage question-archetype
+# SyllabusMate archetype-miner service. Owns the 5-stage question-archetype
 # pipeline (Segmenter -> Analyzer -> embed/cluster -> Miner -> Critic) that
 # turns a historical question corpus into a reusable archetype taxonomy --
 # batch/analytical work with its own LLM+embedding cost profile and its

@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="min-h-screen bg-background">
       <header className="flex items-center justify-between border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-6">
-          <span className="text-sm font-semibold text-brand">TutorOps Admin</span>
+          <span className="text-sm font-semibold text-brand">SyllabusMate Admin</span>
           <nav className="flex gap-4 text-sm">
             {canSee("users") && (
               <Link href="/admin" className="text-foreground/82 hover:text-foreground">

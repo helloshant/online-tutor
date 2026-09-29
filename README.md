@@ -1,4 +1,4 @@
-# TutorOps — Online Tutor SaaS
+# SyllabusMate — Online Tutor SaaS
 
 A chatops-style tutoring platform. Students subscribe to a board, grade, medium, and a set of
 subjects; pay via CCAvenue (optionally redeeming a one-time discount code first — anywhere from a
