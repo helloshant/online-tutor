@@ -37,3 +37,58 @@ export function resolveMonthlyTokenLimit(overrideRow: { monthly_token_limit: num
   if (overrideRow.monthly_token_limit === 0) return { unlimited: true, limit: Infinity };
   return { unlimited: false, limit: overrideRow.monthly_token_limit };
 }
+
+// A brand-new signup's free-trial allowance -- deliberately small, and (see
+// resolveUsageLimit below) a ONE-TIME lifetime cap, never a resetting one:
+// the whole point is limited testing ahead of a real subscription, not a
+// permanent free tier. Never itself 0, same reasoning as
+// DEFAULT_MONTHLY_TOKEN_LIMIT above.
+export const DEFAULT_TRIAL_TOKEN_LIMIT = Number(process.env.DEFAULT_TRIAL_TOKEN_LIMIT) || 5_000;
+
+// Passed as monthly_llm_tokens_for_user's own p_since when a lifetime total
+// is wanted instead of a since-this-month one -- that RPC just sums a
+// student's LLM tokens at or after a given timestamp (see
+// 0037_student_token_usage_limits.sql), so "since the beginning of time"
+// gives a lifetime total for free, no separate RPC needed.
+export const EPOCH_ISO = new Date(0).toISOString();
+
+// A student's own `subscriptions.status`, as far as usage-capping cares --
+// "cancelled"/other statuses never reach here (every enforcement call site
+// only looks up rows with status in ("active", "pending_payment") to begin
+// with) and are treated as no-subscription-at-all by their own callers.
+export type SubscriptionStatusForUsage = "active" | "pending_payment";
+
+// Which usage cap actually applies to a request, and what to tell the
+// student when they're over it -- the one thing every enforcement call site
+// (`/api/chat`, `/api/topics/[id]/exercises/generate`,
+// `/api/practice-papers`) needs, now resolved in one place instead of each
+// re-deriving its own "since" timestamp and message text. `pending_payment`
+// (a trial student who hasn't paid yet) gets the small lifetime cap above;
+// `active` (a paying student) keeps the existing resetting monthly cap. An
+// admin's explicit "unlimited" override (monthly_token_limit === 0, see
+// resolveMonthlyTokenLimit's own comment on the sentinel) wins regardless
+// of subscription status -- a comped student should never be trial-capped
+// just because they haven't paid yet.
+export function resolveUsageLimit(
+  status: SubscriptionStatusForUsage,
+  overrideRow: { monthly_token_limit: number } | null,
+): { unlimited: boolean; limit: number; sinceIso: string; exceededMessage: string } {
+  if (overrideRow?.monthly_token_limit === 0) {
+    return { unlimited: true, limit: Infinity, sinceIso: EPOCH_ISO, exceededMessage: "" };
+  }
+  if (status === "pending_payment") {
+    return {
+      unlimited: false,
+      limit: DEFAULT_TRIAL_TOKEN_LIMIT,
+      sinceIso: EPOCH_ISO,
+      exceededMessage: "You've used up your free trial's AI tutoring tokens. Subscribe to keep going.",
+    };
+  }
+  const { unlimited, limit } = resolveMonthlyTokenLimit(overrideRow);
+  return {
+    unlimited,
+    limit,
+    sinceIso: startOfCurrentMonthIso(),
+    exceededMessage: "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
+  };
+}

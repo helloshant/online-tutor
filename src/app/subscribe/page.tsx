@@ -53,7 +53,14 @@ export default async function SubscribePage({
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-sm">
         <h1 className="text-2xl font-semibold">Complete your subscription</h1>
-        <p className="mt-1 text-sm text-foreground/75">One last step before you can start asking questions.</p>
+        {/* Reachable both from a fresh trial signup (never asked a
+            question yet) and from the dashboard's own "Subscribe" banner
+            link partway through, or after exhausting, a free trial --
+            worded to hold for either case rather than assuming the
+            former. */}
+        <p className="mt-1 text-sm text-foreground/75">
+          Subscribe to keep using TutorOps beyond your free trial.
+        </p>
 
         {error && CALLBACK_ERROR_MESSAGES[error] && (
           <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

@@ -110,5 +110,10 @@ export async function confirmSelection(
     return { error: "Could not save your subject selection. Please try again." };
   }
 
-  redirect("/subscribe");
+  // Straight into the dashboard on a small free-trial token allowance
+  // (see dashboard/page.tsx's own trial gate) rather than requiring
+  // payment before any real product use -- /subscribe stays reachable at
+  // any time via the dashboard's own trial banner, and dashboard/page.tsx
+  // itself redirects here once trial tokens run out.
+  redirect("/dashboard");
 }

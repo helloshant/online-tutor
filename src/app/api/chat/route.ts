@@ -8,10 +8,7 @@ import {
   resolveContentMedium,
   resolveResponseLanguage,
 } from "@/lib/studentScope";
-import {
-  resolveMonthlyTokenLimit,
-  startOfCurrentMonthIso,
-} from "@/lib/usageLimits";
+import { resolveUsageLimit } from "@/lib/usageLimits";
 import {
   getOrchestratedReply,
   type ChatOrchestrationRequest,
@@ -357,6 +354,10 @@ async function handleChatRequest(request: Request) {
     .single();
 
   let subscriptionId: string | null = null;
+  // Set alongside subscriptionId, in the same real-student branch below --
+  // used further down to decide which usage cap applies (see
+  // usageLimits.ts's own resolveUsageLimit).
+  let subscriptionStatus: "active" | "pending_payment" | null = null;
   // Set only for a staff member actively previewing a specific
   // board/grade/medium (see resolveStaffPreviewScope) -- used below to
   // scope/persist their chat_messages rows separately per preview, instead
@@ -426,16 +427,20 @@ async function handleChatRequest(request: Request) {
       };
     }
   } else {
+    // Includes a trial (pending_payment) subscription, not just a paid
+    // (active) one -- see usageLimits.ts's own resolveUsageLimit, used
+    // below, for how a trial student's own usage is capped differently
+    // from a paying student's.
     const { data: subscription } = await supabase
       .from("subscriptions")
       .select("id, board_id, grade_id, medium, status")
       .eq("user_id", user.id)
-      .eq("status", "active")
+      .in("status", ["active", "pending_payment"])
       .maybeSingle();
 
     if (!subscription) {
       return NextResponse.json(
-        { error: "No active subscription" },
+        { error: "No active subscription or trial" },
         { status: 403 },
       );
     }
@@ -461,6 +466,7 @@ async function handleChatRequest(request: Request) {
     ).subjects;
 
     subscriptionId = subscription.id;
+    subscriptionStatus = subscription.status as "active" | "pending_payment";
     ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } =
       await buildStudentOrchestrationRequest(supabase, {
         userId: user.id,
@@ -494,21 +500,27 @@ async function handleChatRequest(request: Request) {
   // anything on a fresh LLM call in the first place -- and before the
   // regenerate-lookup/history queries just below too, so a blocked request
   // does the least possible work.
-  if (subscriptionId) {
+  if (subscriptionId && subscriptionStatus) {
     const { data: override } = await admin
       .from("student_usage_limits")
       .select("monthly_token_limit")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const { unlimited, limit } = resolveMonthlyTokenLimit(override);
+    // A trial (pending_payment) student is capped by a small ONE-TIME
+    // lifetime allowance instead of the paid tier's resetting monthly one
+    // -- see resolveUsageLimit's own comment.
+    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
+      subscriptionStatus,
+      override,
+    );
 
     if (!unlimited) {
       const { data: usedTokens, error: usageError } = await admin.rpc(
         "monthly_llm_tokens_for_user",
         {
           p_user_id: user.id,
-          p_since: startOfCurrentMonthIso(),
+          p_since: sinceIso,
         },
       );
       if (usageError) {
@@ -522,10 +534,7 @@ async function handleChatRequest(request: Request) {
         );
       } else if ((usedTokens ?? 0) >= limit) {
         return NextResponse.json(
-          {
-            error:
-              "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
-          },
+          { error: exceededMessage },
           { status: 429 },
         );
       }

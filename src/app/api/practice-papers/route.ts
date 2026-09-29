@@ -7,10 +7,7 @@ import {
   resolveStudentSubjectScope,
   resolveContentMedium,
 } from "@/lib/studentScope";
-import {
-  resolveMonthlyTokenLimit,
-  startOfCurrentMonthIso,
-} from "@/lib/usageLimits";
+import { resolveUsageLimit } from "@/lib/usageLimits";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { generatePracticePaper } from "@/lib/orchestratorClient";
 import type { DifficultyLevel } from "@/lib/orchestratorClient";
@@ -118,7 +115,7 @@ async function handlePost(request: Request) {
       {
         error: isStaff(profile?.role)
           ? "Select a board and grade to preview practice papers for."
-          : "You don't have an active subscription for this subject.",
+          : "You don't have an active subscription or trial for this subject.",
       },
       { status: isStaff(profile?.role) ? 400 : 403 },
     );
@@ -126,18 +123,33 @@ async function handlePost(request: Request) {
 
   if (!isStaff(profile?.role)) {
     const admin = createAdminClient();
-    const { data: override } = await admin
-      .from("student_usage_limits")
-      .select("monthly_token_limit")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // A trial (pending_payment) student is capped differently from a
+    // paying (active) one -- see resolveUsageLimit. No subscription row at
+    // all falls back to the paying/"active" cap, same as this route's own
+    // behavior before trial subscriptions existed.
+    const [{ data: override }, { data: subscription }] = await Promise.all([
+      admin
+        .from("student_usage_limits")
+        .select("monthly_token_limit")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("subscriptions")
+        .select("status")
+        .eq("user_id", user.id)
+        .in("status", ["active", "pending_payment"])
+        .maybeSingle(),
+    ]);
 
-    const { unlimited, limit } = resolveMonthlyTokenLimit(override);
+    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
+      (subscription?.status as "active" | "pending_payment") ?? "active",
+      override,
+    );
 
     if (!unlimited) {
       const { data: usedTokens, error: usageError } = await admin.rpc(
         "monthly_llm_tokens_for_user",
-        { p_user_id: user.id, p_since: startOfCurrentMonthIso() },
+        { p_user_id: user.id, p_since: sinceIso },
       );
       if (usageError) {
         console.error(
@@ -145,13 +157,7 @@ async function handlePost(request: Request) {
           usageError,
         );
       } else if ((usedTokens ?? 0) >= limit) {
-        return NextResponse.json(
-          {
-            error:
-              "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
-          },
-          { status: 429 },
-        );
+        return NextResponse.json({ error: exceededMessage }, { status: 429 });
       }
     }
   }

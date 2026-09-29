@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveUsageLimit, EPOCH_ISO } from "@/lib/usageLimits";
 import { DashboardShell } from "./dashboard-shell";
 import type { Medium } from "@/lib/supabase/types";
 
@@ -102,7 +104,27 @@ export default async function DashboardPage({
     .maybeSingle();
 
   if (!subscription) redirect("/onboarding");
-  if (subscription.status === "pending_payment") redirect("/subscribe");
+
+  // A trial (pending_payment) student gets straight into the dashboard on
+  // a small free-trial token allowance instead of being sent to /subscribe
+  // immediately (see onboarding/actions.ts's own comment) -- but only
+  // while that allowance still has something left. Checked with the
+  // service-role client since monthly_llm_tokens_for_user is service-role
+  // only (see 0037_student_token_usage_limits.sql), same as every other
+  // usage-cap check in this app.
+  let trial: { tokensUsed: number; tokensLimit: number } | null = null;
+  if (subscription.status === "pending_payment") {
+    const admin = createAdminClient();
+    const [{ data: override }, { data: tokensUsed }] = await Promise.all([
+      admin.from("student_usage_limits").select("monthly_token_limit").eq("user_id", user.id).maybeSingle(),
+      admin.rpc("monthly_llm_tokens_for_user", { p_user_id: user.id, p_since: EPOCH_ISO }),
+    ]);
+    const { unlimited, limit } = resolveUsageLimit("pending_payment", override);
+    if (!unlimited) {
+      if ((tokensUsed ?? 0) >= limit) redirect("/subscribe");
+      trial = { tokensUsed: tokensUsed ?? 0, tokensLimit: limit };
+    }
+  }
 
   const [{ data: board }, { data: grade }, { data: subjectRows }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", subscription.board_id).single(),
@@ -129,6 +151,7 @@ export default async function DashboardPage({
       medium={subscription.medium}
       subjects={subjects}
       isStaffUser={false}
+      trial={trial}
     />
   );
 }

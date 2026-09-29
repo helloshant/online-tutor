@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getTopicExercises, type ExerciseType } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
+import { resolveUsageLimit } from "@/lib/usageLimits";
 import type { Medium } from "@/lib/supabase/types";
 
 // Same as generate-for-concept/route.ts's own VALID_TYPES -- an unknown/
@@ -66,11 +68,44 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
-    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
+    // Includes a trial (pending_payment) subscription, not just a paid
+    // (active) one -- same as /api/topics/[id]/summary's own lookup.
+    supabase.from("subscriptions").select("medium, status").eq("user_id", user.id).in("status", ["active", "pending_payment"]).maybeSingle(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
+
+  // Unlike a "Generate another"/regenerate click (see
+  // /api/topics/[id]/exercises/generate/route.ts), an INITIAL batch here
+  // has deliberately never been usage-capped for a paying student -- that
+  // stays unchanged. But a trial (pending_payment) student picking topic
+  // after topic in the sidebar is exactly the path this route serves, and
+  // with no cap check here at all, it would fully bypass the free-trial
+  // allowance (chat/generate/practice-papers all check it, but simply
+  // browsing topics never would). So this checks it ONLY for a trial
+  // subscription, leaving every other case (active, staff, no
+  // subscription) exactly as uncapped as before.
+  if (subscription?.status === "pending_payment") {
+    const admin = createAdminClient();
+    const { data: override } = await admin
+      .from("student_usage_limits")
+      .select("monthly_token_limit")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit("pending_payment", override);
+    if (!unlimited) {
+      const { data: usedTokens, error: usageError } = await admin.rpc("monthly_llm_tokens_for_user", {
+        p_user_id: user.id,
+        p_since: sinceIso,
+      });
+      if (usageError) {
+        console.error("Failed to check trial token usage, allowing the request:", usageError);
+      } else if ((usedTokens ?? 0) >= limit) {
+        return NextResponse.json({ error: exceededMessage }, { status: 429 });
+      }
+    }
+  }
 
   // See the matching comment in /api/topics/[id]/summary/route.ts and
   // /api/chat/route.ts -- medium always stays this topic's own real content

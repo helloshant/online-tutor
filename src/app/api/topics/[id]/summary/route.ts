@@ -45,7 +45,10 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
-    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
+    // Includes a trial (pending_payment) subscription, not just a paid
+    // (active) one, so a trial student's own native medium still resolves
+    // correctly here.
+    supabase.from("subscriptions").select("medium").eq("user_id", user.id).in("status", ["active", "pending_payment"]).maybeSingle(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;

@@ -92,6 +92,7 @@ export function DashboardShell({
   isStaffUser,
   allBoards = [],
   allGrades = [],
+  trial = null,
 }: {
   userName: string;
   subscriptionId: string | null;
@@ -107,6 +108,12 @@ export function DashboardShell({
   // rather than page.tsx having to pass them through unused every time.
   allBoards?: { id: string; name: string }[];
   allGrades?: { id: string; name: string }[];
+  // Set only for a real student on a trial (pending_payment) subscription
+  // that still has tokens left -- see dashboard/page.tsx's own trial gate,
+  // which redirects to /subscribe once this would go negative rather than
+  // ever rendering a shell with nothing left. null for a paying (active)
+  // student and for staff alike, who see no trial banner at all.
+  trial?: { tokensUsed: number; tokensLimit: number } | null;
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null,
@@ -226,6 +233,27 @@ export function DashboardShell({
           <UserMenu userName={userName} />
         </div>
       </header>
+
+      {/* Only ever rendered for a real student still on their free trial
+          (see dashboard-shell's own `trial` prop comment) -- a paying
+          student and staff see no banner at all. dashboard/page.tsx's own
+          gate already guarantees tokensRemaining is positive here (it
+          redirects to /subscribe the moment it wouldn't be), so this is
+          purely informational, not itself an enforcement point. */}
+      {trial && (
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-brand/5 px-6 py-2 text-xs text-foreground/75">
+          <span>
+            Free trial ·{" "}
+            <span className="font-medium text-foreground">
+              {Math.max(0, trial.tokensLimit - trial.tokensUsed).toLocaleString()}
+            </span>{" "}
+            of {trial.tokensLimit.toLocaleString()} AI tutoring tokens left
+          </span>
+          <Link href="/subscribe" className="shrink-0 font-medium text-brand hover:underline">
+            Subscribe
+          </Link>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* Desktop-only: below lg, subject switching happens through the

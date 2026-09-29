@@ -2,10 +2,7 @@ import Link from "next/link";
 import { isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  resolveMonthlyTokenLimit,
-  startOfCurrentMonthIso,
-} from "@/lib/usageLimits";
+import { resolveUsageLimit } from "@/lib/usageLimits";
 import { NewPasswordForm } from "@/components/new-password-form";
 import { changePassword } from "./actions";
 import type { ProfileRole } from "@/lib/supabase/types";
@@ -75,17 +72,26 @@ export default async function AccountPage() {
     .filter((name): name is string => Boolean(name))
     .sort();
 
+  // A trial (pending_payment) student is capped by a small ONE-TIME
+  // lifetime allowance instead of the paid tier's resetting monthly one --
+  // see resolveUsageLimit. Any other status (active, cancelled, expired --
+  // or no subscription at all) falls back to the monthly display, same as
+  // this page showed before trial subscriptions existed.
+  const usageStatus: "active" | "pending_payment" =
+    subscription?.status === "pending_payment" ? "pending_payment" : "active";
+  const { unlimited, limit, sinceIso } = resolveUsageLimit(usageStatus, usageLimitOverride ?? null);
+
   // monthly_llm_tokens_for_user is service-role-only by design (see
   // 0037_student_token_usage_limits.sql's own revoke/grant comment) -- an
   // ordinary session, even the student's own, can't call it directly.
   // Skipped entirely for staff, who are unmetered (same gate the admin
   // equivalent page uses).
-  const monthlyTokensUsed = staff
+  const tokensUsed = staff
     ? null
     : await createAdminClient()
         .rpc("monthly_llm_tokens_for_user", {
           p_user_id: user.id,
-          p_since: startOfCurrentMonthIso(),
+          p_since: sinceIso,
         })
         .then((r) => r.data ?? 0);
 
@@ -164,8 +170,10 @@ export default async function AccountPage() {
 
       {!staff && (
         <UsageCard
-          override={usageLimitOverride ?? null}
-          usedThisMonth={monthlyTokensUsed ?? 0}
+          isTrial={usageStatus === "pending_payment"}
+          unlimited={unlimited}
+          limit={limit}
+          used={tokensUsed ?? 0}
         />
       )}
 
@@ -182,32 +190,34 @@ export default async function AccountPage() {
 
 // Read-only student-facing sibling of admin/users/[id]/page.tsx's own
 // UsageLimitCard -- same numbers, same meter, but no override form (a
-// student can see their own cap, not change it).
+// student can see their own cap, not change it). `unlimited`/`limit`
+// already resolved by the caller (resolveUsageLimit) -- isTrial only
+// decides the WORDING here (a one-time lifetime allowance vs. a monthly
+// one that resets), not the numbers themselves.
 function UsageCard({
-  override,
-  usedThisMonth,
+  isTrial,
+  unlimited,
+  limit,
+  used,
 }: {
-  override: { monthly_token_limit: number } | null;
-  usedThisMonth: number;
+  isTrial: boolean;
+  unlimited: boolean;
+  limit: number;
+  used: number;
 }) {
-  const { unlimited, limit } = resolveMonthlyTokenLimit(override);
-  const remaining = unlimited ? null : Math.max(0, limit - usedThisMonth);
-  const pctUsed =
-    unlimited || limit === 0
-      ? 0
-      : Math.min(100, Math.round((usedThisMonth / limit) * 100));
-  const overLimit = !unlimited && usedThisMonth >= limit;
+  const remaining = unlimited ? null : Math.max(0, limit - used);
+  const pctUsed = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((used / limit) * 100));
+  const overLimit = !unlimited && used >= limit;
 
   return (
     <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
-      <h2 className="text-sm font-semibold">AI tutoring usage this month</h2>
+      <h2 className="text-sm font-semibold">
+        {isTrial ? "Free trial AI tutoring usage" : "AI tutoring usage this month"}
+      </h2>
       <p className="mt-1 text-sm text-foreground/75">
         {unlimited ? (
           <>
-            <span className="font-medium">
-              {usedThisMonth.toLocaleString()} tokens
-            </span>{" "}
-            used, no monthly limit on your account.
+            <span className="font-medium">{used.toLocaleString()} tokens</span> used, no limit on your account.
           </>
         ) : (
           <>
@@ -216,9 +226,11 @@ function UsageCard({
             >
               {remaining?.toLocaleString()} tokens
             </span>{" "}
-            remaining of {limit.toLocaleString()} this month
+            remaining of {limit.toLocaleString()} {isTrial ? "in your free trial" : "this month"}
             {overLimit &&
-              " — you've reached this month's limit; it resets at the start of next month."}
+              (isTrial
+                ? " — you've used up your free trial; subscribe to keep going."
+                : " — you've reached this month's limit; it resets at the start of next month.")}
           </>
         )}
       </p>

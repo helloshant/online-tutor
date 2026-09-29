@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import {
-  resolveMonthlyTokenLimit,
-  startOfCurrentMonthIso,
-} from "@/lib/usageLimits";
+import { resolveUsageLimit } from "@/lib/usageLimits";
 import {
   generateTopicExercise,
   type DifficultyLevel,
@@ -88,11 +85,27 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     .eq("id", user.id)
     .single();
 
+  // Fetched once, up front, for both this route's own purposes below: the
+  // usage-cap check needs `status` (a trial/pending_payment student is
+  // capped differently from a paying/active one -- see resolveUsageLimit),
+  // and the generation call further down needs `medium`. Includes a trial
+  // subscription, not just a paid one -- same as /api/chat's own lookup.
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("medium, status")
+    .eq("user_id", user.id)
+    .in("status", ["active", "pending_payment"])
+    .maybeSingle();
+
   // Usage-based pricing enforcement -- staff stay unmetered (same posture
   // every other route with a quota check already gives them), a real
-  // student's monthly token cap is checked exactly the way /api/chat
-  // checks it, before the orchestrator is ever called, so an over-quota
-  // click never spends anything on a fresh LLM call.
+  // student's token cap is checked exactly the way /api/chat checks it,
+  // before the orchestrator is ever called, so an over-quota click never
+  // spends anything on a fresh LLM call. No subscription row at all (should
+  // never happen via the normal app flow -- dashboard/page.tsx already
+  // requires one to reach any topic) falls back to the paying/"active"
+  // cap, same as this route's own behavior before trial subscriptions
+  // existed.
   if (!isStaff(profile?.role)) {
     const admin = createAdminClient();
     const { data: override } = await admin
@@ -101,14 +114,17 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const { unlimited, limit } = resolveMonthlyTokenLimit(override);
+    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
+      (subscription?.status as "active" | "pending_payment") ?? "active",
+      override,
+    );
 
     if (!unlimited) {
       const { data: usedTokens, error: usageError } = await admin.rpc(
         "monthly_llm_tokens_for_user",
         {
           p_user_id: user.id,
-          p_since: startOfCurrentMonthIso(),
+          p_since: sinceIso,
         },
       );
       if (usageError) {
@@ -120,13 +136,7 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
           usageError,
         );
       } else if ((usedTokens ?? 0) >= limit) {
-        return NextResponse.json(
-          {
-            error:
-              "You've reached this month's AI tutoring usage limit. It resets at the start of next month.",
-          },
-          { status: 429 },
-        );
+        return NextResponse.json({ error: exceededMessage }, { status: 429 });
       }
     }
   }
@@ -141,26 +151,16 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [
-    { data: board },
-    { data: grade },
-    { data: subject },
-    { data: subscription },
-  ] = await Promise.all([
-    supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
-    supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
-    supabase
-      .from("subjects")
-      .select("name, code")
-      .eq("id", topicRow.subject_id)
-      .single(),
-    supabase
-      .from("subscriptions")
-      .select("medium")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .maybeSingle(),
-  ]);
+  const [{ data: board }, { data: grade }, { data: subject }] =
+    await Promise.all([
+      supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
+      supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
+      supabase
+        .from("subjects")
+        .select("name, code")
+        .eq("id", topicRow.subject_id)
+        .single(),
+    ]);
 
   const topicMedium = topicRow.medium as Medium;
   const nativeMedium: Medium =
