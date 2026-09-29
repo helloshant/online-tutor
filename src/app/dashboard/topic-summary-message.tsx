@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import { TableText } from "@/components/markdown-table";
 import { LoadingIndicator } from "@/components/loading-indicator";
@@ -143,20 +142,19 @@ export function TopicSummaryMessage({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
 
-  // "Relevant Exercises" no longer jumps straight to this topic's own
-  // exercises -- it first lists every OTHER topic sharing this topic's
-  // `chapter` (same board/grade/subject/medium too), so a student browsing
-  // e.g. one story in "Sahitya Onushilon" can get exercises for any of the
-  // book's other stories without leaving this bubble or going back to the
-  // sidebar. null = list not requested yet (still showing the button);
-  // an array (possibly just this one topic, for a chapter with nothing
-  // else in it) once loaded. Fetched with the same direct Supabase read
-  // TopicList uses for the sidebar itself, filtered down to this one
-  // chapter -- no new API route needed for it.
+  // "Relevant Exercises" used to first list every OTHER topic sharing this
+  // topic's `chapter` (e.g. every other poem in a reader like "Malhar"),
+  // letting a student re-pick out of that whole sibling list before
+  // reaching subtopics/exercises. Reported directly as redundant: the
+  // sidebar (TopicList) already lists those exact same siblings, grouped
+  // under that same chapter heading -- a student gets here BY clicking one
+  // of them there. handleLoadChapterTopics now always resolves straight to
+  // this topic's own subtopics, so `chapterTopics` is always just
+  // `[topic]` -- kept as an array (rather than dropped) only because the
+  // "N sibling topics" back-link JSX below still reads its length.
   const [chapterTopics, setChapterTopics] = useState<SyllabusTopic[] | null>(
     null,
   );
-  const [loadingChapterTopics, setLoadingChapterTopics] = useState(false);
   const [chapterTopicsError, setChapterTopicsError] = useState<string | null>(
     null,
   );
@@ -329,67 +327,20 @@ export function TopicSummaryMessage({
     setFilteredExercises(null);
   }, [preferEnglish]);
 
-  async function handleLoadChapterTopics() {
-    setLoadingChapterTopics(true);
-    setChapterTopicsError(null);
-    try {
-      const supabase = createClient();
-
-      // `chapter` doubles as two different things depending on the
-      // subject, and only one of them is worth a sibling picker. For
-      // subjects with real books/chapters (Bengali's "Sahitya Onushilon",
-      // English's "Realm", Maths' "Ganit Prakash" in grades where it
-      // genuinely spans several books...), `chapter` groups several
-      // distinct lesson-topics UNDER MORE THAN ONE chapter value for the
-      // subject, and browsing siblings within just one of them is useful.
-      // But plenty of subjects instead give EVERY topic in the whole
-      // subject the exact same `chapter` value -- most of CBSE/ICSE's own
-      // Physics/Chemistry/Maths/Biology (that value equal to the subject's
-      // own name), but also, confirmed directly against the data, WBBSE
-      // Grade 10's entire catalogue across every subject, STEM and
-      // humanities alike (that value instead a romanized book title, e.g.
-      // Physical Science's "Bhoutobigyan O Poribesh") -- there `chapter`
-      // is really just a board-wide catalogue tag, not a real narrowing
-      // dimension, and grouping "by chapter" would just re-list the
-      // entire subject's topic index right back at the student, exactly
-      // the "displaying the same set of chapters doesn't make any sense"
-      // bug already fixed once for CBSE Biology. A literal subject-name
-      // string comparison (the original fix) only ever caught the first
-      // of these two conventions -- this checks the real, board-agnostic
-      // signal instead: does this subject have more than one DISTINCT
-      // chapter value at all? A "no" is the useless case either way, so
-      // this skips the picker list entirely and goes straight to this
-      // topic's own exercises, same as the original single-topic
-      // behavior; a "yes" narrows down to just this topic's own chapter,
-      // same as before.
-      const { data, error } = await supabase
-        .from("syllabus_topics")
-        .select("*")
-        .eq("board_id", topic.board_id)
-        .eq("grade_id", topic.grade_id)
-        .eq("subject_id", topic.subject_id)
-        .eq("medium", topic.medium)
-        .order("sort_order");
-      if (error || !data) {
-        setChapterTopicsError("Could not load topics for this chapter.");
-        return;
-      }
-
-      const distinctChapters = new Set(
-        data.map((t) => t.chapter.toLowerCase()),
-      );
-      if (distinctChapters.size <= 1) {
-        setChapterTopics([topic]);
-        handleSelectExerciseTopic(topic);
-        return;
-      }
-
-      setChapterTopics(data.filter((t) => t.chapter === topic.chapter));
-    } catch {
-      setChapterTopicsError("Could not load topics for this chapter.");
-    } finally {
-      setLoadingChapterTopics(false);
-    }
+  // Reported directly: this used to first list every OTHER topic sharing
+  // this topic's own `chapter` (e.g. every other poem in a WBBSE reader
+  // like "Malhar") before letting a student drill into subtopics/
+  // exercises. But the sidebar (TopicList) already lists every one of
+  // those same siblings individually, grouped under that exact chapter
+  // heading -- a student reaches this topic BY clicking it there. Re-
+  // showing that identical list here, asking them to pick a topic again
+  // out of a dozen options including the one they just clicked, was pure
+  // redundant friction, not a narrowing step. This now always goes
+  // straight to the currently selected topic's own subtopics, same as
+  // the single-topic-in-chapter case already did.
+  function handleLoadChapterTopics() {
+    setChapterTopics([topic]);
+    void handleSelectExerciseTopic(topic);
   }
 
   // Parameterized on `target` rather than always this bubble's own `topic`
@@ -714,23 +665,13 @@ export function TopicSummaryMessage({
             )}
 
             {chapterTopics === null ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleLoadChapterTopics}
-                  disabled={loadingChapterTopics}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {loadingChapterTopics
-                    ? "Finding topics…"
-                    : "Relevant Exercises"}
-                </button>
-                {loadingChapterTopics && (
-                  <p className="mt-2 text-sm text-foreground/68">
-                    <LoadingIndicator label="Loading topics for this chapter…" />
-                  </p>
-                )}
-              </>
+              <button
+                type="button"
+                onClick={handleLoadChapterTopics}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                Relevant Exercises
+              </button>
             ) : selectedExerciseTopic === null ? (
               <>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/65">
