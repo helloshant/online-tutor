@@ -1,25 +1,29 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getTopicConcepts, getTopicSubtopics } from "@/lib/orchestratorClient";
+import { getTopicSubtopics } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 
-// One merged sub-topic picker option, shown before a student drills into a
-// chapter's exercises -- either a real, exam-mined sub-topic (CBSE today,
-// see getTopicSubtopics/the orchestrator's own /v1/topic-exercises/subtopics)
-// or one of the chapter's own content-chunk concepts (the WBBSE/ICSE
-// fallback, see getTopicConcepts). These are two genuinely separate data
-// sources -- CBSE has real exam-mining coverage, WBBSE/ICSE currently have
-// none at all -- merged here into one flat list so the frontend never has
-// to know which source a chapter happened to have.
-export type SubtopicOption =
-  | { kind: "archetype"; name: string; questionCount: number }
-  | { kind: "concept"; id: string; term: string };
+// One sub-topic picker option, shown before a student drills into a
+// chapter's exercises -- a real, exam-mined sub-topic (CBSE today, see
+// getTopicSubtopics/the orchestrator's own /v1/topic-exercises/subtopics).
+//
+// This used to also merge in one entry per individual glossary/definition
+// term extracted from the chapter's own content chunks (the WBBSE/ICSE
+// fallback, see getTopicConcepts/chunkConcepts.ts), for a chapter with no
+// real exam-mined data. Reported directly against a live example
+// ("Understanding Markets"): that fallback surfaced 27 single-term picks
+// (Market, Needs, Wants, Trade, Price...) -- individually accurate (each
+// really is defined in the chapter), but not a useful narrowing step, just
+// noise ahead of the real choice a student wants ("give me exercises for
+// this chapter"). Dropped board-agnostically rather than only for this one
+// chapter's subject: a chapter with no exam-mined sub-topics now always
+// returns an empty list here, which the frontend already treats as "skip
+// the picker, load the whole chapter's exercises directly" -- same
+// fallback path a chapter with no data of any kind already took.
+export type SubtopicOption = { kind: "archetype"; name: string; questionCount: number };
 
-// Thin merge proxy, same "resolve topicId -> board/grade/subject names,
-// then call the orchestrator" shape as
-// /api/topics/[id]/exercises/patterns/route.ts -- this route's own job is
-// fanning out to both of the orchestrator's sub-topic sources and combining
-// them, nothing else.
+// Thin proxy, same "resolve topicId -> board/grade/subject names, then call
+// the orchestrator" shape as /api/topics/[id]/exercises/patterns/route.ts.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     return await handleGet(await params);
@@ -49,23 +53,15 @@ async function handleGet({ id: topicId }: { id: string }) {
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }, conceptsResult] = await Promise.all([
+  const [{ data: board }, { data: grade }, { data: subject }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name").eq("id", topicRow.subject_id).single(),
-    // Doesn't depend on the board/grade/subject names at all (a plain
-    // topic_id chunk lookup) -- kicked off alongside them rather than
-    // after, for max parallelism. Best-effort: a failure here just means
-    // this source contributes nothing, same posture as the flat pattern
-    // picker's own lookup failure handling below.
-    getTopicConcepts(topicId).catch((err) => {
-      console.error("Topic concepts request failed:", err);
-      return { concepts: [] };
-    }),
   ]);
 
-  // Best-effort, same reasoning as conceptsResult above -- a failure on
-  // this source alone shouldn't hide whatever the other source found.
+  // Best-effort: a failure here just means an empty picker list, same
+  // fallback the frontend already takes for a chapter with no exam-mined
+  // sub-topics at all.
   const subtopicsResult = await getTopicSubtopics({
     boardName: board?.name ?? "",
     // See toArchetypeGradeOrYear's own comment -- grades.name ("Grade N")
@@ -80,16 +76,9 @@ async function handleGet({ id: topicId }: { id: string }) {
     return { subtopics: [] };
   });
 
-  // Archetype-sourced entries first (real exam evidence), concept-sourced
-  // ones after. A chapter with neither returns an empty array here, which
-  // the frontend treats as "skip the picker, load today's flat batch
-  // directly" -- see topic-summary-message.tsx.
-  const subtopics: SubtopicOption[] = [
-    ...subtopicsResult.subtopics.map(
-      (s): SubtopicOption => ({ kind: "archetype", name: s.name, questionCount: s.questionCount })
-    ),
-    ...conceptsResult.concepts.map((c): SubtopicOption => ({ kind: "concept", id: c.id, term: c.term })),
-  ];
+  const subtopics: SubtopicOption[] = subtopicsResult.subtopics.map(
+    (s): SubtopicOption => ({ kind: "archetype", name: s.name, questionCount: s.questionCount })
+  );
 
   return NextResponse.json({ subtopics });
 }
