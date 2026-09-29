@@ -260,6 +260,7 @@ function readImageFile(file: File): Promise<SelectedImage> {
 const MessageBubble = memo(function MessageBubble({
   entry,
   subjectId,
+  subjectCode,
   isRegenerating,
   onRevealProgress,
   preferEnglish,
@@ -267,6 +268,10 @@ const MessageBubble = memo(function MessageBubble({
 }: {
   entry: Extract<TimelineEntry, { kind: "message" }>;
   subjectId: string;
+  // Threaded through to TopicPractice/PatternPicker -- see PatternPicker's
+  // own comment on why the type picker's "Numerical" pill is subject-
+  // gated rather than always offered.
+  subjectCode: string;
   isRegenerating: boolean;
   onRevealProgress: () => void;
   // The CURRENT live toggle state, not a frozen historical snapshot the
@@ -370,6 +375,7 @@ const MessageBubble = memo(function MessageBubble({
             <TopicPractice
               topicId={entry.matchedTopic.id}
               subjectId={subjectId}
+              subjectCode={subjectCode}
               chapter={entry.matchedTopic.chapter}
               topic={entry.matchedTopic.topic}
               preferEnglish={preferEnglish}
@@ -1091,6 +1097,7 @@ export function ChatPanel({
                 key={entry.entryId}
                 topic={entry.topic}
                 preferEnglish={entry.preferEnglish}
+                subjectCode={subject.code}
                 previewBoardId={boardId}
                 previewGradeId={gradeId}
                 previewMedium={medium}
@@ -1106,6 +1113,7 @@ export function ChatPanel({
                 key={entry.message.id}
                 entry={entry}
                 subjectId={subject.id}
+                subjectCode={subject.code}
                 isRegenerating={entry.message.id === regeneratingMessageId}
                 onRevealProgress={handleRevealProgress}
                 preferEnglish={effectivePreferEnglish}

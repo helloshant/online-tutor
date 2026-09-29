@@ -62,6 +62,7 @@ const VERDICT_STYLES: Record<ExerciseVerdict, { box: string; label: string }> =
 export function TopicPractice({
   topicId,
   subjectId,
+  subjectCode,
   chapter,
   topic,
   preferEnglish,
@@ -73,6 +74,9 @@ export function TopicPractice({
 }: {
   topicId: string;
   subjectId: string;
+  // Passed straight through to PatternPicker -- see its own comment on
+  // why the type picker's "Numerical" pill is subject-gated.
+  subjectCode: string;
   chapter: string;
   topic: string;
   preferEnglish: boolean;
@@ -321,6 +325,7 @@ export function TopicPractice({
         <PatternPicker
           key={`${topicId}:${preferEnglish}:${subTopic ?? ""}`}
           topicId={topicId}
+          subjectCode={subjectCode}
           preferEnglish={preferEnglish}
           subTopic={subTopic}
           onExerciseGenerated={handleExerciseGenerated}

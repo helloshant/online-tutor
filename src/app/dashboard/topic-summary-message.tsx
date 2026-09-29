@@ -38,6 +38,17 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   numerical: "Numerical",
 };
 
+// Reported directly: "Numerical" was offered as a type for every subject,
+// including ones with no numerical-style problems at all (Hindi, English,
+// History, ...). Real numerical content lives in Mathematics/Physics/
+// Chemistry, plus the two COMBINED science subjects that cover
+// physics/chemistry topics without a standalone Physics/Chemistry
+// subject of their own at that grade -- CBSE's own "Science" (SC, grades
+// 6-10) and West Bengal Board's "Physical Science" (PS). Subject CODE,
+// not name, since that's what's already threaded through as
+// subjectCode -- see its own comment on why.
+const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
+
 // Mirrors /api/topics/[id]/exercises/subtopics' own SubtopicOption shape --
 // same "define a local mirror type on the client side" convention
 // pattern-picker.tsx's own Pattern type already follows, rather than
@@ -71,6 +82,7 @@ type SubtopicSelection = SubtopicOption | { kind: "all" };
 export function TopicSummaryMessage({
   topic,
   preferEnglish,
+  subjectCode,
   previewBoardId,
   previewGradeId,
   previewMedium,
@@ -79,6 +91,12 @@ export function TopicSummaryMessage({
 }: {
   topic: SyllabusTopic;
   preferEnglish: boolean;
+  // Threaded through to TopicPractice/PatternPicker -- see
+  // PatternPicker's own comment on why the type picker's "Numerical"
+  // pill is subject-gated rather than always offered. SyllabusTopic
+  // itself only carries subject_id, not a name/code, so this has to come
+  // from the caller (ChatPanel already has the full subject record).
+  subjectCode: string;
   // Set for staff only, while previewing a specific board/grade/medium --
   // null for a real student (whose scope is always subscription-derived)
   // and for staff in unrestricted mode. Sent through to
@@ -201,6 +219,11 @@ export function TopicSummaryMessage({
   const [allType, setAllType] = useState<ExerciseType | undefined>(
     undefined,
   );
+  // Shared by every type picker in this component (concept block, both
+  // "all"-path blocks) -- see NUMERICAL_SUBJECT_CODES' own comment.
+  const availableExerciseTypes = NUMERICAL_SUBJECT_CODES.has(subjectCode)
+    ? EXERCISE_TYPES
+    : EXERCISE_TYPES.filter((t) => t !== "numerical");
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -912,6 +935,7 @@ export function TopicSummaryMessage({
                           <TopicPractice
                             topicId={selectedExerciseTopic.id}
                             subjectId={selectedExerciseTopic.subject_id}
+                            subjectCode={subjectCode}
                             chapter={selectedExerciseTopic.chapter}
                             topic={selectedExerciseTopic.topic}
                             preferEnglish={preferEnglish}
@@ -1026,7 +1050,7 @@ export function TopicSummaryMessage({
                             <span className="self-center text-xs text-foreground/65">
                               Type:
                             </span>
-                            {EXERCISE_TYPES.map((t) => (
+                            {availableExerciseTypes.map((t) => (
                               <button
                                 key={t}
                                 type="button"
@@ -1096,7 +1120,7 @@ export function TopicSummaryMessage({
                             <span className="self-center text-xs text-foreground/65">
                               Type:
                             </span>
-                            {EXERCISE_TYPES.map((t) => (
+                            {availableExerciseTypes.map((t) => (
                               <button
                                 key={t}
                                 type="button"
@@ -1164,7 +1188,7 @@ export function TopicSummaryMessage({
                         <span className="self-center text-xs text-foreground/65">
                           Type:
                         </span>
-                        {EXERCISE_TYPES.map((t) => (
+                        {availableExerciseTypes.map((t) => (
                           <button
                             key={t}
                             type="button"

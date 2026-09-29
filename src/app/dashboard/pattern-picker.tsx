@@ -31,6 +31,15 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   numerical: "Numerical",
 };
 
+// Same local-mirror convention as ExerciseType above -- see
+// topic-summary-message.tsx's own identical constant for the full
+// reasoning (Numerical only makes sense for Mathematics/Physics/
+// Chemistry, plus the two combined science subjects -- CBSE's "Science"
+// and West Bengal Board's "Physical Science" -- that cover physics/
+// chemistry content without a standalone Physics/Chemistry subject at
+// that grade).
+const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
+
 // A curated, real exam pattern mined for a topic -- see the endpoint's own
 // comment (/api/topics/[id]/exercises/patterns) for the full shape.
 // difficultyDistribution is the pattern's own real historical spread, used
@@ -153,11 +162,15 @@ type ActiveSelection = {
 // specific just renders nothing extra.
 export function PatternPicker({
   topicId,
+  subjectCode,
   preferEnglish,
   subTopic,
   onExerciseGenerated,
 }: {
   topicId: string;
+  // See NUMERICAL_SUBJECT_CODES' own comment -- gates the "Numerical"
+  // type pill below.
+  subjectCode: string;
   preferEnglish: boolean;
   // Set only when this picker is mounted underneath an already-selected
   // sub-topic pill (see topic-summary-message.tsx's own subtopic picker,
@@ -170,6 +183,9 @@ export function PatternPicker({
   subTopic?: string;
   onExerciseGenerated: (exercise: PatternPickerExercise) => void;
 }) {
+  const availableExerciseTypes = NUMERICAL_SUBJECT_CODES.has(subjectCode)
+    ? EXERCISE_TYPES
+    : EXERCISE_TYPES.filter((t) => t !== "numerical");
   const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [active, setActive] = useState<ActiveSelection | null>(null);
@@ -486,7 +502,7 @@ export function PatternPicker({
             <span className="text-xs text-foreground/65">
               Type: {active.type ? EXERCISE_TYPE_LABELS[active.type] : "Any"}
             </span>
-            {EXERCISE_TYPES.map((t) => (
+            {availableExerciseTypes.map((t) => (
               <button
                 key={t}
                 type="button"
