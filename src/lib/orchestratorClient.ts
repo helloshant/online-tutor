@@ -174,6 +174,10 @@ export type TopicExercisesRequest = {
   // re-serves the exact same banked exercises the first call already
   // stored).
   forceFresh?: boolean;
+  // Set only by the "More exercises" action's own type picker on an
+  // already-loaded flat batch -- see the orchestrator's own
+  // TopicExercisesRequest comment for why this implies forceFresh too.
+  requestedType?: ExerciseType;
 };
 
 // id is the exercise's own stable answered_questions row id -- always

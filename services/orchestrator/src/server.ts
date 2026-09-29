@@ -1266,8 +1266,10 @@ app.post(
     // past the bank-hit path below -- the "more exercises" action on an
     // already-loaded flat batch wants a genuinely NEW batch, not the same
     // banked rows this scope already returned on a prior, non-forceFresh
-    // call for it.
-    const found = body.forceFresh ? [] : await findRelevantExercises(scope, body.topicId);
+    // call for it. requestedType implies the same -- a banked row's own
+    // type isn't reliably known (see ExerciseItem.type's own comment), so
+    // a specific type request always generates fresh too.
+    const found = body.forceFresh || body.requestedType ? [] : await findRelevantExercises(scope, body.topicId);
     const relevantFound = scopedArchetypeIds
       ? found.filter(
           (f) =>
@@ -1346,6 +1348,7 @@ app.post(
         topic: body.topic,
         count: EXERCISE_GENERATION_COUNT,
         archetypes,
+        requestedType: body.requestedType,
       });
       const { text } = await getChatReply({
         systemPrompt,

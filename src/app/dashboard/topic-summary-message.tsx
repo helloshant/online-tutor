@@ -192,6 +192,15 @@ export function TopicSummaryMessage({
   const [conceptType, setConceptType] = useState<ExerciseType | undefined>(
     undefined,
   );
+  // Sibling of conceptType above, for the flat "all exercises" path's own
+  // "More exercises" type picker (see the render branch below) -- kept
+  // separate rather than reused, since a chapter can have BOTH a concept
+  // picker and a flat "skip" pick reachable in the same session (see
+  // SubtopicSelection's own comment on kind: "all" covering two cases),
+  // and their own sticky type preferences shouldn't bleed into each other.
+  const [allType, setAllType] = useState<ExerciseType | undefined>(
+    undefined,
+  );
 
   // Tags actually present among this topic's own banked entries (an admin
   // has to have tagged a topic-scoped entry for any of this to show up --
@@ -291,6 +300,7 @@ export function TopicSummaryMessage({
     setExercisesError(null);
     setLoadingMoreExercises(false);
     setConceptType(undefined);
+    setAllType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -379,7 +389,15 @@ export function TopicSummaryMessage({
   // a second call return something NEW instead of re-serving the exact
   // same banked exercises the first call already stored; append alone
   // only controls how the response is merged into local state.
-  async function handleLoadExercises(target: SyllabusTopic, subTopic?: string, append = false) {
+  async function handleLoadExercises(
+    target: SyllabusTopic,
+    subTopic?: string,
+    append = false,
+    // Only ever passed on an append call, same reasoning
+    // handleLoadConceptExercises' own requestedType param already
+    // documents.
+    requestedType?: ExerciseType,
+  ) {
     if (append) setLoadingMoreExercises(true);
     else setLoadingExercises(true);
     setExercisesError(null);
@@ -389,6 +407,7 @@ export function TopicSummaryMessage({
       });
       if (subTopic) params.set("subTopic", subTopic);
       if (append) params.set("forceFresh", "true");
+      if (requestedType) params.set("requestedType", requestedType);
       const res = await fetch(`/api/topics/${target.id}/exercises?${params}`);
       const body = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(body?.exercises)) {
@@ -517,6 +536,7 @@ export function TopicSummaryMessage({
     setExercisesError(null);
     setLoadingMoreExercises(false);
     setConceptType(undefined);
+    setAllType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -550,6 +570,7 @@ export function TopicSummaryMessage({
     setExercisesError(null);
     setLoadingMoreExercises(false);
     setConceptType(undefined);
+    setAllType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -570,6 +591,7 @@ export function TopicSummaryMessage({
     setExercisesError(null);
     setLoadingMoreExercises(false);
     setConceptType(undefined);
+    setAllType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -588,6 +610,7 @@ export function TopicSummaryMessage({
     setExercisesError(null);
     setLoadingMoreExercises(false);
     setConceptType(undefined);
+    setAllType(undefined);
     setTopicTags([]);
     setActiveTagFilter(null);
     setFilteredExercises(null);
@@ -1053,17 +1076,57 @@ export function TopicSummaryMessage({
                             a picker that DOES exist here (subtopics.length
                             > 0) instead of never having shown one. */}
                         {selectedSubtopic?.kind === "all" && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              selectedExerciseTopic &&
-                              void handleLoadExercises(selectedExerciseTopic, undefined, true)
-                            }
-                            disabled={loadingMoreExercises}
-                            className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
-                          >
-                            {loadingMoreExercises ? "Generating…" : "More exercises"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                selectedExerciseTopic &&
+                                void handleLoadExercises(selectedExerciseTopic, undefined, true, allType)
+                              }
+                              disabled={loadingMoreExercises}
+                              className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
+                            >
+                              {loadingMoreExercises ? "Generating…" : "More exercises"}
+                            </button>
+                            {/* Same type-picker shape as the concept
+                                block's own above -- clicking a pill both
+                                sets it as the sticky preference for the
+                                plain button above AND immediately
+                                generates one more batch at that type. */}
+                            <span className="self-center text-xs text-foreground/65">
+                              Type:
+                            </span>
+                            {EXERCISE_TYPES.map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setAllType(t);
+                                  if (selectedExerciseTopic) {
+                                    void handleLoadExercises(selectedExerciseTopic, undefined, true, t);
+                                  }
+                                }}
+                                disabled={loadingMoreExercises}
+                                title={`Generate more, ${EXERCISE_TYPE_LABELS[t]}`}
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium transition disabled:opacity-40 ${
+                                  allType === t
+                                    ? "bg-brand text-white"
+                                    : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20"
+                                }`}
+                              >
+                                {EXERCISE_TYPE_LABELS[t]}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setAllType(undefined)}
+                              disabled={loadingMoreExercises || allType === undefined}
+                              title="Any type"
+                              className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/75 transition hover:bg-foreground/20 disabled:opacity-40"
+                            >
+                              Any
+                            </button>
+                          </>
                         )}
                       </div>
                     )}
@@ -1086,12 +1149,50 @@ export function TopicSummaryMessage({
                           type="button"
                           onClick={() =>
                             selectedExerciseTopic &&
-                            void handleLoadExercises(selectedExerciseTopic, undefined, true)
+                            void handleLoadExercises(selectedExerciseTopic, undefined, true, allType)
                           }
                           disabled={loadingMoreExercises}
                           className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
                         >
                           {loadingMoreExercises ? "Generating…" : "More exercises"}
+                        </button>
+                        {/* Same type-picker shape as the concept block's
+                            own above -- clicking a pill both sets it as
+                            the sticky preference for the plain button
+                            above AND immediately generates one more batch
+                            at that type. */}
+                        <span className="self-center text-xs text-foreground/65">
+                          Type:
+                        </span>
+                        {EXERCISE_TYPES.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              setAllType(t);
+                              if (selectedExerciseTopic) {
+                                void handleLoadExercises(selectedExerciseTopic, undefined, true, t);
+                              }
+                            }}
+                            disabled={loadingMoreExercises}
+                            title={`Generate more, ${EXERCISE_TYPE_LABELS[t]}`}
+                            className={`rounded-full px-2 py-0.5 text-xs font-medium transition disabled:opacity-40 ${
+                              allType === t
+                                ? "bg-brand text-white"
+                                : "bg-foreground/10 text-foreground/75 hover:bg-foreground/20"
+                            }`}
+                          >
+                            {EXERCISE_TYPE_LABELS[t]}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setAllType(undefined)}
+                          disabled={loadingMoreExercises || allType === undefined}
+                          title="Any type"
+                          className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/75 transition hover:bg-foreground/20 disabled:opacity-40"
+                        >
+                          Any
                         </button>
                       </div>
                     )}

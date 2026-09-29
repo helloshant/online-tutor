@@ -159,6 +159,16 @@ export type TopicExercisesRequest = {
   // load, a sub-topic pill click), which keep their original prefer-
   // the-bank behavior unchanged.
   forceFresh?: boolean;
+  // Set only by the "more exercises" action's own type picker on an
+  // already-loaded flat batch -- see server.ts's own comment on this
+  // route. Implies forceFresh (a banked row's own type isn't reliably
+  // known -- see ExerciseItem.type's own comment -- so a specific type
+  // request always generates fresh rather than risking a bank hit that
+  // doesn't actually match). Passed straight through to
+  // buildExerciseGenerationPrompt, which already supports this same
+  // parameter for the pattern-specific and concept-specific generation
+  // paths.
+  requestedType?: ExerciseType;
 };
 
 // id is the answered_questions row id -- every exercise returned to a

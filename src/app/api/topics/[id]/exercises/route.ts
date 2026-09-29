@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getTopicExercises } from "@/lib/orchestratorClient";
+import { getTopicExercises, type ExerciseType } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
+
+// Same as generate-for-concept/route.ts's own VALID_TYPES -- an unknown/
+// missing value on the query string is silently treated as "no
+// preference" (undefined) rather than rejected, same posture that route
+// already takes.
+const VALID_TYPES: ExerciseType[] = ["MCQ", "short_answer", "long_answer", "numerical"];
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw never reaches the
@@ -38,6 +44,13 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
   // batch -- see getTopicExercises/the orchestrator's own
   // TopicExercisesRequest comment for why this is needed.
   const forceFresh = url.searchParams.get("forceFresh") === "true";
+  // Set only by the "More exercises" action's own type picker -- see
+  // getTopicExercises/the orchestrator's own TopicExercisesRequest
+  // comment for why this implies forceFresh too.
+  const requestedTypeParam = url.searchParams.get("requestedType");
+  const requestedType = VALID_TYPES.includes(requestedTypeParam as ExerciseType)
+    ? (requestedTypeParam as ExerciseType)
+    : undefined;
 
   const { data: topicRow } = await supabase
     .from("syllabus_topics")
@@ -87,6 +100,7 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
       topic: topicRow.topic,
       subTopic,
       forceFresh,
+      requestedType,
     });
     return NextResponse.json({ exercises });
   } catch (err) {
