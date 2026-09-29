@@ -1180,6 +1180,25 @@ export function TopicSummaryMessage({
                         >
                           {loadingMoreExercises ? "Generating…" : "More exercises"}
                         </button>
+                        {/* Reported directly: the header's own identical
+                            "← All topics in this chapter" link (see above
+                            in this same branch) is scrolled out of view by
+                            the time a student reaches this footer, on a
+                            chapter with no sub-topic picker in between to
+                            break the exercise list up -- there was no way
+                            back without scrolling all the way back up.
+                            Same handler, same gate (nothing real to browse
+                            back to when this chapter only has the one
+                            topic) -- just repeated down here too. */}
+                        {chapterTopics && chapterTopics.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={handleBackToChapterTopics}
+                            className="rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-foreground/75 transition hover:bg-foreground/20"
+                          >
+                            ← All topics in this chapter
+                          </button>
+                        )}
                         {/* Same type-picker shape as the concept block's
                             own above -- clicking a pill both sets it as
                             the sticky preference for the plain button
