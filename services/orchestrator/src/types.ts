@@ -149,6 +149,16 @@ export type TopicExercisesRequest = {
   // route. Omitted entirely for the unscoped batch, which keeps its
   // original, unchanged behavior.
   subTopic?: string;
+  // Set only by the "more exercises" action on an already-loaded flat
+  // ("all exercises for this chapter") batch -- see server.ts's own
+  // comment on this route. Skips the bank-hit early return this route
+  // otherwise always takes once anything is banked for this scope, so a
+  // second (or third...) call actually generates and stores a genuinely
+  // NEW batch instead of re-serving the exact same banked exercises
+  // every time. False/omitted for every other call site (the initial
+  // load, a sub-topic pill click), which keep their original prefer-
+  // the-bank behavior unchanged.
+  forceFresh?: boolean;
 };
 
 // id is the answered_questions row id -- every exercise returned to a

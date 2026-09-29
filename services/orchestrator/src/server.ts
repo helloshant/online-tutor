@@ -1262,7 +1262,12 @@ app.post(
       scopedArchetypeIds = new Set(scopedArchetypes.map((a) => a.archetypeId));
     }
 
-    const found = await findRelevantExercises(scope, body.topicId);
+    // forceFresh (see TopicExercisesRequest's own comment) skips straight
+    // past the bank-hit path below -- the "more exercises" action on an
+    // already-loaded flat batch wants a genuinely NEW batch, not the same
+    // banked rows this scope already returned on a prior, non-forceFresh
+    // call for it.
+    const found = body.forceFresh ? [] : await findRelevantExercises(scope, body.topicId);
     const relevantFound = scopedArchetypeIds
       ? found.filter(
           (f) =>

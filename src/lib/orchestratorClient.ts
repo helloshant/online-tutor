@@ -168,6 +168,12 @@ export type TopicExercisesRequest = {
   // orchestrator's own TopicExercisesRequest comment for how this narrows
   // both the bank lookup and generation grounding.
   subTopic?: string;
+  // Set only by the "More exercises" action on an already-loaded flat
+  // batch -- see the orchestrator's own TopicExercisesRequest comment for
+  // why this is needed (without it, a second call for the same scope just
+  // re-serves the exact same banked exercises the first call already
+  // stored).
+  forceFresh?: boolean;
 };
 
 // id is the exercise's own stable answered_questions row id -- always

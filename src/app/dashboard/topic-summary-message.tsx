@@ -368,21 +368,43 @@ export function TopicSummaryMessage({
   // mined sub-topic (see the orchestrator's own TopicExercisesRequest
   // comment) -- omitted both for the flat "all exercises" pick and for the
   // auto-selected flat path when a chapter has no sub-topic data at all.
-  async function handleLoadExercises(target: SyllabusTopic, subTopic?: string) {
-    setLoadingExercises(true);
+  // `append`, when true, ADDS a fresh batch onto whatever's already shown
+  // instead of replacing it -- used by the "More exercises" action below,
+  // for a chapter with no real mined sub-topic AND no concept-chunk data
+  // (the flat "all exercises" pick, see SubtopicSelection's own comment),
+  // which otherwise has NO way at all to get more questions once the
+  // initial batch is exhausted. Reported directly. Mirrors
+  // handleLoadConceptExercises' own append parameter/behavior exactly --
+  // forceFresh (see getTopicExercises' own comment) is what actually makes
+  // a second call return something NEW instead of re-serving the exact
+  // same banked exercises the first call already stored; append alone
+  // only controls how the response is merged into local state.
+  async function handleLoadExercises(target: SyllabusTopic, subTopic?: string, append = false) {
+    if (append) setLoadingMoreExercises(true);
+    else setLoadingExercises(true);
     setExercisesError(null);
     try {
       const params = new URLSearchParams({
         preferEnglish: String(preferEnglish),
       });
       if (subTopic) params.set("subTopic", subTopic);
+      if (append) params.set("forceFresh", "true");
       const res = await fetch(`/api/topics/${target.id}/exercises?${params}`);
       const body = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(body?.exercises)) {
         setExercisesError(body?.error ?? "Could not load exercises.");
         return;
       }
-      setExercises(body.exercises);
+      // Same reasoning as handleLoadConceptExercises' own empty-on-append
+      // handling -- an empty array here is a legitimate "generation didn't
+      // produce anything usable this time," and silently leaving
+      // `exercises` unchanged would make a "More exercises" click that hit
+      // this look indistinguishable from the click not having registered.
+      if (append && body.exercises.length === 0) {
+        setExercisesError("Could not generate a new question this time -- try again.");
+        return;
+      }
+      setExercises((prev) => (append ? [...(prev ?? []), ...body.exercises] : body.exercises));
 
       // Best-effort -- if this fails, the tag chips just don't show, no
       // error surfaced (the exercises themselves loaded fine). The pattern
@@ -392,20 +414,24 @@ export function TopicSummaryMessage({
       // way every other staff-preview-aware fetch does -- omitted (rather
       // than sent empty) for a real student, matching /api/answer-bank/tags'
       // own `url.searchParams.get(...)` null-means-"not staff previewing"
-      // read.
-      const tagsParams = new URLSearchParams({ subjectId: target.subject_id, topicId: target.id });
-      if (previewBoardId) tagsParams.set("boardId", previewBoardId);
-      if (previewGradeId) tagsParams.set("gradeId", previewGradeId);
-      if (previewMedium) tagsParams.set("medium", previewMedium);
-      const tagsRes = await fetch(`/api/answer-bank/tags?${tagsParams}`);
-      const tagsBody = await tagsRes.json().catch(() => null);
-      if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
-        setTopicTags(tagsBody.tags);
+      // read. Skipped entirely on append -- the initial (non-append) call
+      // for this same target already fetched these, nothing's changed.
+      if (!append) {
+        const tagsParams = new URLSearchParams({ subjectId: target.subject_id, topicId: target.id });
+        if (previewBoardId) tagsParams.set("boardId", previewBoardId);
+        if (previewGradeId) tagsParams.set("gradeId", previewGradeId);
+        if (previewMedium) tagsParams.set("medium", previewMedium);
+        const tagsRes = await fetch(`/api/answer-bank/tags?${tagsParams}`);
+        const tagsBody = await tagsRes.json().catch(() => null);
+        if (tagsRes.ok && Array.isArray(tagsBody?.tags)) {
+          setTopicTags(tagsBody.tags);
+        }
       }
     } catch {
       setExercisesError("Could not load exercises.");
     } finally {
-      setLoadingExercises(false);
+      if (append) setLoadingMoreExercises(false);
+      else setLoadingExercises(false);
     }
   }
 
@@ -1020,6 +1046,53 @@ export function TopicSummaryMessage({
                             </button>
                           </>
                         )}
+                        {/* The synthetic "skip the sub-topic breakdown"
+                            pick (see SubtopicSelection's own comment) --
+                            same "More exercises" action as the no-picker-
+                            at-all case below, just reachable from inside
+                            a picker that DOES exist here (subtopics.length
+                            > 0) instead of never having shown one. */}
+                        {selectedSubtopic?.kind === "all" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              selectedExerciseTopic &&
+                              void handleLoadExercises(selectedExerciseTopic, undefined, true)
+                            }
+                            disabled={loadingMoreExercises}
+                            className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
+                          >
+                            {loadingMoreExercises ? "Generating…" : "More exercises"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {/* Sibling of the "skip" pill's own "More exercises"
+                        button just above, for a chapter with NO real
+                        mined sub-topic AND no concept-chunk data at all
+                        (subtopics.length === 0, so the whole picker footer
+                        above never rendered in the first place -- see
+                        SubtopicSelection's own comment on kind: "all"
+                        covering both cases). Reported directly: this flat
+                        path had no way at all to get more questions once
+                        the initial batch ran out -- every other path
+                        already had an equivalent (PatternPicker's own
+                        "Generate another" for a real mined sub-topic,
+                        "More practice on this concept" above for the
+                        concept-chunk fallback). */}
+                    {subtopics.length === 0 && selectedSubtopic?.kind === "all" && (
+                      <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border pt-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectedExerciseTopic &&
+                            void handleLoadExercises(selectedExerciseTopic, undefined, true)
+                          }
+                          disabled={loadingMoreExercises}
+                          className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-60"
+                        >
+                          {loadingMoreExercises ? "Generating…" : "More exercises"}
+                        </button>
                       </div>
                     )}
                     {/* Repeats the top-of-panel error too (see the

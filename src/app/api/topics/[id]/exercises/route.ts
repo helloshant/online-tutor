@@ -34,6 +34,10 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
   // this chapter" -- narrows generation to just that sub-topic, see
   // getTopicExercises/the orchestrator's own TopicExercisesRequest comment.
   const subTopic = url.searchParams.get("subTopic") ?? undefined;
+  // Set only by the "More exercises" action on an already-loaded flat
+  // batch -- see getTopicExercises/the orchestrator's own
+  // TopicExercisesRequest comment for why this is needed.
+  const forceFresh = url.searchParams.get("forceFresh") === "true";
 
   const { data: topicRow } = await supabase
     .from("syllabus_topics")
@@ -82,6 +86,7 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
       chapter: topicRow.chapter,
       topic: topicRow.topic,
       subTopic,
+      forceFresh,
     });
     return NextResponse.json({ exercises });
   } catch (err) {
