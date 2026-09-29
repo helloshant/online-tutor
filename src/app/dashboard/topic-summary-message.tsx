@@ -933,6 +933,28 @@ export function TopicSummaryMessage({
                           )
                         ) : (
                           <TopicPractice
+                            // Reported directly: switching topics within
+                            // this SAME bubble (via "All topics in this
+                            // chapter", or picking a different sub-topic)
+                            // reused the same TopicPractice instance --
+                            // its own internal pickerAdded state (whatever
+                            // PatternPicker had generated on demand for
+                            // the PREVIOUS topic/sub-topic) never reset,
+                            // so those old exercises stayed merged into
+                            // the new selection's own list forever,
+                            // showing two different topics' questions
+                            // together in what looked like one list.
+                            // Keying on the same identity PatternPicker's
+                            // own key already uses (topicId + subTopic --
+                            // preferEnglish is deliberately left out here,
+                            // matching PatternPicker's own comment: a
+                            // toggle flip already remounts this whole
+                            // TopicPractice instance one level up) forces
+                            // a full remount, and a fresh pickerAdded,
+                            // whenever either actually changes.
+                            key={`${selectedExerciseTopic.id}:${
+                              selectedSubtopic?.kind === "archetype" ? selectedSubtopic.name : ""
+                            }`}
                             topicId={selectedExerciseTopic.id}
                             subjectId={selectedExerciseTopic.subject_id}
                             subjectCode={subjectCode}
