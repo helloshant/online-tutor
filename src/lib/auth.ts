@@ -84,6 +84,7 @@ export const ADMIN_PAGES: AdminPageKey[] = [
   "broadcasts",
   "feedback",
   "archetype_miner",
+  "callback_requests",
 ];
 
 // Which admin pages the current user can see. Superadmins always get every

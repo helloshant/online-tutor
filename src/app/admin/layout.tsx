@@ -65,6 +65,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Archetype Miner
               </Link>
             )}
+            {canSee("callback_requests") && (
+              <Link href="/admin/callback-requests" className="text-foreground/82 hover:text-foreground">
+                Callback requests
+              </Link>
+            )}
             {isSuperadmin && (
               <Link href="/admin/authorization" className="text-foreground/82 hover:text-foreground">
                 Authorization

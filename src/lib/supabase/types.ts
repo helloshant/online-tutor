@@ -275,6 +275,20 @@ export type StudentUsageLimit = {
   updated_at: string;
 };
 
+// A "call me back" request from the public /contact page -- see
+// supabase/migrations/0051_callback_requests.sql for why this is public-
+// insert, admin-only-read, and what status's two values mean.
+export type CallbackRequest = {
+  id: string;
+  name: string;
+  phone: string;
+  message: string | null;
+  status: "new" | "contacted";
+  created_at: string;
+  contacted_at: string | null;
+  contacted_by: string | null;
+};
+
 export type AdminPageKey =
   | "users"
   | "catalog"
@@ -285,7 +299,8 @@ export type AdminPageKey =
   | "topic_summaries"
   | "broadcasts"
   | "feedback"
-  | "archetype_miner";
+  | "archetype_miner"
+  | "callback_requests";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -980,6 +995,12 @@ export interface Database {
         Row: StudentUsageLimit;
         Insert: Partial<StudentUsageLimit>;
         Update: Partial<StudentUsageLimit>;
+        Relationships: [];
+      };
+      callback_requests: {
+        Row: CallbackRequest;
+        Insert: Partial<CallbackRequest>;
+        Update: Partial<CallbackRequest>;
         Relationships: [];
       };
       practice_papers: {

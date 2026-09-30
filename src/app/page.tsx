@@ -84,6 +84,10 @@ export default function Home() {
           <Link href="/refund-policy" className="hover:underline">
             Refund &amp; Cancellation
           </Link>
+          <span aria-hidden="true">·</span>
+          <Link href="/contact" className="hover:underline">
+            Contact Us
+          </Link>
         </p>
       </footer>
     </div>
