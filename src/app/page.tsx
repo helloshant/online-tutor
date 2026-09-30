@@ -72,9 +72,13 @@ export default function Home() {
 
       <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/65">
         <p>SyllabusMate — built for students, by subject, by syllabus.</p>
-        <p className="mt-2">
+        <p className="mt-2 flex items-center justify-center gap-3">
           <Link href="/terms" className="hover:underline">
             Terms &amp; Conditions
+          </Link>
+          <span aria-hidden="true">·</span>
+          <Link href="/privacy" className="hover:underline">
+            Privacy Policy
           </Link>
         </p>
       </footer>
