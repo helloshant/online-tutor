@@ -80,6 +80,10 @@ export default function Home() {
           <Link href="/privacy" className="hover:underline">
             Privacy Policy
           </Link>
+          <span aria-hidden="true">·</span>
+          <Link href="/refund-policy" className="hover:underline">
+            Refund &amp; Cancellation
+          </Link>
         </p>
       </footer>
     </div>
