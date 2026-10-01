@@ -13,8 +13,13 @@ services:
         # "undefined" if that flag is forgotten.
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?Set NEXT_PUBLIC_SUPABASE_URL in .env.local, and run compose with --env-file .env.local}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?Set NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, and run compose with --env-file .env.local}
+    # Bound to localhost only -- in production this sits behind a host-level
+    # reverse proxy (cPanel/Apache, nginx, Caddy, ...) that terminates TLS
+    # and forwards to 127.0.0.1:3000. Publishing on 0.0.0.0 here would let
+    # anyone reach the app directly over plain HTTP on :3000, bypassing
+    # whatever that proxy does (HTTPS, any host-level access rules) entirely.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env.local
     environment:
