@@ -8,25 +8,21 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-# Reported directly: a plain `npm ci` here installed BOTH the glibc
-# (@img/sharp-linux-x64) and musl (@img/sharp-linuxmusl-x64) native sharp
-# binaries side by side, even though this base image is alpine/musl-only --
-# npm's platform auto-detection for optional dependencies isn't airtight
-# inside Docker. Having the non-matching glibc one present at all is what
-# then crashed sharp's own loader at startup ("Cannot read properties of
-# undefined (reading 'endsWith')" in sharp.mjs) -- its fallback code breaks
-# on an unexpected platform candidate before ever reaching the right one.
-#
-# --cpu/--os/--libc alone (sharp's own documented fix for cross-platform
-# Docker builds) turned out NOT sufficient here, confirmed directly: this
-# package-lock.json's own @img/sharp-linux-x64 entry has NO "libc" field
-# at all (only cpu/os -- only the musl-suffixed package declares
-# "libc": ["musl"]), so npm's filter has nothing to exclude it BY, and
-# keeps installing it right alongside the musl one regardless of
-# --libc=musl. Deleting the non-matching platform packages outright after
-# install is what actually guarantees only the musl binary remains.
-RUN npm ci --cpu=x64 --os=linux --libc=musl && \
-    rm -rf node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/sharp-wasm32
+# sharp is pinned to 0.32.6 in package.json (not a caret range) -- newer
+# sharp's prebuilt Linux x64 binaries require "v2" microarchitecture CPU
+# features (SSE4.2/POPCNT and similar), and at least one real deployment
+# target's virtualized CPU (confirmed directly via /proc/cpuinfo) doesn't
+# expose them, crashing sharp outright with "Unsupported CPU" at startup.
+# 0.32.6 is the last version built against the older libvips baseline that
+# doesn't have this requirement. Its own install mechanism (prebuild-install,
+# a postinstall script) also auto-detects this container's platform/libc
+# correctly at install time -- unlike newer sharp's declarative
+# @img/sharp-* optionalDependencies scheme, which (separately, confirmed
+# directly before landing on this fix) installed both the glibc and musl
+# native binaries side by side on this same alpine base image, crashing
+# sharp's own loader a different way. No special install flags needed
+# here either way.
+RUN npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -40,11 +36,7 @@ ENV NODE_ENV=production
 ENV PORT=4500
 
 COPY package.json package-lock.json ./
-# Same reasoning as the deps stage above -- this stage does its own
-# separate (production-only) install, so needs the same explicit target
-# AND the same cleanup (this is the node_modules that actually ships).
-RUN npm ci --omit=dev --cpu=x64 --os=linux --libc=musl && \
-    rm -rf node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/sharp-wasm32
+RUN npm ci --omit=dev
 
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 visionocr
 COPY --from=builder --chown=visionocr:nodejs /app/dist ./dist
