@@ -16,10 +16,17 @@ COPY package.json package-lock.json ./
 # then crashed sharp's own loader at startup ("Cannot read properties of
 # undefined (reading 'endsWith')" in sharp.mjs) -- its fallback code breaks
 # on an unexpected platform candidate before ever reaching the right one.
-# --cpu/--os/--libc force npm to only ever consider this exact target,
-# sharp's own officially documented fix for cross-platform Docker builds
-# (https://sharp.pixelplumbing.com/install#cross-platform-build).
-RUN npm ci --cpu=x64 --os=linux --libc=musl
+#
+# --cpu/--os/--libc alone (sharp's own documented fix for cross-platform
+# Docker builds) turned out NOT sufficient here, confirmed directly: this
+# package-lock.json's own @img/sharp-linux-x64 entry has NO "libc" field
+# at all (only cpu/os -- only the musl-suffixed package declares
+# "libc": ["musl"]), so npm's filter has nothing to exclude it BY, and
+# keeps installing it right alongside the musl one regardless of
+# --libc=musl. Deleting the non-matching platform packages outright after
+# install is what actually guarantees only the musl binary remains.
+RUN npm ci --cpu=x64 --os=linux --libc=musl && \
+    rm -rf node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/sharp-wasm32
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -34,8 +41,10 @@ ENV PORT=4500
 
 COPY package.json package-lock.json ./
 # Same reasoning as the deps stage above -- this stage does its own
-# separate (production-only) install, so needs the same explicit target.
-RUN npm ci --omit=dev --cpu=x64 --os=linux --libc=musl
+# separate (production-only) install, so needs the same explicit target
+# AND the same cleanup (this is the node_modules that actually ships).
+RUN npm ci --omit=dev --cpu=x64 --os=linux --libc=musl && \
+    rm -rf node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/sharp-wasm32
 
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 visionocr
 COPY --from=builder --chown=visionocr:nodejs /app/dist ./dist
