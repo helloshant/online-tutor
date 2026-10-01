@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isStaff } from "@/lib/auth";
 import { getTopicExercises, type ExerciseType } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
@@ -64,17 +65,25 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }, { data: subscription }] = await Promise.all([
+  const [{ data: board }, { data: grade }, { data: subject }, { data: profile }, { data: subscription }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
     // Includes a trial (pending_payment) subscription, not just a paid
     // (active) one -- same as /api/topics/[id]/summary's own lookup.
     supabase.from("subscriptions").select("medium, status").eq("user_id", user.id).in("status", ["active", "pending_payment"]).maybeSingle(),
   ]);
 
+  const staff = isStaff(profile?.role);
   const topicMedium = topicRow.medium as Medium;
-  const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
+  // Staff never subscribe, and ignore their own subscription row entirely
+  // even if one happens to exist -- see summary/route.ts's own comment on
+  // the exact bug (a staff account's leftover personal trial subscription
+  // silently overriding the board/grade/medium they're actually staff-
+  // previewing) this guards against, confirmed directly against a real
+  // account.
+  const nativeMedium: Medium = staff ? topicMedium : ((subscription?.medium as Medium | undefined) ?? topicMedium);
 
   // Unlike a "Generate another"/regenerate click (see
   // /api/topics/[id]/exercises/generate/route.ts), an INITIAL batch here
@@ -85,8 +94,10 @@ async function handleGetExercises(request: Request, { id: topicId }: { id: strin
   // allowance (chat/generate/practice-papers all check it, but simply
   // browsing topics never would). So this checks it ONLY for a trial
   // subscription, leaving every other case (active, staff, no
-  // subscription) exactly as uncapped as before.
-  if (subscription?.status === "pending_payment") {
+  // subscription) exactly as uncapped as before -- staff excluded
+  // explicitly now too, so a staff account's own leftover personal trial
+  // subscription can never 429 them while previewing.
+  if (!staff && subscription?.status === "pending_payment") {
     const admin = createAdminClient();
     const { data: override } = await admin
       .from("student_usage_limits")

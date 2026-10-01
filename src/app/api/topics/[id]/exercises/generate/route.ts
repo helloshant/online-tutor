@@ -163,8 +163,15 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     ]);
 
   const topicMedium = topicRow.medium as Medium;
-  const nativeMedium: Medium =
-    (subscription?.medium as Medium | undefined) ?? topicMedium;
+  // Staff never subscribe, and ignore their own subscription row entirely
+  // even if one happens to exist -- see
+  // /api/topics/[id]/summary/route.ts's own comment on the exact bug (a
+  // staff account's leftover personal trial subscription silently
+  // overriding the board/grade/medium they're actually staff-previewing)
+  // this guards against.
+  const nativeMedium: Medium = isStaff(profile?.role)
+    ? topicMedium
+    : ((subscription?.medium as Medium | undefined) ?? topicMedium);
 
   // Same responseLanguage resolution as GET /api/topics/[id]/exercises --
   // see that route's own comment.

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isStaff } from "@/lib/auth";
 import { getTopicSummary } from "@/lib/orchestratorClient";
 import { resolveResponseLanguage } from "@/lib/studentScope";
 import type { Medium } from "@/lib/supabase/types";
@@ -41,10 +42,11 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     return NextResponse.json({ error: "Topic not found" }, { status: 404 });
   }
 
-  const [{ data: board }, { data: grade }, { data: subject }, { data: subscription }] = await Promise.all([
+  const [{ data: board }, { data: grade }, { data: subject }, { data: profile }, { data: subscription }] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
     // Includes a trial (pending_payment) subscription, not just a paid
     // (active) one, so a trial student's own native medium still resolves
     // correctly here.
@@ -52,7 +54,22 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
   ]);
 
   const topicMedium = topicRow.medium as Medium;
-  const nativeMedium: Medium = (subscription?.medium as Medium | undefined) ?? topicMedium;
+  // Staff never subscribe -- same posture as every other route in this app
+  // (see /api/chat/route.ts's own "staff never subscribe" comment). Staff
+  // ignore their own subscription row entirely here, even if one happens
+  // to exist. Reported directly: a staff/admin account that had separately
+  // signed up for its own free trial (board=West Bengal Board, medium=
+  // Bengali) got Bengali topic summaries while PREVIEWING CBSE Grade 10
+  // English as staff -- this route had no isStaff check at all, so it
+  // always preferred that leftover personal subscription's own medium over
+  // the topic actually being viewed, regardless of what the staff preview
+  // picker showed. topicMedium is always correct for staff instead: the
+  // topic being viewed was already fetched under whatever board/grade/
+  // medium scope the preview picker (or a real student's own subscription)
+  // put it in, so there's nothing further to resolve.
+  const nativeMedium: Medium = isStaff(profile?.role)
+    ? topicMedium
+    : ((subscription?.medium as Medium | undefined) ?? topicMedium);
 
   // See the matching comment in /api/chat/route.ts -- medium always stays
   // this topic's own real content medium (topicMedium; for the English
