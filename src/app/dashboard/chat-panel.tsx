@@ -1230,6 +1230,11 @@ export function ChatPanel({
             <span className="hidden sm:inline">Send</span>
           </button>
         </div>
+        {/* Requested directly -- same placement/role as the equivalent
+            disclaimer under ChatGPT's and Claude's own chat inputs. */}
+        <p className="mt-1.5 text-center text-xs text-foreground/55">
+          SyllabusMate can make mistakes. Please verify important information.
+        </p>
       </form>
     </div>
   );
