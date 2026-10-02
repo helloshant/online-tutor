@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { sendAdminNotificationEmail } from "@/lib/email";
 
 export interface BusinessEnquiryState {
   error?: string;
@@ -46,6 +47,20 @@ export async function submitBusinessEnquiry(
   if (error) {
     return { error: "Could not submit your enquiry. Please try again." };
   }
+
+  await sendAdminNotificationEmail({
+    subject: `New business enquiry: ${organizationName}`,
+    text: [
+      `Organisation: ${organizationName}`,
+      `Contact: ${contactName}`,
+      `Email: ${email}`,
+      `Phone: ${phone || "-"}`,
+      `Approx. students: ${approxStudents || "-"}`,
+      "",
+      "Message:",
+      message || "-",
+    ].join("\n"),
+  });
 
   return { success: true };
 }

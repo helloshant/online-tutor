@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { sendAdminNotificationEmail } from "@/lib/email";
 
 export interface CallbackRequestState {
   error?: string;
@@ -43,6 +44,11 @@ export async function submitCallbackRequest(
   if (error) {
     return { error: "Could not submit your request. Please try again." };
   }
+
+  await sendAdminNotificationEmail({
+    subject: `New callback request: ${name}`,
+    text: [`Name: ${name}`, `Phone: ${phone}`, "", "Message:", message || "-"].join("\n"),
+  });
 
   return { success: true };
 }

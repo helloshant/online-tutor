@@ -55,7 +55,7 @@ export default function BusinessPage() {
           <p className="mt-8 text-xs text-foreground/65">
             Odantapuri Financial Services Pvt. Ltd.
             <br />
-            Sapthagiri Sannidhi, Block C, Next Laxminaryana Temple Marathahalli, Bengaluru, 560037
+            Marathahalli, Bengaluru, 560037
           </p>
         </div>
 
