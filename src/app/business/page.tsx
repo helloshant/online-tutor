@@ -11,9 +11,9 @@ export const metadata = {
 };
 
 const POINTS = [
-  "Board & grade aware syllabus coverage across CBSE and West Bengal Board",
+  "Board and syllabus agnostic — works with any board, grade, or curriculum your institution follows",
   "Answers and practice stay scoped to exactly what your students are examined on",
-  "Available in English, Sanskrit, and Bengali",
+  "Language agnostic — can respond in any language your students need",
 ];
 
 export default function BusinessPage() {
