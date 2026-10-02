@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { submitBusinessEnquiry, type BusinessEnquiryState } from "./actions";
 
@@ -10,9 +11,14 @@ export function EnquiryForm() {
 
   if (state?.success) {
     return (
-      <p className="mt-6 rounded-xl border border-border bg-surface p-4 text-sm text-foreground/82">
-        Thanks — we&apos;ve got your enquiry and someone from our team will get back to you shortly.
-      </p>
+      <div className="mt-6 space-y-4">
+        <p className="rounded-xl border border-border bg-surface p-4 text-sm text-foreground/82">
+          Thanks — we&apos;ve got your enquiry and someone from our team will get back to you shortly.
+        </p>
+        <Link href="/" className="inline-block text-sm font-medium text-brand hover:underline">
+          ← Back to home
+        </Link>
+      </div>
     );
   }
 

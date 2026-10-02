@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { submitCallbackRequest, type CallbackRequestState } from "./actions";
 
@@ -10,9 +11,14 @@ export function CallbackForm() {
 
   if (state?.success) {
     return (
-      <p className="mt-6 rounded-xl border border-border bg-surface p-4 text-sm text-foreground/82">
-        Thanks — we&apos;ve got your request and someone from our team will call you back shortly.
-      </p>
+      <div className="mt-6 space-y-4">
+        <p className="rounded-xl border border-border bg-surface p-4 text-sm text-foreground/82">
+          Thanks — we&apos;ve got your request and someone from our team will call you back shortly.
+        </p>
+        <Link href="/" className="inline-block text-sm font-medium text-brand hover:underline">
+          ← Back to home
+        </Link>
+      </div>
     );
   }
 
