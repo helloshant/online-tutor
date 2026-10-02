@@ -70,6 +70,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Callback requests
               </Link>
             )}
+            {canSee("business_enquiries") && (
+              <Link href="/admin/business-enquiries" className="text-foreground/82 hover:text-foreground">
+                Business enquiries
+              </Link>
+            )}
             {isSuperadmin && (
               <Link href="/admin/authorization" className="text-foreground/82 hover:text-foreground">
                 Authorization

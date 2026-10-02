@@ -91,6 +91,10 @@ export default function Home() {
           <Link href="/contact" className="hover:underline">
             Contact Us
           </Link>
+          <span aria-hidden="true">·</span>
+          <Link href="/business" className="hover:underline">
+            Business Enquiry
+          </Link>
         </p>
       </footer>
     </div>

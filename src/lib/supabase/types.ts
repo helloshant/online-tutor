@@ -289,6 +289,24 @@ export type CallbackRequest = {
   contacted_by: string | null;
 };
 
+// A bulk/partnership enquiry from a school, coaching institute, or other
+// organisation, submitted on the public /business page -- see
+// supabase/migrations/0052_business_enquiries.sql for why this is public-
+// insert, admin-only-read, and what status's two values mean.
+export type BusinessEnquiry = {
+  id: string;
+  organization_name: string;
+  contact_name: string;
+  email: string;
+  phone: string | null;
+  approx_students: string | null;
+  message: string | null;
+  status: "new" | "contacted";
+  created_at: string;
+  contacted_at: string | null;
+  contacted_by: string | null;
+};
+
 export type AdminPageKey =
   | "users"
   | "catalog"
@@ -300,7 +318,8 @@ export type AdminPageKey =
   | "broadcasts"
   | "feedback"
   | "archetype_miner"
-  | "callback_requests";
+  | "callback_requests"
+  | "business_enquiries";
 
 // Written by superadmins only (RLS: is_superadmin() for all writes; a user
 // can read their own rows to render their own nav). See
@@ -1001,6 +1020,12 @@ export interface Database {
         Row: CallbackRequest;
         Insert: Partial<CallbackRequest>;
         Update: Partial<CallbackRequest>;
+        Relationships: [];
+      };
+      business_enquiries: {
+        Row: BusinessEnquiry;
+        Insert: Partial<BusinessEnquiry>;
+        Update: Partial<BusinessEnquiry>;
         Relationships: [];
       };
       practice_papers: {
