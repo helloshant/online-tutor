@@ -1,4 +1,5 @@
 import Link from "next/link";
+import HeroDemo from "./hero-demo";
 
 const FEATURES = [
   {
@@ -59,6 +60,8 @@ export default function Home() {
             I already have an account
           </Link>
         </div>
+
+        <HeroDemo />
 
         <div className="mt-20 grid w-full grid-cols-1 gap-4 text-left sm:grid-cols-2">
           {FEATURES.map((f) => (
