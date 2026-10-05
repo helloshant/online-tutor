@@ -110,10 +110,15 @@ export async function confirmSelection(
     return { error: "Could not save your subject selection. Please try again." };
   }
 
-  // Straight into the dashboard on a small free-trial token allowance
-  // (see dashboard/page.tsx's own trial gate) rather than requiring
-  // payment before any real product use -- /subscribe stays reachable at
-  // any time via the dashboard's own trial banner, and dashboard/page.tsx
-  // itself redirects here once trial tokens run out.
-  redirect("/dashboard");
+  // Which of the Confirm step's two buttons was clicked -- native HTML
+  // submits the clicked <button>'s own name/value pair, so this reads
+  // straight off formData without any client-side state. "pay" sends
+  // someone who deliberately came back to subscribe (e.g. the dashboard's
+  // own "Subscribe / Pay" banner, reached once trial tokens run low or
+  // out) on to the real payment page instead of silently re-granting a
+  // trial; "trial" (the default, and the only option a brand-new signup
+  // ever sees) keeps the original straight-into-free-trial behavior, so a
+  // first-time signup never has to pay before using the product at all.
+  const intent = String(formData.get("intent") ?? "trial");
+  redirect(intent === "pay" ? "/subscribe" : "/dashboard");
 }

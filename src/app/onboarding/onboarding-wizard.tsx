@@ -37,6 +37,7 @@ export function OnboardingWizard({
   const [gradeId, setGradeId] = useState(initial?.gradeId ?? "");
   const [medium, setMedium] = useState<Medium | "">(initial?.medium ?? "");
   const [subjectIds, setSubjectIds] = useState<Set<string>>(new Set(initial?.subjectIds ?? []));
+  const [clickedIntent, setClickedIntent] = useState<"trial" | "pay" | null>(null);
   const [state, formAction, pending] = useActionState(confirmSelection, initialState);
 
   const availableSubjects = useMemo(() => {
@@ -252,12 +253,34 @@ export function OnboardingWizard({
 
               {state?.error && <p className="mb-3 text-sm text-red-600">{state.error}</p>}
 
+              {/* Two distinct, honestly-labeled actions -- native HTML
+                  submits whichever button's own name/value pair was
+                  clicked, which confirmSelection reads as `intent` (see
+                  that action's own comment). Start free trial is primary
+                  and first, since it's what every brand-new signup wants;
+                  Skip trial is for someone deliberately here to pay (e.g.
+                  arrived via the dashboard's own Subscribe/Pay banner). */}
               <button
                 type="submit"
+                name="intent"
+                value="trial"
+                onClick={() => setClickedIntent("trial")}
                 disabled={pending}
                 className="w-full rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-60"
               >
-                {pending ? "Saving…" : "Continue to payment"}
+                {pending && clickedIntent === "trial" ? "Starting…" : "Start free trial"}
+              </button>
+              <button
+                type="submit"
+                name="intent"
+                value="pay"
+                onClick={() => setClickedIntent("pay")}
+                disabled={pending}
+                className="mt-2 w-full rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-brand/5 disabled:opacity-60"
+              >
+                {pending && clickedIntent === "pay"
+                  ? "Redirecting…"
+                  : `Skip trial — pay ₹${selectedSubjects.length * PRICE_PER_SUBJECT_INR}/month now`}
               </button>
             </form>
           </section>
