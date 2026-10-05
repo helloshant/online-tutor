@@ -16,7 +16,7 @@ export async function confirmSelection(
   _prevState: OnboardingState,
   formData: FormData
 ): Promise<OnboardingState> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/onboarding");
 
   const boardId = String(formData.get("boardId") ?? "");
   const gradeId = String(formData.get("gradeId") ?? "");

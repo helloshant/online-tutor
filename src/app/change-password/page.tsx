@@ -7,7 +7,7 @@ import { resetPassword } from "../reset-password/actions";
 // lib/auth.ts) -- uses requireUser() directly, not requireFreshPassword(),
 // since gating this page on password freshness would redirect it to itself.
 export default async function ChangePasswordPage() {
-  await requireUser();
+  await requireUser("/change-password");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

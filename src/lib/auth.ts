@@ -25,9 +25,16 @@ export const getCurrentUser = cache(async () => {
   return { user, profile: profile as Profile | null };
 });
 
-export async function requireUser() {
+// `next`, when given, is the path to send the visitor back to once they've
+// logged back in (plumbed through to /login's own `next` param, which
+// login/actions.ts already honours) -- without it, a session that's gone
+// stale mid-flow (e.g. the single-active-device restriction kicking an
+// older tab, or a long-idle cookie) bounces to a bare /login and, after
+// logging in, drops the visitor at the default /dashboard instead of back
+// at whatever they were actually trying to reach (e.g. /subscribe to pay).
+export async function requireUser(next?: string) {
   const session = await getCurrentUser();
-  if (!session) redirect("/login");
+  if (!session) redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
   return session;
 }
 

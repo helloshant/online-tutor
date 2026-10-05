@@ -20,7 +20,7 @@ export default async function SubscribePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const { user, profile } = await requireUser();
+  const { user, profile } = await requireUser("/subscribe");
   // Staff never pay -- if they somehow land here, send them straight in.
   if (isStaff(profile?.role)) redirect("/dashboard");
 

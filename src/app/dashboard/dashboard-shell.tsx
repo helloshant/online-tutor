@@ -242,15 +242,18 @@ export function DashboardShell({
           purely informational, not itself an enforcement point. */}
       {trial && (
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-brand/5 px-6 py-2 text-xs text-foreground/75">
-          <span>
-            Free trial ·{" "}
-            <span className="font-medium text-foreground">
+          <span className="rounded-full border border-border bg-surface px-2.5 py-1 font-medium">
+            Trial usage:{" "}
+            <span className="text-foreground">
               {Math.max(0, trial.tokensLimit - trial.tokensUsed).toLocaleString()}
             </span>{" "}
-            of {trial.tokensLimit.toLocaleString()} AI tutoring tokens left
+            / {trial.tokensLimit.toLocaleString()} tokens left
           </span>
-          <Link href="/subscribe" className="shrink-0 font-medium text-brand hover:underline">
-            Subscribe
+          <Link
+            href="/subscribe"
+            className="shrink-0 rounded-lg bg-brand px-3 py-1.5 font-semibold text-white transition hover:bg-brand-dark"
+          >
+            Subscribe / Pay
           </Link>
         </div>
       )}

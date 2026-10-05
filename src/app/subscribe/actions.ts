@@ -22,7 +22,7 @@ export interface RedeemCouponState {
 // 0002_rls_policies.sql) -- there's no path for a plain session client to
 // do the actual write anyway.
 export async function redeemCoupon(_prevState: RedeemCouponState, formData: FormData): Promise<RedeemCouponState> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/subscribe");
   const code = String(formData.get("code") ?? "").trim();
 
   if (!code) {
