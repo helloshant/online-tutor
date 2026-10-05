@@ -8,6 +8,15 @@ import { confirmSelection, type OnboardingState } from "./actions";
 const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
 const STEPS = ["Board & Grade", "Subjects", "Medium", "Confirm"] as const;
 
+// West Bengal Board is only actually offered for grades 9-12 -- the
+// board_grade_subjects rows for its grades 6-8 are leftover scaffolding
+// from early content work, not a real, launched offering. A board absent
+// from this map (CBSE) has no restriction: every grade 6-12 is genuinely
+// offered for it.
+const BOARD_GRADE_RESTRICTIONS: Record<string, number[]> = {
+  "West Bengal Board": [9, 10, 11, 12],
+};
+
 const initialState: OnboardingState = {};
 
 export function OnboardingWizard({
@@ -44,6 +53,12 @@ export function OnboardingWizard({
   const selectedGrade = grades.find((g) => g.id === gradeId);
   const selectedSubjects = subjects.filter((s) => subjectIds.has(s.id));
 
+  const availableGrades = useMemo(() => {
+    const allowedLevels = selectedBoard ? BOARD_GRADE_RESTRICTIONS[selectedBoard.name] : undefined;
+    if (!allowedLevels) return grades;
+    return grades.filter((g) => allowedLevels.includes(g.level));
+  }, [grades, selectedBoard]);
+
   function toggleSubject(id: string) {
     setSubjectIds((prev) => {
       const next = new Set(prev);
@@ -53,8 +68,17 @@ export function OnboardingWizard({
     });
   }
 
-  function onBoardOrGradeChange(nextBoardId: string, nextGradeId: string) {
+  function onBoardChange(nextBoardId: string) {
+    const nextBoard = boards.find((b) => b.id === nextBoardId);
+    const allowedLevels = nextBoard ? BOARD_GRADE_RESTRICTIONS[nextBoard.name] : undefined;
+    const currentGrade = grades.find((g) => g.id === gradeId);
+    const gradeStillValid = !allowedLevels || (currentGrade && allowedLevels.includes(currentGrade.level));
     setBoardId(nextBoardId);
+    setGradeId(gradeStillValid ? gradeId : "");
+    setSubjectIds(new Set());
+  }
+
+  function onGradeChange(nextGradeId: string) {
     setGradeId(nextGradeId);
     setSubjectIds(new Set());
   }
@@ -95,7 +119,7 @@ export function OnboardingWizard({
                   <button
                     key={b.id}
                     type="button"
-                    onClick={() => onBoardOrGradeChange(b.id, gradeId)}
+                    onClick={() => onBoardChange(b.id)}
                     className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
                       boardId === b.id
                         ? "border-brand bg-brand/5 font-medium text-brand"
@@ -111,11 +135,11 @@ export function OnboardingWizard({
             <div className="mt-6">
               <h3 className="text-sm font-medium text-foreground/82">Grade</h3>
               <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
-                {grades.map((g) => (
+                {availableGrades.map((g) => (
                   <button
                     key={g.id}
                     type="button"
-                    onClick={() => onBoardOrGradeChange(boardId, g.id)}
+                    onClick={() => onGradeChange(g.id)}
                     className={`rounded-lg border px-2 py-2 text-sm transition ${
                       gradeId === g.id
                         ? "border-brand bg-brand/5 font-medium text-brand"

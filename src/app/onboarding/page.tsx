@@ -31,9 +31,15 @@ export default async function OnboardingPage() {
         : Promise.resolve({ data: [] as { subject_id: string }[] }),
     ]);
 
+  // ICSE isn't offered yet (see the home page's own "Currently we are not
+  // offering to ICSE board" copy) -- its boards/mappings rows exist for
+  // internal content work, but it must never be a selectable option for a
+  // new signup.
+  const offeredBoards = (boards ?? []).filter((b) => b.name !== "ICSE");
+
   return (
     <OnboardingWizard
-      boards={boards ?? []}
+      boards={offeredBoards}
       grades={grades ?? []}
       subjects={subjects ?? []}
       mappings={mappings ?? []}
