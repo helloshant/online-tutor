@@ -307,6 +307,18 @@ export type BusinessEnquiry = {
   contacted_by: string | null;
 };
 
+// Failed login attempt tracking for brute-force protection, keyed by
+// normalized (lowercased) email rather than user_id since pre-auth we don't
+// yet know if the account exists. See
+// supabase/migrations/0054_login_attempt_lockout.sql -- service-role only,
+// zero RLS policies.
+export type LoginLockout = {
+  email: string;
+  failed_attempts: number;
+  first_failed_at: string;
+  locked_until: string | null;
+};
+
 export type AdminPageKey =
   | "users"
   | "catalog"
@@ -1028,6 +1040,12 @@ export interface Database {
         Update: Partial<BusinessEnquiry>;
         Relationships: [];
       };
+      login_lockouts: {
+        Row: LoginLockout;
+        Insert: Partial<LoginLockout>;
+        Update: Partial<LoginLockout>;
+        Relationships: [];
+      };
       practice_papers: {
         Row: PracticePaper;
         Insert: Partial<PracticePaper>;
@@ -1188,6 +1206,14 @@ export interface Database {
           p_min_rank?: number;
         };
         Returns: { id: string; answer: string; rank: number }[];
+      };
+      // Atomically records one failed login attempt and returns the
+      // resulting locked_until (or null if still under threshold). See
+      // supabase/migrations/0054_login_attempt_lockout.sql and
+      // src/app/login/actions.ts.
+      record_failed_login: {
+        Args: { p_email: string };
+        Returns: string | null;
       };
     };
   };
