@@ -1,14 +1,8 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatInrFromUsd } from "@/lib/currency";
 import type { ChatEventSource } from "@/lib/supabase/types";
-
-const USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
 
 const SOURCE_STYLES: Record<ChatEventSource, string> = {
   llm: "bg-purple-100 text-purple-700",
@@ -83,7 +77,7 @@ export default async function UserObservabilityPage({
                     {ev.total_tokens != null ? ev.total_tokens.toLocaleString() : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    {ev.cost_usd != null ? USD_FORMATTER.format(ev.cost_usd) : "—"}
+                    {ev.cost_usd != null ? formatInrFromUsd(ev.cost_usd) : "—"}
                   </td>
                   <td className="px-4 py-3 text-xs text-foreground/68">
                     {ev.latency_ms != null ? `${ev.latency_ms} ms` : "—"}

@@ -1,13 +1,7 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-const USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
+import { formatInrFromUsd } from "@/lib/currency";
 
 type UserUsage = {
   promptTokens: number;
@@ -190,7 +184,7 @@ export default async function ObservabilityPage() {
       <section className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard
           label="Total LLM cost"
-          value={USD_FORMATTER.format(totals.costUsd)}
+          value={formatInrFromUsd(totals.costUsd)}
           sub={totals.unpriced > 0 ? `${totals.unpriced} unpriced call(s)` : undefined}
         />
         <StatCard
@@ -239,7 +233,7 @@ export default async function ObservabilityPage() {
                   <td className="px-4 py-3">{row.completionTokens.toLocaleString()}</td>
                   <td className="px-4 py-3">{row.totalTokens.toLocaleString()}</td>
                   <td className="px-4 py-3">
-                    {USD_FORMATTER.format(row.costUsd)}
+                    {formatInrFromUsd(row.costUsd)}
                     {row.unpriced > 0 && (
                       <span className="ml-1 text-xs text-foreground/65">(+{row.unpriced} unpriced)</span>
                     )}
