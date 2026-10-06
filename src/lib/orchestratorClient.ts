@@ -77,6 +77,12 @@ export async function getOrchestratedReply(
   reply: string;
   source?: ChatOrchestrationSource;
   matchedTopic?: { chapter: string; topic: string } | null;
+  // Present only when the reply contained a [EXERCISES] block -- already
+  // stripped out of `reply` itself by the orchestrator. Not yet persisted
+  // or id-bearing; see storeChatExercises below, which this route's own
+  // caller uses once it has resolved matchedTopic to a real topicId (the
+  // orchestrator has no id for that, only the chapter/topic strings).
+  exercises?: { question: string; answer: string }[];
 }> {
   const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/chat`;
   const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
@@ -104,7 +110,50 @@ export async function getOrchestratedReply(
     reply: body.reply,
     source: body.source,
     matchedTopic: body.matchedTopic,
+    exercises: body.exercises,
   };
+}
+
+// Persists question/answer pairs parsed out of a freeform chat reply's own
+// [EXERCISES] block (see getOrchestratedReply's own comment) as real
+// answer-bank rows -- the same storage storeGeneratedExercise already does
+// for pattern-picker-generated exercises, just reached from the chat route
+// instead, since that's the only caller with a resolved topicId for
+// matchedTopic (see /api/chat/route.ts). Returns real, gradeable
+// ExerciseItem rows so the client can render these through the exact same
+// "Check my answer" flow as any other generated exercise.
+export async function storeChatExercises(request: {
+  userId: string;
+  topicId: string;
+  boardId: string;
+  gradeId: string;
+  subjectId: string;
+  medium: Medium;
+  exercises: { question: string; answer: string }[];
+}): Promise<{ exercises: ExerciseItem[] }> {
+  const url = `${getOrchestratorUrl().replace(/\/$/, "")}/v1/topic-exercises/store-batch`;
+  const sharedSecret = process.env.ORCHESTRATOR_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(request),
+  });
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(
+      body?.error ?? `Orchestrator request failed with status ${res.status}`,
+    );
+  }
+  if (!body || !Array.isArray(body.exercises)) {
+    throw new Error("Orchestrator returned an unexpected response shape");
+  }
+  return { exercises: body.exercises as ExerciseItem[] };
 }
 
 export type TopicSummaryRequest = {

@@ -181,6 +181,17 @@ type TimelineEntry =
       revealOnMount?: boolean;
       matchedTopic?: { id: string; chapter: string; topic: string } | null;
       exercises?: ExerciseContextItem[];
+      // Real, gradeable exercises the server already parsed and stored out
+      // of this reply's own [EXERCISES] block (see /api/chat/route.ts's
+      // storeChatExercises) -- fed into TopicPractice's own initialExercises
+      // prop below so a freeform "give me some exercises" chat request
+      // renders through the exact same "Check my answer" flow a pattern-
+      // picker generation does, instead of staying inert prose. Only ever
+      // set at creation time from the API response, never mutated after --
+      // TopicPractice's own onExercisesChanged (see handleMessageExercisesChanged)
+      // is what keeps `exercises` above live from then on, combining this
+      // with anything the pattern picker underneath adds later.
+      initialExercises?: PracticeExerciseItem[];
     }
   | {
       kind: "topic";
@@ -379,6 +390,7 @@ const MessageBubble = memo(function MessageBubble({
               chapter={entry.matchedTopic.chapter}
               topic={entry.matchedTopic.topic}
               preferEnglish={preferEnglish}
+              initialExercises={entry.initialExercises}
               onExercisesChanged={(exercises) =>
                 onExercisesChanged(message.id, exercises)
               }
@@ -825,6 +837,9 @@ export function ChatPanel({
             message: body.assistantMessage as ChatMessage,
             revealOnMount: true,
             matchedTopic: body.matchedTopic ?? null,
+            initialExercises: body.exercises as
+              | PracticeExerciseItem[]
+              | undefined,
           },
         ]);
       } catch (err) {
@@ -895,6 +910,9 @@ export function ChatPanel({
                   message: body.assistantMessage as ChatMessage,
                   revealOnMount: true,
                   matchedTopic: body.matchedTopic ?? null,
+                  initialExercises: body.exercises as
+                    | PracticeExerciseItem[]
+                    | undefined,
                 }
               : entry,
           ),

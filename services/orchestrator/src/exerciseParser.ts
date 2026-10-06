@@ -96,3 +96,43 @@ export function parseGeneratedExercises(text: string): ParsedExercise[] {
 
   return rows;
 }
+
+// Finds a `[EXERCISES]...[/EXERCISES]` block the tutor's own chat reply may
+// contain (see buildTutorSystemPrompt's rule on this -- used only when the
+// student explicitly asks for practice exercises mid-conversation, as
+// opposed to the dedicated topic-exercise generation endpoints) and parses
+// its contents with the exact same Q:/A:/--- format as everywhere else.
+// This is what lets a freeform "give me some Voice Change exercises" chat
+// request end up just as structurally trackable as an exercise batch from
+// the pattern picker -- confirmed live as the fix for a real report: a
+// student's "answer 3" follow-up got answered against a completely
+// different, OLDER structured batch than the freeform one just given,
+// because the freeform batch existed only as plain prose with nothing for
+// the exercise-context follow-up logic (see the web app's chat-panel.tsx)
+// to find.
+//
+// Returns the original text completely unchanged, tag included, when no
+// block is found OR the block is found but doesn't parse into at least one
+// exercise (a malformed/empty block) -- never silently drops real content
+// the way stripping an unparseable block would. Only ever strips the block
+// out of `text` once there's real parsed content to show in its place.
+const EXERCISES_BLOCK_PATTERN = /\[EXERCISES\]([\s\S]*?)\[\/EXERCISES\]/i;
+
+export function extractEmbeddedExercises(text: string): {
+  text: string;
+  exercises: ParsedExercise[];
+} {
+  const match = text.match(EXERCISES_BLOCK_PATTERN);
+  if (!match) return { text, exercises: [] };
+
+  const exercises = parseGeneratedExercises(match[1]);
+  if (exercises.length === 0) return { text, exercises: [] };
+
+  // Collapses any blank lines left behind where the block used to sit, so
+  // the surrounding prose reads as one continuous reply rather than
+  // leaving a visible gap.
+  const cleaned = (text.slice(0, match.index) + text.slice(match.index! + match[0].length))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text: cleaned, exercises };
+}

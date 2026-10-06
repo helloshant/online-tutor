@@ -11,7 +11,9 @@ import {
 import { resolveUsageLimit } from "@/lib/usageLimits";
 import {
   getOrchestratedReply,
+  storeChatExercises,
   type ChatOrchestrationRequest,
+  type ExerciseItem,
   type ImageAttachment,
   type ImageMediaType,
 } from "@/lib/orchestratorClient";
@@ -695,8 +697,9 @@ async function handleChatRequest(request: Request) {
 
   let assistantText: string;
   let matchedTopic: { chapter: string; topic: string } | null | undefined;
+  let parsedExerciseBlock: { question: string; answer: string }[] | undefined;
   try {
-    ({ reply: assistantText, matchedTopic } =
+    ({ reply: assistantText, matchedTopic, exercises: parsedExerciseBlock } =
       await getOrchestratedReply(orchestrationRequest));
   } catch (err) {
     console.error("Orchestrator chat request failed:", err);
@@ -731,6 +734,39 @@ async function handleChatRequest(request: Request) {
         ) ?? null)
       : null;
 
+  // Persists exercises the orchestrator parsed out of a [EXERCISES] block
+  // in this reply (see getOrchestratedReply's own comment) into the answer
+  // bank, the same way a pattern-picker generation already does, giving
+  // them real, gradeable ids -- this route is the only place with a
+  // resolved topicId for that (the orchestrator itself never had one, only
+  // the chapter/topic strings). Fails open: if storage errors, the student
+  // still gets their exercises inline in assistantText (the orchestrator
+  // only strips the block once there's a matchedTopic for this to
+  // succeed against, so the block's own content is never lost even if
+  // this specific write fails) -- just without the interactive "Check my
+  // answer" flow this turn, matching every other non-essential side effect
+  // in this route (answer-bank writes, caching) already failing open.
+  let storedExercises: ExerciseItem[] = [];
+  if (
+    parsedExerciseBlock?.length &&
+    resolvedMatchedTopic &&
+    orchestrationRequest.mode === "student"
+  ) {
+    try {
+      ({ exercises: storedExercises } = await storeChatExercises({
+        userId: user.id,
+        topicId: resolvedMatchedTopic.id,
+        boardId: orchestrationRequest.boardId,
+        gradeId: orchestrationRequest.gradeId,
+        subjectId,
+        medium: orchestrationRequest.responseLanguage,
+        exercises: parsedExerciseBlock,
+      }));
+    } catch (err) {
+      console.error("Failed to store chat-parsed exercises:", err);
+    }
+  }
+
   if (regenerateMessageId) {
     // Overwrite the existing assistant row in place -- the paired user
     // question is untouched (it's still the same question, just answered
@@ -758,6 +794,7 @@ async function handleChatRequest(request: Request) {
     return NextResponse.json({
       assistantMessage: updated as ChatMessage,
       matchedTopic: resolvedMatchedTopic,
+      exercises: storedExercises,
     });
   }
 
@@ -813,5 +850,6 @@ async function handleChatRequest(request: Request) {
     userMessage: rows.find((m) => m.role === "user"),
     assistantMessage: rows.find((m) => m.role === "assistant"),
     matchedTopic: resolvedMatchedTopic,
+    exercises: storedExercises,
   });
 }

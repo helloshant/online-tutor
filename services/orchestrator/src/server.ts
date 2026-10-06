@@ -31,7 +31,7 @@ import {
 } from "./chapterDocuments.js";
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
-import { parseGeneratedExercises } from "./exerciseParser.js";
+import { extractEmbeddedExercises, parseGeneratedExercises } from "./exerciseParser.js";
 import { getChatReply, getGradingReply } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
 import { buildPracticeBlueprint } from "./practiceBlueprint.js";
@@ -430,6 +430,34 @@ app.post(
       studentBody.message,
     );
 
+    // Strips a [EXERCISES] block (see buildTutorSystemPrompt's rule 9) out
+    // of a reply and returns its parsed contents, applied uniformly to
+    // every one of the three response paths below (cache/database/llm) so
+    // a cached or banked reply that happens to contain one degrades the
+    // exact same way a fresh one does, never leaking the raw tag to the
+    // student. Only attempted when matchedTopic resolved -- the web app's
+    // own matchedTopic -> topicId lookup is a guaranteed-to-succeed exact
+    // match against the very topics list it just sent (see its own
+    // comment on that), so gating on the same condition here means this
+    // never strips a block the web app would then have no topicId to
+    // persist (and therefore nothing to show in its place) for.
+    function withEmbeddedExercises(text: string): {
+      text: string;
+      exercises: ChatOrchestrationResponse["exercises"];
+    } {
+      if (!matchedTopic) return { text, exercises: undefined };
+      const { text: cleaned, exercises } = extractEmbeddedExercises(text);
+      return exercises.length > 0
+        ? {
+            text: cleaned,
+            exercises: exercises.map((e) => ({
+              question: e.question,
+              answer: e.answer,
+            })),
+          }
+        : { text, exercises: undefined };
+    }
+
     // Stages 2-3 (cache, then the Postgres answer bank) only apply to a fresh,
     // text-only question, not a follow-up ("explain more", "why?") -- those
     // depend on conversation context that a scope-only lookup key can't
@@ -476,10 +504,13 @@ app.post(
           source: "cache",
           latencyMs: Date.now() - startedAt,
         });
+        const { text: cachedText, exercises: cachedExercises } =
+          withEmbeddedExercises(cached);
         const response: ChatOrchestrationResponse = {
-          reply: cached,
+          reply: cachedText,
           source: "cache",
           matchedTopic,
+          exercises: cachedExercises,
         };
         res.json(response);
         return;
@@ -502,10 +533,13 @@ app.post(
           answerBankId: fromBank.id,
           latencyMs: Date.now() - startedAt,
         });
+        const { text: bankText, exercises: bankExercises } =
+          withEmbeddedExercises(fromBank.answer);
         const response: ChatOrchestrationResponse = {
-          reply: fromBank.answer,
+          reply: bankText,
           source: "database",
           matchedTopic,
+          exercises: bankExercises,
         };
         res.json(response);
         return;
@@ -632,10 +666,17 @@ app.post(
         }
       }
 
+      // Storage/caching above deliberately used the RAW `text` (block
+      // still embedded) -- a future cache/database hit re-runs
+      // withEmbeddedExercises on replay (see those two branches above),
+      // so the stored copy needs the block intact too. Only the response
+      // actually sent back this turn is cleaned.
+      const { text: cleanedText, exercises } = withEmbeddedExercises(text);
       const response: ChatOrchestrationResponse = {
-        reply: text,
+        reply: cleanedText,
         source: "llm",
         matchedTopic,
+        exercises,
       };
       res.json(response);
     } catch (err) {
@@ -1184,6 +1225,88 @@ async function storeGeneratedExercise(
     type: exercise.type ?? null,
   };
 }
+
+// Persists the question/answer pairs /v1/chat parsed out of a tutor
+// reply's own [EXERCISES] block (see extractEmbeddedExercises) as real
+// answer-bank rows, the same way storeGeneratedExercise already does for
+// pattern-picker-generated ones -- this is what turns a freeform "give me
+// some exercises" chat request into something with real, gradeable
+// ExerciseItem ids the web app can render through the exact same "Check my
+// answer" flow pattern-picker exercises already use, rather than inert
+// prose. No archetype attribution here (archetypeAttribution: null) --
+// these were never grounded in a mined pattern. Called by the web app only
+// once it has resolved matchedTopic to a real topicId (it alone has that
+// lookup -- see ChatOrchestrationResponse.exercises's own comment).
+app.post(
+  "/v1/topic-exercises/store-batch",
+  requireSharedSecret,
+  async (req: Request, res: Response) => {
+    const body = req.body as
+      | {
+          userId?: unknown;
+          topicId?: unknown;
+          boardId?: unknown;
+          gradeId?: unknown;
+          subjectId?: unknown;
+          medium?: unknown;
+          exercises?: unknown;
+        }
+      | undefined;
+
+    if (
+      !body ||
+      typeof body.userId !== "string" ||
+      !body.userId ||
+      typeof body.topicId !== "string" ||
+      !body.topicId ||
+      typeof body.boardId !== "string" ||
+      !body.boardId ||
+      typeof body.gradeId !== "string" ||
+      !body.gradeId ||
+      typeof body.subjectId !== "string" ||
+      !body.subjectId ||
+      typeof body.medium !== "string" ||
+      !Array.isArray(body.exercises) ||
+      body.exercises.length === 0
+    ) {
+      res.status(400).json({
+        error:
+          "userId, topicId, boardId, gradeId, subjectId, medium, and a non-empty exercises array are required",
+      });
+      return;
+    }
+
+    const exercises: { question: string; answer: string }[] = [];
+    for (const item of body.exercises) {
+      if (typeof item !== "object" || item === null) continue;
+      const { question, answer } = item as {
+        question?: unknown;
+        answer?: unknown;
+      };
+      if (typeof question === "string" && typeof answer === "string" && question.trim() && answer.trim()) {
+        exercises.push({ question, answer });
+      }
+    }
+
+    const scope = {
+      boardId: body.boardId,
+      gradeId: body.gradeId,
+      subjectId: body.subjectId,
+      medium: body.medium as Medium,
+    };
+
+    const stored = (
+      await Promise.all(
+        exercises.map((e) =>
+          storeGeneratedExercise(scope, body.topicId as string, body.userId as string, e, null),
+        ),
+      )
+    ).filter((e): e is ExerciseItem => e !== null);
+
+    const response: { exercises: ExerciseItem[] } = { exercises: stored };
+    res.json(response);
+  },
+);
 
 // Reached when a student clicks "Relevant Exercises" under a topic summary.
 // Searches the answer bank for exercises already generated for this exact

@@ -105,6 +105,14 @@ export type ChatOrchestrationResponse = {
   // syllabus_topics row by exact string equality, no fuzzy matching
   // needed, since it's the same source data round-tripped.
   matchedTopic?: { chapter: string; topic: string } | null;
+  // Present only when the reply contained a [EXERCISES] block (see
+  // buildTutorSystemPrompt's rule 9 and exerciseParser.ts's
+  // extractEmbeddedExercises) -- already stripped out of `reply` itself.
+  // The web app persists these into the answer bank (it alone has the
+  // resolved topicId matchedTopic needs for that, see its own chat
+  // route) and echoes back real, gradeable ExerciseItem rows; the
+  // orchestrator's own job here is just parsing them out, never storage.
+  exercises?: { question: string; answer: string }[];
 };
 
 // Identifies a single question within the L1 (Redis) / L2 (Postgres answer
