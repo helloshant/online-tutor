@@ -6,6 +6,7 @@ import {
   getAzureOpenAIReply,
   getAzureOpenAIGradingReply,
 } from "./azureOpenAIProvider.js";
+import { getGeminiReply, getGeminiGradingReply } from "./geminiProvider.js";
 import { recordChatEvent } from "./observabilityClient.js";
 import type {
   ChatTurn,
@@ -15,13 +16,14 @@ import type {
   SystemPromptInput,
 } from "./types.js";
 
-export type LlmProvider = "anthropic" | "azure-openai";
+export type LlmProvider = "anthropic" | "azure-openai" | "gemini";
 
-// Defaults to Anthropic; set LLM_PROVIDER=azure-openai to switch.
+// Defaults to Anthropic; set LLM_PROVIDER=azure-openai or LLM_PROVIDER=gemini
+// to switch.
 export function getActiveLlmProvider(): LlmProvider {
-  return process.env.LLM_PROVIDER === "azure-openai"
-    ? "azure-openai"
-    : "anthropic";
+  if (process.env.LLM_PROVIDER === "azure-openai") return "azure-openai";
+  if (process.env.LLM_PROVIDER === "gemini") return "gemini";
+  return "anthropic";
 }
 
 // Which model/deployment a call actually gets, chosen by matching its
@@ -82,10 +84,24 @@ const AZURE_TIER_DEPLOYMENTS: Record<LlmTier, string> = {
     process.env.AZURE_OPENAI_DEPLOYMENT_ECONOMY || DEFAULT_AZURE_DEPLOYMENT,
 };
 
+// Gemini model ids are stable, portable strings too (same as Anthropic's),
+// so each tier gets its own real model rather than Azure's single-deployment
+// no-op. Mapped the same way the flagship/standard default change above
+// reasoned about Anthropic: the highest-capability model (Pro) only where
+// stakes genuinely call for it, the mid-tier model (Flash) on the
+// highest-volume work, and the cheapest (Flash-Lite) on what's never shown
+// directly to a student. All three are already priced in
+// services/observability/src/pricing.ts.
+const GEMINI_TIER_MODELS: Record<LlmTier, string> = {
+  flagship: process.env.GEMINI_MODEL_FLAGSHIP || "gemini-2.5-pro",
+  standard: process.env.GEMINI_MODEL_STANDARD || "gemini-2.5-flash",
+  economy: process.env.GEMINI_MODEL_ECONOMY || "gemini-2.5-flash-lite",
+};
+
 function resolveModel(provider: LlmProvider, tier: LlmTier): string {
-  return provider === "azure-openai"
-    ? AZURE_TIER_DEPLOYMENTS[tier]
-    : ANTHROPIC_TIER_MODELS[tier];
+  if (provider === "azure-openai") return AZURE_TIER_DEPLOYMENTS[tier];
+  if (provider === "gemini") return GEMINI_TIER_MODELS[tier];
+  return ANTHROPIC_TIER_MODELS[tier];
 }
 
 // Every getChatReply/getGradingReply call must supply one of these two
@@ -176,7 +192,9 @@ export async function getChatReply(params: {
   const reply =
     provider === "azure-openai"
       ? await getAzureOpenAIReply({ ...providerParams, model })
-      : await getAnthropicReply({ ...providerParams, model });
+      : provider === "gemini"
+        ? await getGeminiReply({ ...providerParams, model })
+        : await getAnthropicReply({ ...providerParams, model });
   reportLlmCall(event, reply, startedAt);
   return reply;
 }
@@ -202,7 +220,9 @@ export async function getGradingReply(params: {
   const reply =
     provider === "azure-openai"
       ? await getAzureOpenAIGradingReply({ ...providerParams, model })
-      : await getAnthropicGradingReply({ ...providerParams, model });
+      : provider === "gemini"
+        ? await getGeminiGradingReply({ ...providerParams, model })
+        : await getAnthropicGradingReply({ ...providerParams, model });
   reportLlmCall(event, reply, startedAt);
   return reply;
 }

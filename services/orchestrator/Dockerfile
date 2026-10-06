@@ -1,7 +1,7 @@
 # SyllabusMate LLM orchestration service. Owns system-prompt construction,
 # syllabus-relevance filtering, and LLM provider selection (Anthropic /
-# Azure OpenAI); kept as its own container so the provider/prompt layer can
-# be scaled, redeployed, or swapped independently of the web app.
+# Azure OpenAI / Gemini); kept as its own container so the provider/prompt
+# layer can be scaled, redeployed, or swapped independently of the web app.
 
 FROM node:22-alpine AS deps
 WORKDIR /app

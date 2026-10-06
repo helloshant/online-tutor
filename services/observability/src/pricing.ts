@@ -25,6 +25,21 @@ const DEFAULT_ANTHROPIC_PRICING: Record<string, PricingRate> = {
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
 };
 
+// Google's published Gemini Developer API pricing (USD per million tokens),
+// as of 2026-10. gemini-2.5-pro's rate here is its <=200K-context tier
+// ($1.25/$10) -- the >200K tier ($2.50/$15, applied to the WHOLE prompt, not
+// just the excess) isn't modeled by this flat-rate PricingRate shape, same
+// limitation as every other model here having one rate rather than one per
+// context-length bracket. This app's own prompts (even with multi-turn
+// history) never realistically approach 200K tokens, so the flat rate is
+// accurate for actual usage; set a LLM_PRICING_JSON override if that
+// changes.
+const DEFAULT_GEMINI_PRICING: Record<string, PricingRate> = {
+  "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gemini-2.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  "gemini-2.5-flash-lite": { inputPerMTok: 0.1, outputPerMTok: 0.4 },
+};
+
 let cachedOverrides: Record<string, PricingRate> | undefined;
 
 function loadOverrides(): Record<string, PricingRate> {
@@ -49,6 +64,9 @@ export function getPricing(provider: string, model: string): PricingRate | null 
   if (overrides[key]) return overrides[key];
   if (provider === "anthropic" && DEFAULT_ANTHROPIC_PRICING[model]) {
     return DEFAULT_ANTHROPIC_PRICING[model];
+  }
+  if (provider === "gemini" && DEFAULT_GEMINI_PRICING[model]) {
+    return DEFAULT_GEMINI_PRICING[model];
   }
   return null;
 }
