@@ -86,31 +86,43 @@ const AZURE_TIER_DEPLOYMENTS: Record<LlmTier, string> = {
 
 // Gemini model ids are stable, portable strings too (same as Anthropic's),
 // so each tier gets its own real model rather than Azure's single-deployment
-// no-op. Mapped the same way the flagship/standard default change above
-// reasoned about Anthropic: the highest-capability model (Pro) only where
-// stakes genuinely call for it, the mid-tier model (Flash) on the
-// highest-volume work, and the cheapest (Flash-Lite) on what's never shown
-// directly to a student. All three are already priced in
-// services/observability/src/pricing.ts.
+// no-op -- mapped the same way the flagship/standard default change above
+// reasoned about Anthropic: the highest-capability tier only where stakes
+// genuinely call for it, the mid tier on the highest-volume work, the
+// cheapest on what's never shown directly to a student.
 //
-// standard was gemini-2.5-flash until Google retired it for new/existing
-// callers -- reported directly in production: a real 404 ("This model
-// models/gemini-2.5-flash is no longer available... use
-// models/gemini-3.8-flash"), confirmed straight from Google's own API
-// response, not a guess. flagship/economy are still on their original 2.5
-// names below (gemini-2.5-pro, gemini-2.5-flash-lite) -- same generation
-// Google just retired flash from, so they may be silently broken the same
-// way and just haven't been hit by a real request yet. Verify against
-// Google's own model list before trusting either (a web search for current
-// Gemini model names/pricing turned out NOT reliable enough to risk a
-// second guess here -- several aggregator sites disagreed with each other
-// on what "the current Gemini 3 models" even are):
+// These default to Google's own "-latest" ALIASES (gemini-pro-latest/
+// gemini-flash-latest/gemini-flash-lite-latest), not a specific pinned
+// version -- a deliberate choice forced by what actually happened here:
+// standard's pinned gemini-2.5-flash broke in production with a real 404
+// ("no longer available... use gemini-3.8-flash"), confirmed straight from
+// Google's own API, and a models.list check (see below) then showed
+// gemini-2.5-flash ITSELF still listed as available despite 404ing on
+// every real call -- proof that "present in models.list" does NOT mean
+// "actually callable," so flagship/economy's then-current pinned names
+// (gemini-2.5-pro, gemini-2.5-flash-lite -- also both still listed) could
+// not be trusted either, and Google was cycling flash versions fast enough
+// (3.1/3.5/3.6/3.7/3.8 all listed at once) that pinning the next specific
+// version looked likely to break again soon. The "-latest" aliases exist
+// specifically so this class of breakage stops recurring -- Google routes
+// them to whatever it currently recommends, so no .env.local edit or
+// redeploy is needed when the underlying model changes again. Tradeoff,
+// stated plainly: Google can change what an alias points to without
+// warning, which could shift output format/behavior under this app's own
+// carefully-tuned prompts (the [DIAGRAM]/[STEP] instructions) -- accepted
+// here given pinned names have now broken twice in a row. Cost tracking
+// still works through this: getGeminiReply/getGeminiGradingReply record
+// response.modelVersion (what Gemini actually resolved to), not the alias
+// string, so services/observability/src/pricing.ts's lookup still has a
+// real model id to match against -- see geminiProvider.ts's own comment.
+// To verify what's currently valid for a real key (confirm an alias still
+// resolves, or re-pin a specific version instead):
 //   curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" \
 //     | grep -o '"name": "models/[^"]*"' | sort -u
 const GEMINI_TIER_MODELS: Record<LlmTier, string> = {
-  flagship: process.env.GEMINI_MODEL_FLAGSHIP || "gemini-2.5-pro",
-  standard: process.env.GEMINI_MODEL_STANDARD || "gemini-3.8-flash",
-  economy: process.env.GEMINI_MODEL_ECONOMY || "gemini-2.5-flash-lite",
+  flagship: process.env.GEMINI_MODEL_FLAGSHIP || "gemini-pro-latest",
+  standard: process.env.GEMINI_MODEL_STANDARD || "gemini-flash-latest",
+  economy: process.env.GEMINI_MODEL_ECONOMY || "gemini-flash-lite-latest",
 };
 
 function resolveModel(provider: LlmProvider, tier: LlmTier): string {

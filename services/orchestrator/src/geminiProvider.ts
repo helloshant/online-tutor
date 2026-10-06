@@ -91,9 +91,18 @@ export async function getGeminiReply(params: {
     },
   });
 
+  // response.modelVersion -- what Gemini actually served -- not the `model`
+  // request param, matching the Anthropic provider's own response.model
+  // posture: harmless when `model` is already a specific pinned version
+  // (the two agree), but necessary once a GEMINI_MODEL_* tier is set to one
+  // of Google's "-latest" aliases (see llm.ts's own GEMINI_TIER_MODELS
+  // comment on why this app uses those) -- recording the alias string
+  // itself into chat_events would both lose which concrete model actually
+  // answered and break /admin/observability's cost lookup, which is keyed
+  // by concrete model id in pricing.ts, not by alias.
   return {
     text: response.text?.trim() ? response.text : FALLBACK_TEXT,
-    model,
+    model: response.modelVersion || model,
     usage: {
       promptTokens: response.usageMetadata?.promptTokenCount ?? 0,
       completionTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
@@ -142,7 +151,7 @@ export async function getGeminiGradingReply(params: {
 
   return {
     text: response.text?.trim() ? response.text : GRADING_FALLBACK_TEXT,
-    model,
+    model: response.modelVersion || model,
     usage: {
       promptTokens: response.usageMetadata?.promptTokenCount ?? 0,
       completionTokens: response.usageMetadata?.candidatesTokenCount ?? 0,

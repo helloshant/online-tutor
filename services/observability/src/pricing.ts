@@ -37,16 +37,24 @@ const DEFAULT_ANTHROPIC_PRICING: Record<string, PricingRate> = {
 //
 // gemini-2.5-flash has NO entry here anymore -- Google retired it (see
 // llm.ts's own comment on GEMINI_TIER_MODELS for the production 404 that
-// caught this) in favor of gemini-3.8-flash, whose real rate isn't added
-// here: the only numbers found for it were a time-limited introductory
-// price from third-party aggregator sites that disagreed with each other,
-// not confirmed against Google's own pricing page -- exactly the kind of
-// unverified guess that got gemini-2.5-flash's own replacement name wrong
-// the first time. Until confirmed, a gemini-3.8-flash call reports token
-// counts with no dollar cost (getPricing returns null, same as any other
-// unpriced model) rather than a dollar figure that might be confidently
-// wrong. Set it via LLM_PRICING_JSON once you've confirmed the real rate
-// (e.g. from an invoice, or Google's own https://ai.google.dev/pricing).
+// caught this). The two entries below are kept for anyone who explicitly
+// pins a GEMINI_MODEL_* env var to these exact, still-real version
+// strings -- but as of this file's own last update, all three Gemini tiers
+// default to Google's "-latest" ALIASES instead (gemini-pro-latest etc.,
+// again see GEMINI_TIER_MODELS's comment for why), and the provider
+// records whatever concrete model Gemini actually resolves an alias to
+// (response.modelVersion), which won't match "gemini-2.5-pro" or
+// "gemini-2.5-flash-lite" below unless Google happens to still be routing
+// there. A resolved id with no entry here is expected, not a bug --
+// getPricing returns null and the call's tokens are still recorded, just
+// with no dollar figure, rather than guessing a rate for a model id this
+// file has never confirmed a real price for. Add a confirmed rate here (or
+// via LLM_PRICING_JSON) once you see which concrete model id your own
+// deploy's aliases are actually resolving to (/admin/observability will
+// show it) and have a real number for it (an invoice, or Google's own
+// https://ai.google.dev/pricing) -- not a third-party aggregator guess,
+// which is exactly what got gemini-2.5-flash's replacement name wrong the
+// first time.
 const DEFAULT_GEMINI_PRICING: Record<string, PricingRate> = {
   "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gemini-2.5-flash-lite": { inputPerMTok: 0.1, outputPerMTok: 0.4 },
