@@ -30,6 +30,22 @@ const TABLE_FORMAT_RULE =
 const SUMMARY_EMPHASIS_RULE =
   "Use markdown emphasis so this reads as a scannable reference card, not a wall of prose: **bold** each sub-topic/concept name you introduce (e.g. \"**Newton's First Law**\"), and *italicize* key terms, named formulas/rules, and other words worth the student's particular attention the first time each appears. This renders as real bold/italic text, not literal asterisks -- use it to mark real structure and vocabulary, not on every other word.";
 
+// Returns {stable, volatile} rather than one string -- see
+// SystemPromptInput's own comment in types.ts for why, and
+// anthropicProvider.ts for how the two get cached/assembled. `stable` holds
+// every rule whose wording never changes for a given board/grade/subject/
+// medium (the opening line and rules 1-8 as written in the catalog, minus
+// the three message-dependent insertions below); `volatile` holds exactly
+// those three insertions -- the image note, the relevant-topics detail for
+// rule 3, and the RAG reference material for rule 7 -- moved to the END of
+// the prompt instead of inline where each used to sit. This is a real
+// reordering, not just a mechanical split, but it's also what Anthropic's
+// own prompt-caching guidance recommends regardless of caching (static
+// instructions first, per-request context last, right before the actual
+// question) -- each moved section keeps its own original descriptive
+// lead-in sentence verbatim, so it still reads as self-contained context
+// for whichever rule it supports even without being physically adjacent to
+// it.
 export function buildTutorSystemPrompt(params: {
   subjectName: string;
   boardName: string;
@@ -56,7 +72,7 @@ export function buildTutorSystemPrompt(params: {
   // the common case (no matching chapter document, or the subject has none
   // authored yet) -- the prompt reads identically to before this feature.
   referenceChunks?: RetrievedChunk[];
-}): string {
+}): { stable: string; volatile: string } {
   const {
     subjectName,
     boardName,
@@ -134,12 +150,12 @@ Student: Give me the exact lines of that poem.
 Assistant: I can't reproduce the exact original wording, but here's what it describes in my own words: it paints a quiet, everyday scene through a few simple, vivid details. For the precise text, please check your textbook copy directly.`
       : "";
 
-  return `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.${imageNote}
+  const stable = `You are a patient, encouraging tutor for a school student studying ${subjectName} in ${gradeName} under the ${boardName} curriculum.
 
 Hard rules, in order of priority:
 1. Respond ONLY in ${responseLanguage}, regardless of what language the student writes in.
 2. Only answer questions about ${subjectName}. If the student asks about a different subject, gently decline and remind them they can switch subjects using the left panel to ask about that subject instead.
-3. Keep your answers within the ${gradeName} ${boardName} ${subjectName} syllabus, which covers these chapters: ${chapterList}. You may draw on the prerequisite knowledge needed to explain them, but do not teach content from later grades, other boards, or chapters not listed here.${detailSection}
+3. Keep your answers within the ${gradeName} ${boardName} ${subjectName} syllabus, which covers these chapters: ${chapterList}. You may draw on the prerequisite knowledge needed to explain them, but do not teach content from later grades, other boards, or chapters not listed here. (The specific topics most relevant to the student's current question, when any stand out, are detailed at the end of this prompt.)
 4. If a question falls outside this syllabus (e.g. a much more advanced topic, or something from a different grade or board), say so briefly, note that it's outside the current syllabus, and offer to explain the closest syllabus-appropriate topic instead.
 5. Teach, don't just answer: explain concepts clearly with simple examples appropriate for a ${gradeName} student, and show step-by-step reasoning for problems. When a problem genuinely takes multiple distinct steps to solve (not a single-fact/definition question), format each step as [STEP: short name of the concept/rule this step applies]\nthe step's own reasoning and working\n[/STEP], one per step, in order -- name the actual concept/rule/theorem being used, not a generic label like "Step 1". This lets the student see which specific idea from the chapter each step leans on, not just the arithmetic. Everything outside a [STEP]...[/STEP] block (a brief intro, the final answer/summary) is written as ordinary prose, not wrapped in a step.
 6. Whenever a problem describes or reduces to a physical shape or configuration -- a triangle, a ladder/pole/tower leaning or standing against something, an angle of elevation/depression, points on a plane, a range on a number line -- you MUST include a [DIAGRAM]{...}[/DIAGRAM] block; this is not optional or a nice-to-have for this kind of problem, it is required. Place it wherever you first set up that configuration in prose, whichever part of the answer that turns out to be -- very often that is your OPENING PARAGRAPH before any [STEP] block at all (e.g. "we will form two right triangles..."), not inside a step, since a [STEP] frequently starts straight in on using a ratio/equation rather than re-describing the shape it belongs to; if that's where you describe the setup, put the [DIAGRAM] block there, in that same opening paragraph -- do not skip it just because no individual [STEP] itself does the describing. This applies even to a configuration involving two triangles, or an angle of elevation/depression measured from an implied horizontal line rather than from a side that's already drawn. Skip the diagram entirely only when there is truly nothing physical left to draw (e.g. a step that's pure algebraic/symbolic manipulation, isolating a variable, simplifying an expression). Include exactly one [DIAGRAM] block for the configuration (not one per step repeating the same shape), containing ONLY valid JSON (no comments, no trailing commas) in one of these four shapes. NEVER write a heading or section (e.g. "### Geometry Setup:") whose only purpose is to introduce the [DIAGRAM] block -- a malformed diagram is dropped silently rather than shown broken, and a heading with nothing under it if that happens reads as an obviously broken response even though the rest of your answer is fine. Put the [DIAGRAM] block inside an ordinary sentence or paragraph that still reads as complete on its own regardless of whether the diagram itself ends up rendering. Every coordinate or numeric field you write (in any of the four shapes below) MUST be an actual number -- never a variable name or unknown like h or x, even one the problem itself uses and even mid-step while you don't yet know its value; a bare unquoted letter where a number is expected is not valid JSON at all and silently drops the ENTIRE diagram, not just that one value. This is exactly why angleFromHorizontal (below) takes no coordinates in the first place -- if a point's position would depend on an unknown you're still solving for, that is the signal to use angleFromHorizontal instead of "geometry", not to write the unknown's name into a coordinate field. Coordinates (where you supply any at all -- see angleFromHorizontal below, which needs none) are logical units, not pixels -- the diagram is scaled and drawn automatically, so exact precision isn't needed. But keep the two axes RELATIVELY proportional to the problem's real numbers -- if one distance is many times another (e.g. a 60 m building next to a much smaller horizontal offset), its coordinates should be too, not copied verbatim from the small illustrative numbers in the examples below. Coordinates wildly out of proportion to the real problem render as an unreadable sliver.
@@ -148,10 +164,19 @@ Hard rules, in order of priority:
    - Graph (plotted points/lines on x/y axes): {"type":"graph","points":[{"x":3,"y":4,"label":"P"}],"lines":[{"points":[{"x":-2,"y":-3},{"x":4,"y":9}]}]}
    - Number line: {"type":"numberline","range":[-5,5],"points":[{"value":2,"label":"x"}],"highlight":[{"from":0,"to":2}]}
    Most steps need no diagram at all -- only include one when it genuinely helps, never as decoration.
-7. If reference material is provided below, use it if it actually helps answer accurately; ignore it if it doesn't apply. Where it does apply, ground your answer in it rather than filling gaps with outside knowledge presented as fact -- if it only partly covers the question, say plainly which part you can't confirm rather than guessing. Never quote long passages, poem lines, or dialogue verbatim from it; paraphrase and explain in your own words instead. When you rely on a specific piece of reference material, name its source in parentheses using the citation given with it, e.g. "(Source: ...)" -- if a chunk has no citation attached, name the chapter/topic it came from instead.${referenceSection}${fewShotSection}
+7. If reference material is provided (at the end of this prompt, after the hard rules), use it if it actually helps answer accurately; ignore it if it doesn't apply. Where it does apply, ground your answer in it rather than filling gaps with outside knowledge presented as fact -- if it only partly covers the question, say plainly which part you can't confirm rather than guessing. Never quote long passages, poem lines, or dialogue verbatim from it; paraphrase and explain in your own words instead. When you rely on a specific piece of reference material, name its source in parentheses using the citation given with it, e.g. "(Source: ...)" -- if a chunk has no citation attached, name the chapter/topic it came from instead.
 8. ${TABLE_FORMAT_RULE}
 
 Keep responses focused and appropriately concise for a chat interface.`;
+
+  // Everything that genuinely varies by message, moved here (the end of
+  // the effective prompt, right before the student's own question) instead
+  // of inline within rules 3 and 7 -- see this function's own comment for
+  // why. Each piece keeps its original, self-contained lead-in sentence,
+  // so it still reads as clearly tied to the rule above that pointed to it.
+  const volatile = `${imageNote}${detailSection}${referenceSection}${fewShotSection}`;
+
+  return { stable, volatile };
 }
 
 export function buildTopicSummaryPrompt(params: {

@@ -1,5 +1,23 @@
 import { AzureOpenAI } from "openai";
-import type { ChatTurn, ImageAttachment, LlmReply } from "./types.js";
+import type {
+  ChatTurn,
+  ImageAttachment,
+  LlmReply,
+  SystemPromptInput,
+} from "./types.js";
+
+// Azure OpenAI (and the OpenAI API generally) has no cache_control
+// breakpoint syntax -- caching is fully automatic there, applying to
+// whatever ends up as the request's longest-matching prefix, so the only
+// thing this provider needs to do for SystemPromptInput's {stable, volatile}
+// shape is keep `stable` first: concatenating it before `volatile` preserves
+// the exact prefix buildTutorSystemPrompt built it to be, letting Azure's
+// own automatic caching find and reuse it with no further code here.
+function resolveSystemPrompt(systemPrompt: SystemPromptInput): string {
+  return typeof systemPrompt === "string"
+    ? systemPrompt
+    : systemPrompt.stable + systemPrompt.volatile;
+}
 
 const DEFAULT_API_VERSION = "2024-08-01-preview";
 
@@ -40,7 +58,7 @@ const FALLBACK_TEXT =
   "Sorry, I couldn't come up with an answer. Please try rephrasing your question.";
 
 export async function getAzureOpenAIReply(params: {
-  systemPrompt: string;
+  systemPrompt: SystemPromptInput;
   history: ChatTurn[];
   message: string;
   maxTokens: number;
@@ -68,7 +86,7 @@ export async function getAzureOpenAIReply(params: {
     model,
     max_tokens: maxTokens,
     messages: [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: resolveSystemPrompt(systemPrompt) },
       ...history.map((turn) => ({ role: turn.role, content: turn.content })),
       { role: "user" as const, content: userContent },
     ],

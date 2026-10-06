@@ -7,7 +7,13 @@ import {
   getAzureOpenAIGradingReply,
 } from "./azureOpenAIProvider.js";
 import { recordChatEvent } from "./observabilityClient.js";
-import type { ChatTurn, ImageAttachment, LlmReply, Medium } from "./types.js";
+import type {
+  ChatTurn,
+  ImageAttachment,
+  LlmReply,
+  Medium,
+  SystemPromptInput,
+} from "./types.js";
 
 export type LlmProvider = "anthropic" | "azure-openai";
 
@@ -150,7 +156,7 @@ function reportLlmCall(
 }
 
 export async function getChatReply(params: {
-  systemPrompt: string;
+  systemPrompt: SystemPromptInput;
   history: ChatTurn[];
   message: string;
   maxTokens: number;

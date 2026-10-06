@@ -8,6 +8,23 @@ export type Medium = "English" | "Hindi" | "Bengali" | "Sanskrit";
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type SyllabusTopic = { chapter: string; topic: string };
 
+// What a prompt builder hands getChatReply. Most builders (topic summary,
+// exercise generation, grading, staff chat) still return a plain string --
+// short, single-shot prompts with little realistic reuse across calls, not
+// worth the complexity of splitting. buildTutorSystemPrompt is the
+// exception: it returns the {stable, volatile} shape so the Anthropic
+// provider can cache `stable` (everything that stays byte-identical across
+// every turn of a chat AND across every other student currently on the
+// same board/grade/subject/medium -- the "hard rules" boilerplate) as a
+// prompt-caching breakpoint, while `volatile` (the per-message RAG
+// reference chunks and relevant-topic detail, which genuinely differ
+// question to question) is sent fresh every time, appended after it. See
+// anthropicProvider.ts's own comment for how the two get assembled into
+// one effective system prompt. The Azure OpenAI provider doesn't need this
+// split -- it just concatenates stable+volatile in order (still a valid
+// prefix for Azure's own automatic prompt caching, no code needed there).
+export type SystemPromptInput = string | { stable: string; volatile: string };
+
 // Matches Anthropic's Base64ImageSource media_type union exactly, so no
 // runtime cast is needed when building the content block.
 export type ImageMediaType =
