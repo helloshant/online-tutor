@@ -220,7 +220,7 @@ export async function getChatReply(params: {
     provider === "azure-openai"
       ? await getAzureOpenAIReply({ ...providerParams, model })
       : provider === "gemini"
-        ? await getGeminiReply({ ...providerParams, model })
+        ? await getGeminiReply({ ...providerParams, model, tier })
         : await getAnthropicReply({ ...providerParams, model });
   reportLlmCall(event, reply, startedAt);
   return reply;

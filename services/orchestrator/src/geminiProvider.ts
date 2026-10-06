@@ -5,6 +5,10 @@ import type {
   LlmReply,
   SystemPromptInput,
 } from "./types.js";
+// Type-only -- erased at compile time, so this doesn't create a real
+// runtime circular import with llm.ts (which imports the functions below
+// from this file).
+import type { LlmTier } from "./llm.js";
 
 let cachedClient: GoogleGenAI | null = null;
 
@@ -50,6 +54,24 @@ function toGeminiRole(role: ChatTurn["role"]): "user" | "model" {
   return role === "assistant" ? "model" : "user";
 }
 
+// Gemini 2.5+/3.x models spend hidden "thinking" tokens before the visible
+// reply by default (automatic budget, unset by this provider until now) --
+// real latency, and real cost (thinking tokens bill as output). Reported
+// directly: exercise generation (standard tier) got noticeably slower after
+// switching to Gemini, exactly where it matters most -- that path runs up
+// to 41 calls for one practice paper, so added latency/cost compounds hard
+// there. Disabled (thinkingBudget: 0) for standard and economy -- writing a
+// practice question from an archetype, or the answer-bank/emphasis work
+// economy does, doesn't need extended reasoning, it needs fast, direct
+// output matching a spelled-out format. Left at Gemini's own default
+// (undefined -- automatic) for flagship: chat tutoring and grading are
+// where multi-step reasoning (this app's own [STEP]-by-[STEP] math,
+// judgment-call grading) can genuinely benefit from it, and that path is
+// one on-demand call at a time, not a 41-call batch.
+function resolveThinkingConfig(tier: LlmTier): { thinkingBudget: number } | undefined {
+  return tier === "flagship" ? undefined : { thinkingBudget: 0 };
+}
+
 export async function getGeminiReply(params: {
   systemPrompt: SystemPromptInput;
   history: ChatTurn[];
@@ -58,8 +80,10 @@ export async function getGeminiReply(params: {
   image?: ImageAttachment | null;
   // The tier-resolved model id -- see llm.ts's own LlmTier comment.
   model: string;
+  tier: LlmTier;
 }): Promise<LlmReply> {
-  const { systemPrompt, history, message, maxTokens, image, model } = params;
+  const { systemPrompt, history, message, maxTokens, image, model, tier } =
+    params;
   const client = getClient();
 
   // Same vision posture as the Anthropic/Azure providers: the image is read
@@ -88,6 +112,7 @@ export async function getGeminiReply(params: {
     config: {
       systemInstruction: resolveSystemInstruction(systemPrompt),
       maxOutputTokens: maxTokens,
+      thinkingConfig: resolveThinkingConfig(tier),
     },
   });
 
