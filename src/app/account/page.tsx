@@ -7,6 +7,7 @@ import { NewPasswordForm } from "@/components/new-password-form";
 import { changePassword } from "./actions";
 import { AiModelSwitcher } from "./ai-model-switcher";
 import { RechargeCheckout } from "./recharge-checkout";
+import { CouponForm } from "./coupon-form";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const ROLE_LABEL: Record<ProfileRole, string> = {
@@ -197,6 +198,7 @@ function WalletCard({ balance }: { balance: number }) {
       <div className="mt-3">
         <RechargeCheckout />
       </div>
+      <CouponForm />
     </div>
   );
 }

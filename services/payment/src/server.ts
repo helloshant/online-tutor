@@ -1,6 +1,6 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
-import { generateCoupons, redeemCoupon, revokeCoupon } from "./coupons.js";
+import { generateCoupons, redeemCoupon, redeemWalletTopupCoupon, revokeCoupon } from "./coupons.js";
 import { handleCallback, initiatePayment, initiateWalletTopup } from "./ccavenuePayment.js";
 
 const PORT = Number(process.env.PORT) || 4200;
@@ -206,6 +206,40 @@ app.post(
     }
 
     const result = await redeemCoupon({ code: body.code, userId: body.userId, subscriptionId: body.subscriptionId });
+    if (result.error) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true, activated: result.activated, newAmountPaise: result.newAmountPaise });
+  })
+);
+
+// Sibling of /v1/coupons/redeem above for a wallet recharge instead of a
+// subscription -- a new, additive route rather than widening the one
+// above, since subscriptionId/topupId identify rows in two completely
+// different tables (see redeemWalletTopupCoupon's own comment).
+app.post(
+  "/v1/coupons/redeem-wallet-topup",
+  requireSharedSecret,
+  asyncRoute(async (req, res) => {
+    const body = req.body as Partial<{ code: string; userId: string; topupId: string }>;
+    if (
+      typeof body.code !== "string" ||
+      !body.code ||
+      typeof body.userId !== "string" ||
+      !body.userId ||
+      typeof body.topupId !== "string" ||
+      !body.topupId
+    ) {
+      res.status(400).json({ error: "code, userId, and topupId are required" });
+      return;
+    }
+
+    const result = await redeemWalletTopupCoupon({
+      code: body.code,
+      userId: body.userId,
+      topupId: body.topupId,
+    });
     if (result.error) {
       res.status(400).json({ error: result.error });
       return;

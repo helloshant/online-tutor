@@ -162,3 +162,109 @@ export async function redeemCoupon(params: {
   }
   return { activated: false, newAmountPaise: discountedAmount };
 }
+
+// Sibling of redeemCoupon above, for a wallet recharge instead of a
+// subscription -- see 0056_coupon_codes_wallet_topups.sql. Discounts the
+// topup's amount_paise (what the student pays); tokens_credited is never
+// touched, so a discounted recharge still credits the SAME full 200,000
+// tokens -- "pay less for the same thing," identical to how a subscription
+// discount worked. 100% off skips payment entirely: the wallet is credited
+// immediately via credit_wallet and the row is marked active with no
+// CCAvenue trip at all, same as the old subscription flow's "activate
+// outright" case.
+export async function redeemWalletTopupCoupon(params: {
+  code: string;
+  userId: string;
+  topupId: string;
+}): Promise<{ error?: string; activated?: boolean; newAmountPaise?: number }> {
+  const supabase = getSupabaseClient();
+  const code = params.code.trim().toUpperCase();
+
+  // Re-verified here rather than trusted from the caller, same reasoning
+  // as redeemCoupon above -- this service is the actual trust boundary.
+  const { data: topup } = await supabase
+    .from("wallet_topups")
+    .select("id, user_id, status, amount_paise, tokens_credited")
+    .eq("id", params.topupId)
+    .maybeSingle();
+
+  if (!topup || topup.user_id !== params.userId || topup.status !== "pending_payment") {
+    return { error: "No pending recharge to apply this code to." };
+  }
+
+  const { data: coupon } = await supabase
+    .from("coupon_codes")
+    .select("id, used_by, expires_at, discount_percent")
+    .eq("code", code)
+    .maybeSingle();
+  if (!coupon) {
+    return { error: "That coupon code isn't valid." };
+  }
+  if (coupon.used_by) {
+    return { error: "That coupon code has already been used." };
+  }
+  if (coupon.expires_at && new Date(coupon.expires_at) <= new Date()) {
+    return { error: "That coupon code has expired." };
+  }
+
+  // Atomic claim -- same "is(\"used_by\", null)\" race guard as
+  // redeemCoupon above: whichever of two simultaneous attempts for the
+  // same code loses gets zero rows back and reports "already used."
+  const nowIso = new Date().toISOString();
+  const { data: claimed } = await supabase
+    .from("coupon_codes")
+    .update({ used_by: params.userId, used_at: nowIso, wallet_topup_id: topup.id })
+    .eq("id", coupon.id)
+    .is("used_by", null)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .select("id")
+    .maybeSingle();
+
+  if (!claimed) {
+    return { error: "That coupon code can no longer be used." };
+  }
+
+  const discountedAmount = Math.max(
+    0,
+    Math.round((topup.amount_paise ?? 0) * (100 - coupon.discount_percent) / 100)
+  );
+
+  if (discountedAmount <= 0) {
+    const { error: activateError } = await supabase
+      .from("wallet_topups")
+      .update({ status: "active", activated_at: new Date().toISOString() })
+      .eq("id", topup.id)
+      .eq("status", "pending_payment");
+
+    if (activateError) {
+      return { error: "Could not credit your wallet. Please contact support." };
+    }
+
+    const { error: creditError } = await supabase.rpc("credit_wallet", {
+      p_user_id: params.userId,
+      p_tokens: topup.tokens_credited,
+    });
+    if (creditError) {
+      // The topup row is already marked active above -- logged for manual
+      // reconciliation rather than reported as a failure, same posture
+      // handleWalletTopupCallback in ccavenuePayment.ts already takes for
+      // this exact failure mode.
+      console.error(
+        `Wallet top-up ${topup.id} marked active (coupon) but crediting the wallet failed -- manual reconciliation needed:`,
+        creditError,
+      );
+    }
+    return { activated: true };
+  }
+
+  const { error: discountError } = await supabase
+    .from("wallet_topups")
+    .update({ amount_paise: discountedAmount })
+    .eq("id", topup.id)
+    .eq("status", "pending_payment");
+
+  if (discountError) {
+    return { error: "Could not apply the discount. Please contact support." };
+  }
+  return { activated: false, newAmountPaise: discountedAmount };
+}

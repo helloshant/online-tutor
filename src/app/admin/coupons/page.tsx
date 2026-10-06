@@ -29,9 +29,10 @@ export default async function CouponsPage() {
       <h1 className="text-xl font-semibold">Coupons</h1>
       <p className="mt-1 max-w-2xl text-sm text-foreground/75">
         Single-use discount codes — a student enters one on the{" "}
-        <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/subscribe</code> page to knock a percentage
-        off their subscription price, or activate for free outright with a 100% code. Each code works exactly
-        once; once redeemed it can never be reused, even by the same student.
+        <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/account</code> page to knock a percentage
+        off a ₹500/200,000-token wallet recharge, or credit the full 200,000 tokens for free outright with a
+        100% code. Each code works exactly once; once redeemed it can never be reused, even by the same
+        student.
       </p>
 
       <form action={generateCouponCodes} className="mt-6 flex items-end gap-2">

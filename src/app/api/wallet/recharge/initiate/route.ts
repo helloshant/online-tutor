@@ -2,16 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { initiateWalletTopup } from "@/lib/paymentClient";
-
-// Fixed top-up block, confirmed explicitly -- not a rate a student can pick
-// an arbitrary amount against. Duplicated in
-// services/payment/src/ccavenuePayment.ts (that service's own copy is the
-// real trust boundary, re-validated against the row this route creates,
-// never trusted from here) -- same "reimplement rather than share across
-// a service boundary" convention every other cross-service constant in
-// this app already follows.
-const WALLET_TOPUP_AMOUNT_PAISE = 50_000; // ₹500
-const WALLET_TOPUP_TOKENS = 200_000;
+import { createPendingWalletTopup } from "@/lib/walletTopup";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw (e.g. the payment
@@ -29,12 +20,16 @@ export async function POST(request: Request) {
   }
 }
 
-// A thin proxy, same shape as /api/ccavenue/initiate: creates the pending
-// wallet_topups row here (this app owns that table's writes, same as
-// subscriptions), then hands off to services/payment, which owns the
-// actual CCAvenue integration and independently re-verifies the row
-// before charging it -- see initiateWalletTopup in
-// services/payment/src/ccavenuePayment.ts.
+// A thin proxy, same shape as /api/ccavenue/initiate: either creates a
+// fresh pending wallet_topups row (the plain "Recharge" button) or, when
+// `topupId` is given, pays for an EXISTING one instead -- the latter is
+// what a discounted-but-not-free coupon redemption needs (see
+// src/app/account/actions.ts's redeemWalletCoupon, which already created
+// the row and applied the discount; this just completes payment for it).
+// Either way, this app owns the row's writes (same as subscriptions), then
+// hands off to services/payment, which owns the actual CCAvenue
+// integration and independently re-verifies the row before charging it --
+// see initiateWalletTopup in services/payment/src/ccavenuePayment.ts.
 async function handleInitiate(request: Request) {
   const supabase = await createClient();
   const {
@@ -45,21 +40,38 @@ async function handleInitiate(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const admin = createAdminClient();
-  const { data: topup, error: insertError } = await admin
-    .from("wallet_topups")
-    .insert({
-      user_id: user.id,
-      amount_paise: WALLET_TOPUP_AMOUNT_PAISE,
-      tokens_credited: WALLET_TOPUP_TOKENS,
-      status: "pending_payment",
-    })
-    .select("id")
-    .single();
+  const body = await request.json().catch(() => null);
+  const existingTopupId =
+    typeof body?.topupId === "string" ? body.topupId : undefined;
 
-  if (insertError || !topup) {
-    console.error("Failed to create wallet_topups row:", insertError);
-    return NextResponse.json({ error: "Could not start payment" }, { status: 500 });
+  const admin = createAdminClient();
+  let topupId: string;
+
+  if (existingTopupId) {
+    // Re-validated server-side (ownership + still pending), never trusted
+    // from the client -- the actual amount/tokens are re-derived from the
+    // row itself by initiateWalletTopup below, same trust boundary every
+    // other payment-initiating route in this app already draws.
+    const { data: topup } = await admin
+      .from("wallet_topups")
+      .select("id")
+      .eq("id", existingTopupId)
+      .eq("user_id", user.id)
+      .eq("status", "pending_payment")
+      .maybeSingle();
+    if (!topup) {
+      return NextResponse.json(
+        { error: "No pending recharge found" },
+        { status: 404 },
+      );
+    }
+    topupId = topup.id;
+  } else {
+    const topup = await createPendingWalletTopup(admin, user.id);
+    if (!topup) {
+      return NextResponse.json({ error: "Could not start payment" }, { status: 500 });
+    }
+    topupId = topup.id;
   }
 
   const url = new URL(request.url);
@@ -67,7 +79,7 @@ async function handleInitiate(request: Request) {
 
   try {
     const result = await initiateWalletTopup({
-      topupId: topup.id,
+      topupId,
       userId: user.id,
       userEmail: user.email ?? "",
       origin,

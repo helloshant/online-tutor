@@ -101,3 +101,21 @@ export async function redeemCoupon(params: {
     return { error: err instanceof Error ? err.message : "Something went wrong." };
   }
 }
+
+// Sibling of redeemCoupon above, for a wallet recharge instead of a
+// subscription -- see services/payment/src/coupons.ts's own
+// redeemWalletTopupCoupon.
+export async function redeemWalletTopupCoupon(params: {
+  code: string;
+  userId: string;
+  topupId: string;
+}): Promise<{ error?: string; activated?: boolean; newAmountPaise?: number }> {
+  try {
+    return await callPaymentService<{ activated?: boolean; newAmountPaise?: number }>(
+      "/v1/coupons/redeem-wallet-topup",
+      params
+    );
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong." };
+  }
+}
