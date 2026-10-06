@@ -135,15 +135,26 @@ const EMPHASIS_MAX_TOKENS = 4000;
 // Raising the ceiling costs nothing when a response was already well
 // under it, and removes this as a cause when it wasn't.
 const EXERCISE_MAX_TOKENS = 4096;
-const EXERCISE_GENERATION_COUNT = 5;
-// findArchetypesForTopic's own default limit (5, matching
-// EXERCISE_GENERATION_COUNT above) is right for grounding a batch of
-// generated exercises, but wrong for the picker/on-demand-generate routes
-// below, which need to see (and be able to pick) any of a chapter's real
-// mined patterns, not just an arbitrary first few -- see that function's
-// own comment for the production bug this fixes. Effectively "no cap" for
-// any realistic topic's mined-pattern count while still bounding a truly
-// pathological case.
+// Lowered from 5: reported directly -- generating a batch was taking
+// noticeably longer after a provider switch, and the real cost wasn't just
+// more completion tokens per exercise, it was the retry below (see its own
+// comment): under-production is more likely the more exercises are asked
+// for in one call, and that retry is a full second LLM call, not a cheap
+// top-up. Fewer requested per batch both shortens the typical response and
+// makes hitting the target on the first attempt (skipping the retry
+// entirely) more likely. "More exercises" is one click away for a student
+// who wants more than 3.
+const EXERCISE_GENERATION_COUNT = 3;
+// findArchetypesForTopic's own default limit (5) is right for grounding a
+// batch of generated exercises -- more mined patterns available to draw
+// from than EXERCISE_GENERATION_COUNT actually needs is fine (the
+// generation prompt cycles through whatever it's given), so this doesn't
+// need to track EXERCISE_GENERATION_COUNT 1:1. Wrong for the picker/
+// on-demand-generate routes below, though, which need to see (and be able
+// to pick) any of a chapter's real mined patterns, not just an arbitrary
+// first few -- see that function's own comment for the production bug
+// this fixes. Effectively "no cap" for any realistic topic's mined-pattern
+// count while still bounding a truly pathological case.
 const PATTERN_PICKER_LIMIT = 200;
 // Tier D: validates a client-supplied requestedDifficulty on
 // /v1/topic-exercises/generate -- see that route's own comment.
