@@ -1998,6 +1998,22 @@ app.post(
 
       const parsed = parseGeneratedExercises(text);
       const first = parsed[0];
+      if (!first) {
+        // Silent until now -- GenerateTopicExerciseResponse.exercise: null
+        // deliberately covers this case too (see its own comment: "never
+        // an error response"), which is the right contract for the
+        // client, but left this exact failure mode (model replied, output
+        // just didn't match the Q:/A: format parseGeneratedExercises
+        // expects) completely unobservable server-side -- chat_events only
+        // records a short label, never the completion text itself. Logged
+        // here, truncated, purely for diagnosing a report of "generation
+        // failed" after the fact; never surfaced to the client.
+        console.error(
+          `On-demand topic exercise generation produced unparseable output for ` +
+            `${body.boardName}/${body.gradeName}/${body.subjectName} -- "${body.chapter}" / "${body.topic}" ` +
+            `(pattern: "${chosen.name}"): ${text.slice(0, 2000)}`,
+        );
+      }
       const archetypeAttribution = {
         runId: chosen.runId,
         archetypeId: chosen.archetypeId,
