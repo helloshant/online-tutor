@@ -1,8 +1,10 @@
-// Stage 3 of the answer pipeline: the durable Postgres full-text knowledge
-// base (see supabase/migrations/0005_answer_bank.sql). Like cache.ts, every
-// function here fails open -- a missing Supabase connection or a query error
-// just means this stage is skipped, not that the request fails.
+// Stage 3 of the answer pipeline: the durable Postgres knowledge base (see
+// supabase/migrations/0005_answer_bank.sql and 0053_answer_bank_semantic_
+// search.sql). Like cache.ts, every function here fails open -- a missing
+// Supabase/Voyage connection or a query error just means this stage is
+// skipped, not that the request fails.
 import { getSupabaseClient } from "./supabaseClient.js";
+import { embed } from "./voyageClient.js";
 import type { AnswerScope } from "./types.js";
 
 // Below this ts_rank score, a "match" is too weak to trust -- serving it
@@ -10,12 +12,25 @@ import type { AnswerScope } from "./types.js";
 // failure mode than falling through to the LLM.
 const MIN_RANK = 0.1;
 
-export async function findAnswerInBank(
+// Semantic search's own threshold is deliberately much stricter than full
+// text's MIN_RANK above, and stricter than chapterRag.ts's MIN_SIMILARITY
+// (0.55) too -- that feature only *augments* an LLM call (a weak match just
+// means slightly less-grounded context, the LLM still reasons over it),
+// this one can *replace* the LLM call outright, serving the matched answer
+// verbatim. 0005_answer_bank.sql's own comment on why FTS was chosen over
+// embeddings originally still applies here: two questions can be
+// semantically close (same topic, similar phrasing) while being
+// substantively different (opposite operations, different given numbers,
+// a different condition), and a false-positive "semantic match" doesn't
+// give a mediocre answer, it gives a confidently WRONG one. Starting high
+// and tuning down against real logged near-misses is the safer direction
+// to err in than the reverse.
+const MIN_SEMANTIC_SIMILARITY = 0.8;
+
+async function findViaFullText(
+  supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
   scope: AnswerScope,
 ): Promise<{ id: string; answer: string } | null> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
   const { data, error } = await supabase
     .rpc("search_answer_bank", {
       p_board_id: scope.boardId,
@@ -28,20 +43,62 @@ export async function findAnswerInBank(
     .maybeSingle<{ id: string; answer: string; rank: number }>();
 
   if (error) {
-    console.error("Postgres answer bank search failed:", error);
+    console.error("Postgres answer bank full-text search failed:", error);
     return null;
   }
-  if (!data) return null;
+  return data ? { id: data.id, answer: data.answer } : null;
+}
+
+// Tried only on a full-text MISS, not instead of it -- full text stays the
+// first, cheaper, more precise pass (no embeddings call needed), this is
+// the fallback for a paraphrased question that shares meaning but not
+// enough wording to clear MIN_RANK. See MIN_SEMANTIC_SIMILARITY's own
+// comment for why this threshold is the conservative one.
+async function findViaSemantic(
+  supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
+  scope: AnswerScope,
+): Promise<{ id: string; answer: string } | null> {
+  const embeddings = await embed([scope.question], "query");
+  if (!embeddings || !embeddings[0]) return null;
+
+  const { data, error } = await supabase
+    .rpc("match_answer_bank", {
+      p_board_id: scope.boardId,
+      p_grade_id: scope.gradeId,
+      p_subject_id: scope.subjectId,
+      p_medium: scope.medium,
+      p_query_embedding: embeddings[0],
+      p_min_similarity: MIN_SEMANTIC_SIMILARITY,
+    })
+    .maybeSingle<{ id: string; answer: string; similarity: number }>();
+
+  if (error) {
+    console.error("Postgres answer bank semantic search failed:", error);
+    return null;
+  }
+  return data ? { id: data.id, answer: data.answer } : null;
+}
+
+export async function findAnswerInBank(
+  scope: AnswerScope,
+): Promise<{ id: string; answer: string } | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const match =
+    (await findViaFullText(supabase, scope)) ??
+    (await findViaSemantic(supabase, scope));
+  if (!match) return null;
 
   // Best-effort hit-count bump -- never block the response on it.
   supabase
-    .rpc("bump_answer_bank_hit", { p_id: data.id })
+    .rpc("bump_answer_bank_hit", { p_id: match.id })
     .then(({ error: bumpError }) => {
       if (bumpError)
         console.error("Failed to bump answer bank hit count:", bumpError);
     });
 
-  return { id: data.id, answer: data.answer };
+  return match;
 }
 
 // "Relevant exercises" search, used by the topic-exercises endpoint --
@@ -126,6 +183,15 @@ export async function recordAnswer(
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
+  // Only chat-originated rows (no topicId -- see AnswerScope's own comment)
+  // are ever looked up by findViaSemantic above; an exercise row is always
+  // matched by its exact topic_id instead (findRelevantExercises), never
+  // by question-text similarity, so embedding it here would just be a
+  // write-time cost with no corresponding read path ever using it.
+  const embeddings = scope.topicId
+    ? null
+    : await embed([scope.question], "document");
+
   const { data, error } = await supabase
     .from("answered_questions")
     .insert({
@@ -140,6 +206,7 @@ export async function recordAnswer(
       archetype_id: archetypeAttribution?.archetypeId ?? null,
       topic_id: scope.topicId ?? null,
       created_by: createdBy,
+      embedding: embeddings?.[0] ?? null,
     })
     .select("id")
     .single();
