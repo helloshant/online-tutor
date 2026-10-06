@@ -33,6 +33,7 @@ import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
 import { extractEmbeddedExercises, parseGeneratedExercises } from "./exerciseParser.js";
 import { getChatReply, getGradingReply } from "./llm.js";
+import type { LlmProvider } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
 import { buildPracticeBlueprint } from "./practiceBlueprint.js";
 import { parsePracticePaperGrading } from "./practicePaperGrading.js";
@@ -601,6 +602,7 @@ app.post(
         },
         // Chat tutoring -- see llm.ts's own LlmTier comment.
         tier: "flagship",
+        provider: studentBody.provider,
       });
 
       if (scope) {
@@ -1130,6 +1132,7 @@ app.post(
         // High volume, quality still matters -- see llm.ts's own LlmTier
         // comment.
         tier: "standard",
+        provider: body.provider,
       });
 
       await upsertTopicSummary(body.topicId, responseLanguage, text);
@@ -1502,6 +1505,7 @@ app.post(
         // High volume, quality still matters -- see llm.ts's own LlmTier
         // comment.
         tier: "standard",
+        provider: body.provider,
       });
 
       let parsed = parseGeneratedExercises(text);
@@ -1536,6 +1540,7 @@ app.post(
             question: `topic-exercises (retry, got ${parsed.length}/${EXERCISE_GENERATION_COUNT}): ${body.chapter} / ${body.topic}${subTopicFilter ? ` (${body.subTopic})` : ""}`,
           },
           tier: "standard",
+          provider: body.provider,
         });
         const seen = new Set(parsed.map((p) => p.question));
         for (const exercise of parseGeneratedExercises(retryText)) {
@@ -1889,6 +1894,7 @@ app.post(
         // High volume, quality still matters -- see llm.ts's own LlmTier
         // comment.
         tier: "standard",
+        provider: body.provider,
       });
 
       let parsed = parseGeneratedExercises(text);
@@ -1920,6 +1926,7 @@ app.post(
             question: `topic-exercises/generate-for-concept (retry, got ${parsed.length}/${CONCEPT_EXERCISE_COUNT}): ${body.chapter} / ${body.topic} (${concept.term})`,
           },
           tier: "standard",
+          provider: body.provider,
         });
         const seen = new Set(parsed.map((p) => p.question));
         for (const exercise of parseGeneratedExercises(retryText)) {
@@ -2117,6 +2124,7 @@ app.post(
         // High volume, quality still matters -- see llm.ts's own LlmTier
         // comment.
         tier: "standard",
+        provider: body.provider,
       });
 
       const parsed = parseGeneratedExercises(text);
@@ -2232,6 +2240,7 @@ app.post(
           medium: exercise.medium as Medium,
           question: `topic-exercises/grade: ${exercise.question.slice(0, 80)}`,
         },
+        provider: body.provider,
       });
 
       // Only credited when grading actually produced a real verdict AND the
@@ -2309,6 +2318,11 @@ function shuffle<T>(items: T[]): T[] {
 async function generatePracticePaperQuestion(params: {
   userId: string;
   scope: Omit<AnswerScope, "question" | "topicId">;
+  // The requesting student's own llm_provider choice -- see
+  // GeneratePracticePaperRequest's own comment. Threaded through from the
+  // /v1/practice-paper/generate route, which calls this once per question
+  // (up to 41 times per paper).
+  provider?: LlmProvider;
   subjectName: string;
   boardName: string;
   gradeName: string;
@@ -2327,6 +2341,7 @@ async function generatePracticePaperQuestion(params: {
   const {
     userId,
     scope,
+    provider,
     subjectName,
     boardName,
     gradeName,
@@ -2419,6 +2434,7 @@ async function generatePracticePaperQuestion(params: {
     // not at the flagship level a live grading judgment needs. See llm.ts's
     // own LlmTier comment.
     tier: "standard",
+    provider,
   });
 
   const [exercise] = parseGeneratedExercises(text);
@@ -2556,6 +2572,7 @@ app.post(
             return generatePracticePaperQuestion({
               userId,
               scope,
+              provider: body.provider,
               subjectName,
               boardName,
               gradeName,
@@ -2697,6 +2714,7 @@ app.post(
         // directly determines their actual score, never the place to cut
         // cost. See llm.ts's own LlmTier comment.
         tier: "flagship",
+        provider: body.provider,
       });
 
       const parsed = parsePracticePaperGrading(

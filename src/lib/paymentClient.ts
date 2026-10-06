@@ -45,6 +45,22 @@ export async function initiatePayment(params: {
   return callPaymentService<InitiatePaymentResult>("/v1/payment/initiate", params);
 }
 
+// Sibling of initiatePayment above for a wallet recharge -- see
+// services/payment/src/ccavenuePayment.ts's own initiateWalletTopup for
+// why this is a separate, additive path rather than widening
+// initiatePayment itself.
+export async function initiateWalletTopup(params: {
+  topupId: string;
+  userId: string;
+  userEmail: string;
+  origin: string;
+}): Promise<InitiatePaymentResult> {
+  return callPaymentService<InitiatePaymentResult>("/v1/payment/initiate", {
+    orderType: "wallet_topup",
+    ...params,
+  });
+}
+
 export async function handlePaymentCallback(encResp: string): Promise<{ redirectTo: string }> {
   return callPaymentService<{ redirectTo: string }>("/v1/payment/callback", { encResp });
 }

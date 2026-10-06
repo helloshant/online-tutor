@@ -92,7 +92,7 @@ export function DashboardShell({
   isStaffUser,
   allBoards = [],
   allGrades = [],
-  trial = null,
+  walletBalance = null,
 }: {
   userName: string;
   subscriptionId: string | null;
@@ -108,12 +108,10 @@ export function DashboardShell({
   // rather than page.tsx having to pass them through unused every time.
   allBoards?: { id: string; name: string }[];
   allGrades?: { id: string; name: string }[];
-  // Set only for a real student on a trial (pending_payment) subscription
-  // that still has tokens left -- see dashboard/page.tsx's own trial gate,
-  // which redirects to /subscribe once this would go negative rather than
-  // ever rendering a shell with nothing left. null for a paying (active)
-  // student and for staff alike, who see no trial banner at all.
-  trial?: { tokensUsed: number; tokensLimit: number } | null;
+  // Set only for a real student (see dashboard/page.tsx's own
+  // getWalletBalance call) -- null for staff, who have no wallet and see
+  // no banner at all.
+  walletBalance?: number | null;
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null,
@@ -234,26 +232,37 @@ export function DashboardShell({
         </div>
       </header>
 
-      {/* Only ever rendered for a real student still on their free trial
-          (see dashboard-shell's own `trial` prop comment) -- a paying
-          student and staff see no banner at all. dashboard/page.tsx's own
-          gate already guarantees tokensRemaining is positive here (it
-          redirects to /subscribe the moment it wouldn't be), so this is
-          purely informational, not itself an enforcement point. */}
-      {trial && (
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-brand/5 px-6 py-2 text-xs text-foreground/75">
+      {/* Only ever rendered for a real student (see dashboard-shell's own
+          `walletBalance` prop comment) -- staff see no banner at all. Shown
+          for every balance, not just a low one -- this is now the one
+          thing that actually decides whether the tutor will answer, so a
+          student should always be able to see it, not just notice it after
+          hitting zero. This is purely informational -- the actual gate is
+          the pre-call balance check every LLM-spending route performs (see
+          src/lib/walletBalance.ts), not anything here. */}
+      {walletBalance !== null && walletBalance !== undefined && (
+        <div
+          className={`flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-2 text-xs text-foreground/75 ${
+            walletBalance <= 0 ? "bg-red-50" : "bg-brand/5"
+          }`}
+        >
           <span className="rounded-full border border-border bg-surface px-2.5 py-1 font-medium">
-            Trial usage:{" "}
-            <span className="text-foreground">
-              {Math.max(0, trial.tokensLimit - trial.tokensUsed).toLocaleString()}
-            </span>{" "}
-            / {trial.tokensLimit.toLocaleString()} tokens left
+            {walletBalance <= 0 ? (
+              <span className="text-red-600">Out of tokens</span>
+            ) : (
+              <>
+                <span className="text-foreground">
+                  {walletBalance.toLocaleString()}
+                </span>{" "}
+                tokens left
+              </>
+            )}
           </span>
           <Link
-            href="/subscribe"
+            href="/account"
             className="shrink-0 rounded-lg bg-brand px-3 py-1.5 font-semibold text-white transition hover:bg-brand-dark"
           >
-            Subscribe / Pay
+            Recharge
           </Link>
         </div>
       )}

@@ -392,37 +392,20 @@ export async function setAccountExpired(userId: string, formData: FormData) {
   revalidatePath(`/admin/users/${userId}`);
 }
 
-// Sets, clears, or explicitly unlimited-s a student's monthly LLM token
-// allowance -- see supabase/migrations/0037_student_token_usage_limits.sql
-// for the table this writes and why it's never a plain profiles column.
-// Blank input deletes the override row entirely (back to the platform
-// default, DEFAULT_MONTHLY_TOKEN_LIMIT in src/app/api/chat/route.ts) --
-// distinct from writing 0, which is this table's own sentinel for an
-// explicit, permanent "no limit" override rather than "no opinion".
-//
-// Uses the ordinary session client, not the service-role admin client,
-// same as every other admin write in this file (setUserRole,
-// cancelSubscription, ...) -- student_usage_limits' own "admin can write"
-// RLS policy is the actual enforcement here, not just requireAdminPage's
-// UI-level check, so this can't be bypassed by calling the action directly
-// even if that check ever had a bug.
-export async function updateUserUsageLimit(userId: string, formData: FormData) {
+// Admin comping a student now means crediting their wallet directly (see
+// supabase/migrations/0055_student_wallets.sql) rather than raising a
+// monthly cap -- a positive integer amount is added to the student's
+// existing balance via the same atomic credit_wallet function a real
+// CCAvenue recharge uses, never a blind overwrite (their balance may have
+// changed from real usage between page load and this submit).
+export async function grantWalletTokens(userId: string, formData: FormData) {
   await requireAdminPage("users");
-  const raw = String(formData.get("monthlyTokenLimit") ?? "").trim();
-  const supabase = await createClient();
-
-  if (!raw) {
-    await supabase.from("student_usage_limits").delete().eq("user_id", userId);
-    revalidatePath(`/admin/users/${userId}`);
-    return;
-  }
-
+  const raw = String(formData.get("tokens") ?? "").trim();
   const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return;
+  if (!Number.isInteger(parsed) || parsed <= 0) return;
 
-  await supabase
-    .from("student_usage_limits")
-    .upsert({ user_id: userId, monthly_token_limit: parsed, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  const admin = createAdminClient();
+  await admin.rpc("credit_wallet", { p_user_id: userId, p_tokens: parsed });
 
   revalidatePath(`/admin/users/${userId}`);
 }

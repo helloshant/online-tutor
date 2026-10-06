@@ -8,7 +8,7 @@ import {
   resolveContentMedium,
   resolveResponseLanguage,
 } from "@/lib/studentScope";
-import { resolveUsageLimit } from "@/lib/usageLimits";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import {
   getOrchestratedReply,
   storeChatExercises,
@@ -379,10 +379,6 @@ async function handleChatRequest(request: Request) {
     .single();
 
   let subscriptionId: string | null = null;
-  // Set alongside subscriptionId, in the same real-student branch below --
-  // used further down to decide which usage cap applies (see
-  // usageLimits.ts's own resolveUsageLimit).
-  let subscriptionStatus: "active" | "pending_payment" | null = null;
   // Set only for a staff member actively previewing a specific
   // board/grade/medium (see resolveStaffPreviewScope) -- used below to
   // scope/persist their chat_messages rows separately per preview, instead
@@ -452,20 +448,21 @@ async function handleChatRequest(request: Request) {
       };
     }
   } else {
-    // Includes a trial (pending_payment) subscription, not just a paid
-    // (active) one -- see usageLimits.ts's own resolveUsageLimit, used
-    // below, for how a trial student's own usage is capped differently
-    // from a paying student's.
+    // Subject/board/grade selection is free and instant now (see
+    // src/app/onboarding/actions.ts) -- every subscription row is created
+    // "active" straight away, so this is really just "has this student
+    // finished onboarding," not a payment gate. Actual usage is gated by
+    // the wallet balance check further below, not by status at all.
     const { data: subscription } = await supabase
       .from("subscriptions")
       .select("id, board_id, grade_id, medium, status")
       .eq("user_id", user.id)
-      .in("status", ["active", "pending_payment"])
+      .eq("status", "active")
       .maybeSingle();
 
     if (!subscription) {
       return NextResponse.json(
-        { error: "No active subscription or trial" },
+        { error: "Please finish setting up your board, grade, and subjects first." },
         { status: 403 },
       );
     }
@@ -491,7 +488,6 @@ async function handleChatRequest(request: Request) {
     ).subjects;
 
     subscriptionId = subscription.id;
-    subscriptionStatus = subscription.status as "active" | "pending_payment";
     ({ request: orchestrationRequest, topicsWithIds: syllabusTopicsWithIds } =
       await buildStudentOrchestrationRequest(supabase, {
         userId: user.id,
@@ -516,53 +512,26 @@ async function handleChatRequest(request: Request) {
   // only (see supabase/migrations/0037_student_token_usage_limits.sql).
   const admin = createAdminClient();
 
-  // Usage-based pricing enforcement -- gated on subscriptionId, which is
-  // only ever set in the real-student branch just above: staff, whether
-  // unrestricted or previewing a specific board/grade, stays unmetered,
-  // same "unrestricted" posture staff already gets from every other
-  // syllabus/scope check in this route. Checked before the orchestrator is
-  // ever called (further below), so an over-quota request never spends
-  // anything on a fresh LLM call in the first place -- and before the
-  // regenerate-lookup/history queries just below too, so a blocked request
-  // does the least possible work.
-  if (subscriptionId && subscriptionStatus) {
-    const { data: override } = await admin
-      .from("student_usage_limits")
-      .select("monthly_token_limit")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    // A trial (pending_payment) student is capped by a small ONE-TIME
-    // lifetime allowance instead of the paid tier's resetting monthly one
-    // -- see resolveUsageLimit's own comment.
-    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
-      subscriptionStatus,
-      override,
-    );
-
-    if (!unlimited) {
-      const { data: usedTokens, error: usageError } = await admin.rpc(
-        "monthly_llm_tokens_for_user",
-        {
-          p_user_id: user.id,
-          p_since: sinceIso,
-        },
+  // Wallet gate -- gated on subscriptionId, which is only ever set in the
+  // real-student branch above: staff, whether unrestricted or previewing a
+  // specific board/grade, stays unmetered, same "unrestricted" posture
+  // staff already gets from every other syllabus/scope check in this
+  // route. Checked before the orchestrator is ever called (further below),
+  // so an exhausted-wallet request never spends anything on a fresh LLM
+  // call -- and before the regenerate-lookup/history queries just below
+  // too, so a blocked request does the least possible work. Also carries
+  // the student's own llm_provider choice into orchestrationRequest, the
+  // one thing that actually makes the Gemini/Anthropic pick take effect.
+  if (subscriptionId) {
+    const wallet = await getWalletBalance(admin, user.id);
+    if (wallet.balance <= 0) {
+      return NextResponse.json(
+        { error: WALLET_EXHAUSTED_MESSAGE },
+        { status: 429 },
       );
-      if (usageError) {
-        // Fail OPEN on a metering error (e.g. a transient DB issue):
-        // blocking every student's ability to ask a question because the
-        // usage lookup itself failed would be a far worse outage than
-        // occasionally under-enforcing a cap for one request.
-        console.error(
-          "Failed to check monthly token usage, allowing the request:",
-          usageError,
-        );
-      } else if ((usedTokens ?? 0) >= limit) {
-        return NextResponse.json(
-          { error: exceededMessage },
-          { status: 429 },
-        );
-      }
+    }
+    if (orchestrationRequest.mode === "student") {
+      orchestrationRequest.provider = wallet.provider;
     }
   }
 

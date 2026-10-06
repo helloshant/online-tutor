@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
-import { resolveUsageLimit } from "@/lib/usageLimits";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import {
   generateTopicExercise,
   type DifficultyLevel,
@@ -24,8 +24,8 @@ const VALID_TYPES: ExerciseType[] = [
 // picked pattern, or "Generate another" with no pattern specified) --
 // unlike GET /api/topics/[id]/exercises (which only ever fires once per
 // topic-open), this can be clicked repeatedly, so it's the one exercise-
-// generation endpoint that actually needs the same monthly-token-usage
-// gate /api/chat already enforces -- see the usage-quota block below.
+// generation endpoint that actually needs the same wallet gate /api/chat
+// already enforces -- see the wallet-balance check below.
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -85,60 +85,33 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
     .eq("id", user.id)
     .single();
 
-  // Fetched once, up front, for both this route's own purposes below: the
-  // usage-cap check needs `status` (a trial/pending_payment student is
-  // capped differently from a paying/active one -- see resolveUsageLimit),
-  // and the generation call further down needs `medium`. Includes a trial
-  // subscription, not just a paid one -- same as /api/chat's own lookup.
+  // Fetched once, up front, for this route's own `medium` need further
+  // down -- status is no longer meaningful here (subject selection is free
+  // and instant, see onboarding/actions.ts), so this no longer filters on
+  // it.
   const { data: subscription } = await supabase
     .from("subscriptions")
     .select("medium, status")
     .eq("user_id", user.id)
-    .in("status", ["active", "pending_payment"])
+    .eq("status", "active")
     .maybeSingle();
 
-  // Usage-based pricing enforcement -- staff stay unmetered (same posture
-  // every other route with a quota check already gives them), a real
-  // student's token cap is checked exactly the way /api/chat checks it,
-  // before the orchestrator is ever called, so an over-quota click never
-  // spends anything on a fresh LLM call. No subscription row at all (should
-  // never happen via the normal app flow -- dashboard/page.tsx already
-  // requires one to reach any topic) falls back to the paying/"active"
-  // cap, same as this route's own behavior before trial subscriptions
-  // existed.
+  // Wallet gate -- staff stay unmetered (same posture every other route
+  // with this check already gives them), a real student's balance is
+  // checked exactly the way /api/chat checks it, before the orchestrator
+  // is ever called, so an exhausted-wallet click never spends anything on
+  // a fresh LLM call.
+  let provider: "gemini" | "anthropic" | undefined;
   if (!isStaff(profile?.role)) {
     const admin = createAdminClient();
-    const { data: override } = await admin
-      .from("student_usage_limits")
-      .select("monthly_token_limit")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
-      (subscription?.status as "active" | "pending_payment") ?? "active",
-      override,
-    );
-
-    if (!unlimited) {
-      const { data: usedTokens, error: usageError } = await admin.rpc(
-        "monthly_llm_tokens_for_user",
-        {
-          p_user_id: user.id,
-          p_since: sinceIso,
-        },
+    const wallet = await getWalletBalance(admin, user.id);
+    if (wallet.balance <= 0) {
+      return NextResponse.json(
+        { error: WALLET_EXHAUSTED_MESSAGE },
+        { status: 429 },
       );
-      if (usageError) {
-        // Fail OPEN on a metering error, same reasoning as /api/chat --
-        // blocking every request because the usage lookup itself failed
-        // would be a worse outage than occasionally under-enforcing a cap.
-        console.error(
-          "Failed to check monthly token usage, allowing the request:",
-          usageError,
-        );
-      } else if ((usedTokens ?? 0) >= limit) {
-        return NextResponse.json({ error: exceededMessage }, { status: 429 });
-      }
     }
+    provider = wallet.provider;
   }
 
   const { data: topicRow } = await supabase
@@ -203,6 +176,7 @@ async function handlePost(request: Request, { id: topicId }: { id: string }) {
       archetypeRunId,
       requestedDifficulty,
       requestedType,
+      provider,
     });
     return NextResponse.json({ exercise });
   } catch (err) {

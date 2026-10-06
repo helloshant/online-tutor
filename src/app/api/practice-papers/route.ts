@@ -7,7 +7,7 @@ import {
   resolveStudentSubjectScope,
   resolveContentMedium,
 } from "@/lib/studentScope";
-import { resolveUsageLimit } from "@/lib/usageLimits";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { generatePracticePaper } from "@/lib/orchestratorClient";
 import type { DifficultyLevel } from "@/lib/orchestratorClient";
@@ -115,51 +115,23 @@ async function handlePost(request: Request) {
       {
         error: isStaff(profile?.role)
           ? "Select a board and grade to preview practice papers for."
-          : "You don't have an active subscription or trial for this subject.",
+          : "You haven't set up this subject yet.",
       },
       { status: isStaff(profile?.role) ? 400 : 403 },
     );
   }
 
+  let provider: "gemini" | "anthropic" | undefined;
   if (!isStaff(profile?.role)) {
     const admin = createAdminClient();
-    // A trial (pending_payment) student is capped differently from a
-    // paying (active) one -- see resolveUsageLimit. No subscription row at
-    // all falls back to the paying/"active" cap, same as this route's own
-    // behavior before trial subscriptions existed.
-    const [{ data: override }, { data: subscription }] = await Promise.all([
-      admin
-        .from("student_usage_limits")
-        .select("monthly_token_limit")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("subscriptions")
-        .select("status")
-        .eq("user_id", user.id)
-        .in("status", ["active", "pending_payment"])
-        .maybeSingle(),
-    ]);
-
-    const { unlimited, limit, sinceIso, exceededMessage } = resolveUsageLimit(
-      (subscription?.status as "active" | "pending_payment") ?? "active",
-      override,
-    );
-
-    if (!unlimited) {
-      const { data: usedTokens, error: usageError } = await admin.rpc(
-        "monthly_llm_tokens_for_user",
-        { p_user_id: user.id, p_since: sinceIso },
+    const wallet = await getWalletBalance(admin, user.id);
+    if (wallet.balance <= 0) {
+      return NextResponse.json(
+        { error: WALLET_EXHAUSTED_MESSAGE },
+        { status: 429 },
       );
-      if (usageError) {
-        console.error(
-          "Failed to check monthly token usage, allowing the request:",
-          usageError,
-        );
-      } else if ((usedTokens ?? 0) >= limit) {
-        return NextResponse.json({ error: exceededMessage }, { status: 429 });
-      }
     }
+    provider = wallet.provider;
   }
 
   const [{ data: board }, { data: grade }, { data: subject }] =
@@ -237,6 +209,7 @@ async function handlePost(request: Request) {
         topic: t.topic,
       })),
       difficulty,
+      provider,
     });
 
     if (questions.length === 0) {

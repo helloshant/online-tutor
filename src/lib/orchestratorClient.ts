@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Medium } from "@/lib/supabase/types";
+import type { LlmProvider, Medium } from "@/lib/supabase/types";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -48,6 +48,9 @@ export type ChatOrchestrationRequest =
       message: string;
       image?: ImageAttachment | null;
       history: ChatTurn[];
+      // The student's own student_wallets.llm_provider choice -- see
+      // src/lib/walletBalance.ts.
+      provider?: LlmProvider;
     }
   | {
       mode: "staff";
@@ -168,6 +171,8 @@ export type TopicSummaryRequest = {
   responseLanguage?: Medium;
   chapter: string;
   topic: string;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export async function getTopicSummary(
@@ -227,6 +232,9 @@ export type TopicExercisesRequest = {
   // already-loaded flat batch -- see the orchestrator's own
   // TopicExercisesRequest comment for why this implies forceFresh too.
   requestedType?: ExerciseType;
+  // See ChatOrchestrationRequest's own comment. Inherited by
+  // GenerateTopicExerciseRequest below too (it extends this type).
+  provider?: LlmProvider;
 };
 
 // id is the exercise's own stable answered_questions row id -- always
@@ -420,6 +428,8 @@ export type GenerateConceptExercisesRequest = {
   // Set only when the student picked a specific type rather than "Any" --
   // see ExerciseType's own comment.
   requestedType?: ExerciseType;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export async function generateConceptExercises(
@@ -540,6 +550,8 @@ export type GradeTopicExerciseRequest = {
   userId: string;
   exerciseId: string;
   studentAnswer: string;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
@@ -824,6 +836,8 @@ export type GeneratePracticePaperRequest = {
   // The practice panel's own difficulty slider -- see the orchestrator's
   // own GeneratePracticePaperRequest comment.
   difficulty?: DifficultyLevel;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type PracticePaperQuestion = {
@@ -890,6 +904,8 @@ export type EvaluatePracticePaperRequest = {
   // client that sends more than a single image in one request; every other
   // image-taking request here stays singular and untouched.
   images: ImageAttachment[];
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type PracticePaperQuestionResult = {

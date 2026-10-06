@@ -177,6 +177,7 @@ export type LlmCallContext =
 
 function reportLlmCall(
   context: LlmCallContext,
+  provider: LlmProvider,
   reply: LlmReply,
   startedAt: number,
 ): void {
@@ -184,7 +185,14 @@ function reportLlmCall(
   // Fire-and-forget, same posture as every recordChatEvent call this
   // replaces -- observability is an add-on to the pipeline, not a
   // dependency of it, so this never adds latency to the reply the caller is
-  // about to return.
+  // about to return. `provider` is this CALL's own resolved provider (the
+  // caller's choice, or getActiveLlmProvider() for a caller that passed
+  // none -- see getChatReply/getGradingReply) -- not re-derived from the
+  // global env default, which would have recorded the wrong provider for
+  // any student whose own llm_provider preference differs from it (see
+  // student_wallets -- this is also what services/observability/src/
+  // server.ts needs to convert this call's real cost into the RIGHT
+  // wallet-token rate).
   void recordChatEvent({
     userId: context.userId,
     mode: context.mode,
@@ -194,7 +202,7 @@ function reportLlmCall(
     medium: context.medium,
     question: context.question,
     source: "llm",
-    provider: getActiveLlmProvider(),
+    provider,
     model: reply.model,
     promptTokens: reply.usage.promptTokens,
     completionTokens: reply.usage.completionTokens,
@@ -211,9 +219,17 @@ export async function getChatReply(params: {
   image?: ImageAttachment | null;
   event: LlmCallContext;
   tier: LlmTier;
+  // The caller's own resolved provider choice (a student's own
+  // student_wallets.llm_provider for mode:"student", see server.ts's /v1/
+  // chat and every other student-facing endpoint) -- falls back to the
+  // global env default (getActiveLlmProvider()) when omitted, which is
+  // what every caller with no per-user provider concept (staff mode) still
+  // relies on.
+  provider?: LlmProvider;
 }): Promise<LlmReply> {
-  const { event, tier, ...providerParams } = params;
-  const provider = getActiveLlmProvider();
+  const { event, tier, provider: requestedProvider, ...providerParams } =
+    params;
+  const provider = requestedProvider ?? getActiveLlmProvider();
   const model = resolveModel(provider, tier);
   const startedAt = Date.now();
   const reply =
@@ -222,7 +238,7 @@ export async function getChatReply(params: {
       : provider === "gemini"
         ? await getGeminiReply({ ...providerParams, model, tier })
         : await getAnthropicReply({ ...providerParams, model });
-  reportLlmCall(event, reply, startedAt);
+  reportLlmCall(event, provider, reply, startedAt);
   return reply;
 }
 
@@ -239,9 +255,12 @@ export async function getGradingReply(params: {
   maxTokens: number;
   event: LlmCallContext;
   tier: LlmTier;
+  // See getChatReply's own comment.
+  provider?: LlmProvider;
 }): Promise<LlmReply> {
-  const { event, tier, ...providerParams } = params;
-  const provider = getActiveLlmProvider();
+  const { event, tier, provider: requestedProvider, ...providerParams } =
+    params;
+  const provider = requestedProvider ?? getActiveLlmProvider();
   const model = resolveModel(provider, tier);
   const startedAt = Date.now();
   const reply =
@@ -256,6 +275,6 @@ export async function getGradingReply(params: {
           // this is a live judgment on a real student's answer sheet.
           await getGeminiGradingReply({ ...providerParams, model, tier })
         : await getAnthropicGradingReply({ ...providerParams, model });
-  reportLlmCall(event, reply, startedAt);
+  reportLlmCall(event, provider, reply, startedAt);
   return reply;
 }

@@ -2,6 +2,7 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { calculateCostUsd } from "./pricing.js";
 import { getSupabaseClient } from "./supabaseClient.js";
+import { walletTokensForCostUsd } from "./walletPricing.js";
 import type { ChatEventInput } from "./types.js";
 
 const PORT = Number(process.env.PORT) || 4100;
@@ -122,6 +123,30 @@ app.post("/v1/events", requireSharedSecret, async (req: Request, res: Response) 
     console.error("Failed to record chat event:", error);
     res.status(502).json({ error: "Failed to record event" });
     return;
+  }
+
+  // Deducts this call's real cost from the student's prepaid token wallet
+  // (see supabase/migrations/0055_student_wallets.sql) -- the bookkeeping
+  // half of the wallet model; the actual pre-call gate (balance > 0) lives
+  // in the web app (src/lib/walletBalance.ts), since that's the only side
+  // that can reject a request BEFORE spending anything on it. Only for a
+  // real student call with a known cost -- staff mode has no wallet at
+  // all, and a null costUsd (no pricing entry for this model, see
+  // pricing.ts's own comment) has nothing to convert. Fire-and-forget,
+  // fails open: losing one deduction is an acceptable, rare accounting
+  // gap, never a reason to fail a reply that was already sent to the
+  // student and already recorded above.
+  if (body.mode === "student" && costUsd !== null) {
+    const tokens = walletTokensForCostUsd(costUsd);
+    if (tokens > 0) {
+      void supabase
+        .rpc("deduct_wallet", { p_user_id: body.userId, p_tokens: tokens })
+        .then(({ error: deductError }) => {
+          if (deductError) {
+            console.error("Failed to deduct wallet balance:", deductError);
+          }
+        });
+    }
   }
 
   res.json({ ok: true, recorded: true });

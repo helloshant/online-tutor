@@ -319,6 +319,41 @@ export type LoginLockout = {
   locked_until: string | null;
 };
 
+export type LlmProvider = "gemini" | "anthropic";
+
+// Prepaid LLM token wallet -- replaces student_usage_limits/subscriptions'
+// amount_paise as the thing that actually gates usage. balance_tokens is
+// money-denominated (₹500 = 200,000 tokens, see
+// services/observability/src/walletPricing.ts), so choosing "anthropic"
+// (pricier per real LLM token) burns this SAME balance faster rather than
+// costing a separate upgrade fee. See
+// supabase/migrations/0055_student_wallets.sql -- every account always has
+// exactly one row (created alongside profiles by handle_new_tutorops_user),
+// starting at balance_tokens: 0, llm_provider: "gemini".
+export type StudentWallet = {
+  user_id: string;
+  balance_tokens: number;
+  llm_provider: LlmProvider;
+  updated_at: string;
+};
+
+// A CCAvenue-paid wallet recharge -- see
+// supabase/migrations/0055_student_wallets.sql and
+// services/payment/src/ccavenuePayment.ts's wallet-topup branch. Mirrors
+// subscriptions' own CCAvenue pattern: this row's own id is the CCAvenue
+// order_id (prefixed "wtop_" to distinguish from a subscription order_id),
+// amount/tokens are fixed server-side, never client-supplied.
+export type WalletTopup = {
+  id: string;
+  user_id: string;
+  amount_paise: number;
+  tokens_credited: number;
+  status: "pending_payment" | "active";
+  ccavenue_tracking_id: string | null;
+  created_at: string;
+  activated_at: string | null;
+};
+
 export type AdminPageKey =
   | "users"
   | "catalog"
@@ -1046,6 +1081,18 @@ export interface Database {
         Update: Partial<LoginLockout>;
         Relationships: [];
       };
+      student_wallets: {
+        Row: StudentWallet;
+        Insert: Partial<StudentWallet>;
+        Update: Partial<StudentWallet>;
+        Relationships: [];
+      };
+      wallet_topups: {
+        Row: WalletTopup;
+        Insert: Partial<WalletTopup>;
+        Update: Partial<WalletTopup>;
+        Relationships: [];
+      };
       practice_papers: {
         Row: PracticePaper;
         Insert: Partial<PracticePaper>;
@@ -1214,6 +1261,20 @@ export interface Database {
       record_failed_login: {
         Args: { p_email: string };
         Returns: string | null;
+      };
+      // Atomically adjusts a student's wallet balance and returns the new
+      // total -- deduct_wallet is called by the observability service after
+      // every LLM call (allowed to go negative, see
+      // supabase/migrations/0055_student_wallets.sql's own comment);
+      // credit_wallet by a successful wallet-topup payment callback and by
+      // an admin's "Grant tokens" action.
+      deduct_wallet: {
+        Args: { p_user_id: string; p_tokens: number };
+        Returns: number;
+      };
+      credit_wallet: {
+        Args: { p_user_id: string; p_tokens: number };
+        Returns: number;
       };
     };
   };

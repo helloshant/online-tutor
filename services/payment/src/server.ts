@@ -1,7 +1,7 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { generateCoupons, redeemCoupon, revokeCoupon } from "./coupons.js";
-import { handleCallback, initiatePayment } from "./ccavenuePayment.js";
+import { handleCallback, initiatePayment, initiateWalletTopup } from "./ccavenuePayment.js";
 
 const PORT = Number(process.env.PORT) || 4200;
 const SHARED_SECRET = process.env.PAYMENT_SHARED_SECRET;
@@ -63,26 +63,55 @@ function asyncRoute(handler: (req: Request, res: Response) => Promise<void>) {
 // own (a cheap RLS-bound check) -- this service re-verifies the same thing
 // independently via its own Supabase connection rather than trusting that
 // check, since it's the actual trust boundary for what amount gets charged.
+//
+// orderType defaults to "subscription" so no existing caller needs to
+// change -- "wallet_topup" is the new, additive path (see
+// src/app/api/wallet/recharge/initiate/route.ts), using topupId in place
+// of subscriptionId.
 app.post(
   "/v1/payment/initiate",
   requireSharedSecret,
   asyncRoute(async (req, res) => {
     const body = req.body as Partial<{
+      orderType: "subscription" | "wallet_topup";
       subscriptionId: string;
+      topupId: string;
       userId: string;
       userEmail: string;
       origin: string;
     }>;
 
     if (
-      typeof body.subscriptionId !== "string" ||
-      !body.subscriptionId ||
       typeof body.userId !== "string" ||
       !body.userId ||
       typeof body.origin !== "string" ||
       !body.origin
     ) {
-      res.status(400).json({ error: "subscriptionId, userId, and origin are required" });
+      res.status(400).json({ error: "userId and origin are required" });
+      return;
+    }
+
+    if (body.orderType === "wallet_topup") {
+      if (typeof body.topupId !== "string" || !body.topupId) {
+        res.status(400).json({ error: "topupId is required" });
+        return;
+      }
+      const result = await initiateWalletTopup({
+        topupId: body.topupId,
+        userId: body.userId,
+        userEmail: body.userEmail ?? "",
+        origin: body.origin,
+      });
+      if ("error" in result) {
+        res.status(404).json({ error: result.error });
+        return;
+      }
+      res.json(result);
+      return;
+    }
+
+    if (typeof body.subscriptionId !== "string" || !body.subscriptionId) {
+      res.status(400).json({ error: "subscriptionId is required" });
       return;
     }
 

@@ -3,7 +3,6 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { amountForSubjects } from "@/lib/pricing";
 import type { Medium } from "@/lib/supabase/types";
 
 export interface OnboardingState {
@@ -54,16 +53,22 @@ export async function confirmSelection(
     return { error: "None of the selected subjects are offered for this board and grade." };
   }
 
+  // Board/grade/subject selection is free and instant -- there's no more
+  // payment step to gate this on, so a subscription row is always "active"
+  // from here on. Still matched against BOTH legacy states ("active" or a
+  // pending_payment row from before this shipped, never since) rather than
+  // "active" alone: subscriptions_one_live_per_user is a unique index on
+  // user_id covering both statuses, so inserting a fresh row for a student
+  // who still has an old pending_payment one sitting around would violate
+  // it outright instead of just leaving a harmless duplicate -- confirmed
+  // live, there was exactly one such row. Always written back as "active"
+  // regardless of which state it's coming from.
   const { data: existing } = await supabase
     .from("subscriptions")
     .select("id, status")
     .eq("user_id", user.id)
-    .in("status", ["pending_payment", "active"])
+    .in("status", ["active", "pending_payment"])
     .maybeSingle();
-
-  if (existing?.status === "active") {
-    redirect("/dashboard");
-  }
 
   let subscriptionId = existing?.id;
 
@@ -75,25 +80,25 @@ export async function confirmSelection(
         board_id: boardId,
         grade_id: gradeId,
         medium,
-        status: "pending_payment",
-        amount_paise: amountForSubjects(chosenSubjectIds.length),
+        status: "active",
       })
       .select("id")
       .single();
 
     if (insertError || !created) {
-      return { error: "Could not start your subscription. Please try again." };
+      return { error: "Could not save your selection. Please try again." };
     }
     subscriptionId = created.id;
   } else {
-    // Resuming an incomplete onboarding: update the selection in place.
+    // Resuming an incomplete (or, for a legacy row, still-pending)
+    // onboarding, or changing an existing selection: update in place.
     await supabase
       .from("subscriptions")
       .update({
         board_id: boardId,
         grade_id: gradeId,
         medium,
-        amount_paise: amountForSubjects(chosenSubjectIds.length),
+        status: "active",
       })
       .eq("id", subscriptionId);
     await supabase.from("subscription_subjects").delete().eq("subscription_id", subscriptionId);
@@ -110,15 +115,5 @@ export async function confirmSelection(
     return { error: "Could not save your subject selection. Please try again." };
   }
 
-  // Which of the Confirm step's two buttons was clicked -- native HTML
-  // submits the clicked <button>'s own name/value pair, so this reads
-  // straight off formData without any client-side state. "pay" sends
-  // someone who deliberately came back to subscribe (e.g. the dashboard's
-  // own "Subscribe / Pay" banner, reached once trial tokens run low or
-  // out) on to the real payment page instead of silently re-granting a
-  // trial; "trial" (the default, and the only option a brand-new signup
-  // ever sees) keeps the original straight-into-free-trial behavior, so a
-  // first-time signup never has to pay before using the product at all.
-  const intent = String(formData.get("intent") ?? "trial");
-  redirect(intent === "pay" ? "/subscribe" : "/dashboard");
+  redirect("/dashboard");
 }

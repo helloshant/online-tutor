@@ -5,6 +5,13 @@ export type InitiateResult =
   | { encRequest: string; accessCode: string; actionUrl: string }
   | { error: string };
 
+// Fixed top-up block -- confirmed explicitly, not a rate students can pick
+// an arbitrary amount against. Kept here (not just in the web app) since
+// this is also what gets validated against a wallet_topups row before
+// ever building a CCAvenue request -- see initiateWalletTopup below.
+const WALLET_TOPUP_AMOUNT_PAISE = 50_000; // ₹500
+const WALLET_TOPUP_TOKENS = 200_000;
+
 // origin is the web app's own public origin (it knows this from the
 // incoming request it received from the browser; this service, being
 // internal-only, has no way to know it independently) -- used only to build
@@ -60,6 +67,65 @@ export async function initiatePayment(params: {
   };
 }
 
+// Parallel, additive sibling of initiatePayment above for a wallet
+// recharge -- kept separate rather than widening initiatePayment itself
+// since the two have genuinely different validation (fixed amount, no
+// pre-existing row to look up) and this way the existing, working
+// subscription path is never touched. The CCAvenue order_id gets a
+// "wtop_" prefix (subscription order_ids stay bare UUIDs, unchanged) so
+// handleCallback -- which only ever receives the decrypted response, never
+// the original request -- can tell the two apart deterministically with no
+// extra lookup.
+export async function initiateWalletTopup(params: {
+  topupId: string;
+  userId: string;
+  userEmail: string;
+  origin: string;
+}): Promise<InitiateResult> {
+  const supabase = getSupabaseClient();
+
+  const { data: topup } = await supabase
+    .from("wallet_topups")
+    .select("id, user_id, amount_paise, tokens_credited, status")
+    .eq("id", params.topupId)
+    .maybeSingle();
+
+  if (!topup || topup.user_id !== params.userId || topup.status !== "pending_payment") {
+    return { error: "No pending wallet top-up found" };
+  }
+  // Re-validated against the fixed block, same "never trust a client-
+  // supplied amount" posture as initiatePayment -- the web app route that
+  // creates this row already writes WALLET_TOPUP_AMOUNT_PAISE/
+  // WALLET_TOPUP_TOKENS, but this is the actual trust boundary, not that
+  // route.
+  if (
+    topup.amount_paise !== WALLET_TOPUP_AMOUNT_PAISE ||
+    topup.tokens_credited !== WALLET_TOPUP_TOKENS
+  ) {
+    return { error: "Invalid wallet top-up amount" };
+  }
+
+  const orderId = `wtop_${topup.id}`;
+  const amountRupees = (topup.amount_paise / 100).toFixed(2);
+
+  const requestString = new URLSearchParams({
+    merchant_id: getMerchantIdForRequest(),
+    order_id: orderId,
+    currency: "INR",
+    amount: amountRupees,
+    redirect_url: `${params.origin}/api/ccavenue/callback`,
+    cancel_url: `${params.origin}/api/ccavenue/callback`,
+    language: "EN",
+    billing_email: params.userEmail || "",
+  }).toString();
+
+  return {
+    encRequest: encrypt(requestString),
+    accessCode: getAccessCode(),
+    actionUrl: getTransactionUrl(),
+  };
+}
+
 // CCAvenue POSTs its encrypted response to the web app's public callback
 // route (both success and failure/cancel -- redirect_url and cancel_url
 // point at the same route, distinguished by order_status in the decrypted
@@ -83,6 +149,16 @@ export async function handleCallback(encResp: string): Promise<{ redirectTo: str
   if (!orderId) {
     return { redirectTo: "/subscribe?error=invalid_response" };
   }
+
+  // "wtop_" prefix (see initiateWalletTopup above) means this is a wallet
+  // recharge, not a subscription payment -- the only signal available
+  // here, since this handler only ever sees CCAvenue's own decrypted
+  // response, never the original initiate request. Anything else falls
+  // through to the existing, unchanged subscription logic below.
+  if (orderId.startsWith("wtop_")) {
+    return handleWalletTopupCallback(orderId.slice("wtop_".length), orderStatus, trackingId);
+  }
+
   if (orderStatus !== "Success") {
     return { redirectTo: "/subscribe?error=payment_failed" };
   }
@@ -103,4 +179,53 @@ export async function handleCallback(encResp: string): Promise<{ redirectTo: str
   }
 
   return { redirectTo: "/dashboard" };
+}
+
+async function handleWalletTopupCallback(
+  topupId: string,
+  orderStatus: string | null,
+  trackingId: string | null,
+): Promise<{ redirectTo: string }> {
+  if (orderStatus !== "Success") {
+    return { redirectTo: "/account?error=payment_failed" };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: topup, error } = await supabase
+    .from("wallet_topups")
+    .update({
+      status: "active",
+      ccavenue_tracking_id: trackingId,
+      activated_at: new Date().toISOString(),
+    })
+    .eq("id", topupId)
+    .eq("status", "pending_payment")
+    .select("id, user_id, tokens_credited")
+    .maybeSingle();
+
+  if (error || !topup) {
+    return { redirectTo: "/account?error=activation_failed" };
+  }
+
+  // credit_wallet, not a plain UPDATE -- the student's balance may have
+  // changed (real usage, another top-up) since this row was created, so
+  // this has to be an atomic add, not a blind overwrite -- see
+  // supabase/migrations/0055_student_wallets.sql.
+  const { error: creditError } = await supabase.rpc("credit_wallet", {
+    p_user_id: topup.user_id,
+    p_tokens: topup.tokens_credited,
+  });
+
+  if (creditError) {
+    // The payment itself succeeded and is already recorded as `active`
+    // above -- never tell the student it failed over a crediting error,
+    // that would be wrong and could prompt a duplicate payment. Logged for
+    // manual reconciliation instead.
+    console.error(
+      `Wallet top-up ${topup.id} marked active but crediting the wallet failed -- manual reconciliation needed:`,
+      creditError,
+    );
+  }
+
+  return { redirectTo: "/account" };
 }

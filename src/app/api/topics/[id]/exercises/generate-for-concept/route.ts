@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isStaff } from "@/lib/auth";
 import {
   generateConceptExercises,
   type ExerciseType,
 } from "@/lib/orchestratorClient";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { resolveResponseLanguage } from "@/lib/studentScope";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import type { Medium } from "@/lib/supabase/types";
 
 const VALID_TYPES: ExerciseType[] = [
@@ -80,6 +83,7 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
     { data: grade },
     { data: subject },
     { data: subscription },
+    { data: profile },
   ] = await Promise.all([
     supabase.from("boards").select("name").eq("id", topicRow.board_id).single(),
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
@@ -94,6 +98,7 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
       .eq("user_id", user.id)
       .eq("status", "active")
       .maybeSingle(),
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;
@@ -104,6 +109,20 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
     nativeMedium,
     preferEnglish,
   );
+
+  // Wallet gate, same posture as /api/topics/[id]/exercises's own.
+  let provider: "gemini" | "anthropic" | undefined;
+  if (!isStaff(profile?.role)) {
+    const admin = createAdminClient();
+    const wallet = await getWalletBalance(admin, user.id);
+    if (wallet.balance <= 0) {
+      return NextResponse.json(
+        { error: WALLET_EXHAUSTED_MESSAGE },
+        { status: 429 },
+      );
+    }
+    provider = wallet.provider;
+  }
 
   try {
     const { exercises } = await generateConceptExercises({
@@ -121,6 +140,7 @@ async function handleGet(request: Request, { id: topicId }: { id: string }) {
       topic: topicRow.topic,
       conceptId,
       requestedType,
+      provider,
     });
     return NextResponse.json({ exercises });
   } catch (err) {

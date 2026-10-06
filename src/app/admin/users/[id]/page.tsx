@@ -2,18 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 import {
   activateSubscriptionWithoutPayment,
   cancelSubscription,
   deleteUser,
+  grantWalletTokens,
   sendPasswordResetEmail,
   setAccountExpired,
   setUserRole,
   updateSubscriptionBoardGrade,
   updateSubscriptionSubjects,
   updateUserProfile,
-  updateUserUsageLimit,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SetPasswordForm } from "./set-password-form";
@@ -41,8 +40,7 @@ export default async function AdminUserDetailPage({
     { data: identityRows },
     { data: boards },
     { data: grades },
-    { data: usageLimitOverride },
-    { data: monthlyTokensUsed },
+    { data: wallet },
   ] = await Promise.all([
     admin.auth.admin.getUserById(id),
     admin.from("profiles").select("*").eq("id", id).single(),
@@ -60,13 +58,11 @@ export default async function AdminUserDetailPage({
     // not just the subscription's current one.
     admin.from("boards").select("id, name").order("name"),
     admin.from("grades").select("id, name").order("level"),
-    // Usage-based pricing (see supabase/migrations/0037_student_token_usage_limits.sql)
-    // -- fetched unconditionally alongside everything else above (cheap,
-    // one extra indexed query each) even though the section below only
-    // renders it for a plain 'user' role; staff is unmetered so there's
-    // nothing student-specific to branch the fetch itself on beforehand.
-    admin.from("student_usage_limits").select("monthly_token_limit").eq("user_id", id).maybeSingle(),
-    admin.rpc("monthly_llm_tokens_for_user", { p_user_id: id, p_since: startOfCurrentMonthIso() }),
+    // Fetched unconditionally alongside everything else above (cheap, one
+    // extra indexed query), even though the section below only renders it
+    // for a plain 'user' role -- staff has no wallet, so there's nothing
+    // student-specific to branch the fetch itself on beforehand.
+    admin.from("student_wallets").select("balance_tokens").eq("user_id", id).maybeSingle(),
   ]);
 
   if (!authUser?.user) notFound();
@@ -226,11 +222,7 @@ export default async function AdminUserDetailPage({
       </div>
 
       {targetRole === "user" && (
-        <UsageLimitCard
-          userId={id}
-          override={usageLimitOverride ?? null}
-          usedThisMonth={monthlyTokensUsed ?? 0}
-        />
+        <WalletCard userId={id} balance={wallet?.balance_tokens ?? 0} />
       )}
 
       {canDeleteTarget && (
@@ -254,72 +246,43 @@ export default async function AdminUserDetailPage({
   );
 }
 
-// Usage-based pricing enforcement: displays this student's current-
-// calendar-month LLM token usage (see monthly_llm_tokens_for_user) against
-// their effective monthly cap -- the platform default, or their own
-// override row if one exists -- and lets an admin set/clear that override.
-// Only ever rendered for a plain 'user' role (see the call site) -- staff
-// is unmetered, so there's no limit here to show or edit for them.
-function UsageLimitCard({
-  userId,
-  override,
-  usedThisMonth,
-}: {
-  userId: string;
-  override: { monthly_token_limit: number } | null;
-  usedThisMonth: number;
-}) {
-  const { unlimited, limit } = resolveMonthlyTokenLimit(override);
-  const pctUsed = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((usedThisMonth / limit) * 100));
-  const overLimit = !unlimited && usedThisMonth >= limit;
+// Displays this student's current prepaid wallet balance (see
+// supabase/migrations/0055_student_wallets.sql) and lets an admin grant
+// tokens directly -- comping a student now means crediting their wallet,
+// not raising a monthly cap. Only ever rendered for a plain 'user' role
+// (see the call site) -- staff has no wallet, nothing here to show or
+// grant for them.
+function WalletCard({ userId, balance }: { userId: string; balance: number }) {
+  const exhausted = balance <= 0;
 
   return (
     <div className="mt-8 rounded-xl border border-border bg-surface p-6">
-      <h2 className="text-sm font-semibold">Usage-based pricing</h2>
+      <h2 className="text-sm font-semibold">Token wallet</h2>
       <p className="mt-1 text-sm text-foreground/75">
-        This month:{" "}
-        <span className={overLimit ? "font-medium text-red-600" : "font-medium"}>
-          {usedThisMonth.toLocaleString()} tokens
+        <span className={exhausted ? "font-medium text-red-600" : "font-medium"}>
+          {balance.toLocaleString()} tokens
         </span>{" "}
-        {unlimited ? (
-          "used, no limit set for this student."
-        ) : (
-          <>
-            of {limit.toLocaleString()} allowed
-            {override ? "" : " (platform default)"}
-            {overLimit && " — further questions are blocked until next calendar month, or until this is raised."}
-          </>
-        )}
+        remaining
+        {exhausted && " — further questions are blocked until this student recharges, or until this is topped up."}
       </p>
 
-      {!unlimited && (
-        <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-foreground/10">
-          <div
-            className={`h-full rounded-full ${overLimit ? "bg-red-500" : "bg-brand"}`}
-            style={{ width: `${pctUsed}%` }}
-          />
-        </div>
-      )}
-
-      <form action={updateUserUsageLimit.bind(null, userId)} className="mt-4 flex flex-wrap items-end gap-2">
+      <form action={grantWalletTokens.bind(null, userId)} className="mt-4 flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-xs text-foreground/75">
-          Monthly token limit override
+          Grant tokens
           <input
-            name="monthlyTokenLimit"
+            name="tokens"
             type="number"
-            min={0}
+            min={1}
             step={1}
-            defaultValue={override?.monthly_token_limit ?? ""}
-            placeholder="Platform default"
+            placeholder="e.g. 200000"
             className="w-44 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
           />
         </label>
         <button className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark">
-          Save
+          Grant
         </button>
         <p className="w-full text-xs text-foreground/65">
-          Leave blank to use the platform default. Enter 0 for unlimited. Any other number replaces the
-          default with this student&apos;s own monthly cap.
+          Adds this many tokens to the student&apos;s existing balance, free of charge.
         </p>
       </form>
     </div>

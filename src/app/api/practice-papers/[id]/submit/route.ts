@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluatePracticePaperSubmission } from "@/lib/orchestratorClient";
 import type { ImageMediaType } from "@/lib/orchestratorClient";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 
 const BUCKET = "practice-answer-sheets";
 // Same allow-list as /api/chat's own image handling -- a photographed
@@ -59,6 +60,19 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
   }
 
   const admin = createAdminClient();
+
+  // Wallet gate -- checked before any upload work, same posture as every
+  // other LLM-spending route (see /api/chat/route.ts). This route had no
+  // usage check at all before the wallet model (a real gap -- vision
+  // grading a multi-page answer sheet is a real, often large LLM cost),
+  // closed here as part of replacing the old metering system wholesale.
+  const wallet = await getWalletBalance(admin, user.id);
+  if (wallet.balance <= 0) {
+    return NextResponse.json(
+      { error: WALLET_EXHAUSTED_MESSAGE },
+      { status: 429 },
+    );
+  }
 
   const { data: paper } = await admin
     .from("practice_papers")
@@ -211,6 +225,7 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
           marks: q.marks,
         })),
         images,
+        provider: wallet.provider,
       });
 
     const { error: scoresError } = await admin

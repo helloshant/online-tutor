@@ -217,18 +217,16 @@ export async function resolveStudentSubjectScope(
 ): Promise<StudentSubjectScope | null> {
   if (staffPreview) return staffPreview;
 
-  // Includes a trial (pending_payment) subscription, not just a paid
-  // (active) one -- see usageLimits.ts's own resolveUsageLimit for how a
-  // trial student's usage is capped instead. Whichever of the two a caller
-  // finds here has already been let through by dashboard/page.tsx's own
-  // gate (a trial student with no tokens left is redirected to /subscribe
-  // before ever reaching a page that could call this), so no further
-  // status branching is needed at this scope-resolution layer.
+  // Subject selection is free and instant (see onboarding/actions.ts) --
+  // every subscription row is "active" as soon as it's created, so this is
+  // really just "has this student finished onboarding." Actual usage is
+  // gated by the student's wallet balance (src/lib/walletBalance.ts), not
+  // by anything here.
   const { data: subscription } = await supabase
     .from("subscriptions")
     .select("id, board_id, grade_id, medium, status")
     .eq("user_id", userId)
-    .in("status", ["active", "pending_payment"])
+    .eq("status", "active")
     .maybeSingle();
 
   if (!subscription) return null;

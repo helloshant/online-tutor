@@ -2,9 +2,11 @@ import Link from "next/link";
 import { isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolveUsageLimit } from "@/lib/usageLimits";
+import { getWalletBalance } from "@/lib/walletBalance";
 import { NewPasswordForm } from "@/components/new-password-form";
 import { changePassword } from "./actions";
+import { AiModelSwitcher } from "./ai-model-switcher";
+import { RechargeCheckout } from "./recharge-checkout";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const ROLE_LABEL: Record<ProfileRole, string> = {
@@ -19,30 +21,26 @@ export default async function AccountPage() {
   const staff = isStaff(profile?.role);
 
   // Ordinary session client -- RLS already lets a student read their own
-  // subscription/student_usage_limits rows directly (0002_rls_policies.sql,
-  // 0037_student_token_usage_limits.sql), so this doesn't need the
-  // service-role client the way the admin equivalent page does. Not scoped
-  // to status in ("pending_payment", "active") the way dashboard/page.tsx's
+  // subscription row directly (0002_rls_policies.sql). Not scoped to
+  // status in ("pending_payment", "active") the way dashboard/page.tsx's
   // own lookup is -- this is a read-only info page, not a feature gate, so a
   // cancelled/expired subscription should still show here rather than the
   // page pretending the student never subscribed at all.
-  const [{ data: subscription }, { data: usageLimitOverride }] =
-    await Promise.all([
-      supabase
-        .from("subscriptions")
-        .select("id, status, medium, board_id, grade_id, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      staff
-        ? Promise.resolve({ data: null })
-        : supabase
-            .from("student_usage_limits")
-            .select("monthly_token_limit")
-            .eq("user_id", user.id)
-            .maybeSingle(),
-    ]);
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("id, status, medium, board_id, grade_id, created_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Service-role: student_wallets has no client-facing read beyond the
+  // student's own row (which this already is, via RLS), but using the
+  // same admin client every other wallet read in this app uses keeps this
+  // consistent -- and avoids a second round trip, since getWalletBalance
+  // already handles the "no row" default cleanly.
+  const admin = createAdminClient();
+  const wallet = staff ? null : await getWalletBalance(admin, user.id);
 
   const [{ data: board }, { data: grade }, { data: subjectRows }] = subscription
     ? await Promise.all([
@@ -71,29 +69,6 @@ export default async function AccountPage() {
     )
     .filter((name): name is string => Boolean(name))
     .sort();
-
-  // A trial (pending_payment) student is capped by a small ONE-TIME
-  // lifetime allowance instead of the paid tier's resetting monthly one --
-  // see resolveUsageLimit. Any other status (active, cancelled, expired --
-  // or no subscription at all) falls back to the monthly display, same as
-  // this page showed before trial subscriptions existed.
-  const usageStatus: "active" | "pending_payment" =
-    subscription?.status === "pending_payment" ? "pending_payment" : "active";
-  const { unlimited, limit, sinceIso } = resolveUsageLimit(usageStatus, usageLimitOverride ?? null);
-
-  // monthly_llm_tokens_for_user is service-role-only by design (see
-  // 0037_student_token_usage_limits.sql's own revoke/grant comment) -- an
-  // ordinary session, even the student's own, can't call it directly.
-  // Skipped entirely for staff, who are unmetered (same gate the admin
-  // equivalent page uses).
-  const tokensUsed = staff
-    ? null
-    : await createAdminClient()
-        .rpc("monthly_llm_tokens_for_user", {
-          p_user_id: user.id,
-          p_since: sinceIso,
-        })
-        .then((r) => r.data ?? 0);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
@@ -168,13 +143,23 @@ export default async function AccountPage() {
         </dl>
       </div>
 
-      {!staff && (
-        <UsageCard
-          isTrial={usageStatus === "pending_payment"}
-          unlimited={unlimited}
-          limit={limit}
-          used={tokensUsed ?? 0}
-        />
+      {!staff && wallet && (
+        <>
+          <WalletCard balance={wallet.balance} />
+
+          <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
+            <h2 className="text-sm font-semibold">AI model</h2>
+            <p className="mt-1 text-xs text-foreground/68">
+              Gemini is the default, included in your wallet balance at the
+              standard rate. Anthropic (Claude) is a premium model -- no
+              separate charge to switch, it just burns your wallet balance
+              faster.
+            </p>
+            <div className="mt-3">
+              <AiModelSwitcher currentProvider={wallet.provider} />
+            </div>
+          </div>
+        </>
       )}
 
       <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
@@ -188,61 +173,30 @@ export default async function AccountPage() {
   );
 }
 
-// Read-only student-facing sibling of admin/users/[id]/page.tsx's own
-// UsageLimitCard -- same numbers, same meter, but no override form (a
-// student can see their own cap, not change it). `unlimited`/`limit`
-// already resolved by the caller (resolveUsageLimit) -- isTrial only
-// decides the WORDING here (a one-time lifetime allowance vs. a monthly
-// one that resets), not the numbers themselves.
-function UsageCard({
-  isTrial,
-  unlimited,
-  limit,
-  used,
-}: {
-  isTrial: boolean;
-  unlimited: boolean;
-  limit: number;
-  used: number;
-}) {
-  const remaining = unlimited ? null : Math.max(0, limit - used);
-  const pctUsed = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  const overLimit = !unlimited && used >= limit;
+// Student-facing wallet balance + recharge -- replaces the old monthly/
+// trial usage meter now that the wallet balance is the one thing that
+// decides whether the tutor will answer (see src/lib/walletBalance.ts).
+function WalletCard({ balance }: { balance: number }) {
+  const exhausted = balance <= 0;
 
   return (
     <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
-      <h2 className="text-sm font-semibold">
-        {isTrial ? "Free trial AI tutoring usage" : "AI tutoring usage this month"}
-      </h2>
+      <h2 className="text-sm font-semibold">Token wallet</h2>
       <p className="mt-1 text-sm text-foreground/75">
-        {unlimited ? (
-          <>
-            <span className="font-medium">{used.toLocaleString()} tokens</span> used, no limit on your account.
-          </>
+        {exhausted ? (
+          <span className="font-medium text-red-600">
+            Out of tokens -- recharge to keep using the tutor.
+          </span>
         ) : (
           <>
-            <span
-              className={overLimit ? "font-medium text-red-600" : "font-medium"}
-            >
-              {remaining?.toLocaleString()} tokens
-            </span>{" "}
-            remaining of {limit.toLocaleString()} {isTrial ? "in your free trial" : "this month"}
-            {overLimit &&
-              (isTrial
-                ? " — you've used up your free trial; subscribe to keep going."
-                : " — you've reached this month's limit; it resets at the start of next month.")}
+            <span className="font-medium">{balance.toLocaleString()} tokens</span>{" "}
+            remaining.
           </>
         )}
       </p>
-
-      {!unlimited && (
-        <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-foreground/10">
-          <div
-            className={`h-full rounded-full ${overLimit ? "bg-red-500" : "bg-brand"}`}
-            style={{ width: `${pctUsed}%` }}
-          />
-        </div>
-      )}
+      <div className="mt-3">
+        <RechargeCheckout />
+      </div>
     </div>
   );
 }

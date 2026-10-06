@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isStaff } from "@/lib/auth";
 import { getTopicSummary } from "@/lib/orchestratorClient";
 import { resolveResponseLanguage } from "@/lib/studentScope";
+import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import type { Medium } from "@/lib/supabase/types";
 
 // Every code path below must return through NextResponse.json -- this
@@ -47,10 +49,7 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
     supabase.from("grades").select("name").eq("id", topicRow.grade_id).single(),
     supabase.from("subjects").select("name, code").eq("id", topicRow.subject_id).single(),
     supabase.from("profiles").select("role").eq("id", user.id).single(),
-    // Includes a trial (pending_payment) subscription, not just a paid
-    // (active) one, so a trial student's own native medium still resolves
-    // correctly here.
-    supabase.from("subscriptions").select("medium").eq("user_id", user.id).in("status", ["active", "pending_payment"]).maybeSingle(),
+    supabase.from("subscriptions").select("medium").eq("user_id", user.id).eq("status", "active").maybeSingle(),
   ]);
 
   const topicMedium = topicRow.medium as Medium;
@@ -84,6 +83,21 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
   // native medium itself for everything else).
   const responseLanguage: Medium = resolveResponseLanguage(subject?.code ?? "", nativeMedium, preferEnglish);
 
+  // Wallet gate, same posture as every other LLM-spending route -- topic
+  // summaries are cached/banked often, but a cache miss is a real spend.
+  let provider: "gemini" | "anthropic" | undefined;
+  if (!isStaff(profile?.role)) {
+    const admin = createAdminClient();
+    const wallet = await getWalletBalance(admin, user.id);
+    if (wallet.balance <= 0) {
+      return NextResponse.json(
+        { error: WALLET_EXHAUSTED_MESSAGE },
+        { status: 429 },
+      );
+    }
+    provider = wallet.provider;
+  }
+
   try {
     const { summary } = await getTopicSummary({
       userId: user.id,
@@ -96,6 +110,7 @@ async function handleGetSummary(request: Request, { id: topicId }: { id: string 
       responseLanguage,
       chapter: topicRow.chapter,
       topic: topicRow.topic,
+      provider,
     });
     return NextResponse.json({ summary });
   } catch (err) {

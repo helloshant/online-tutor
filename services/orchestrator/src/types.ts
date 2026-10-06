@@ -1,3 +1,9 @@
+// Type-only import -- erased at compile time, so this doesn't create a real
+// runtime circular import with llm.ts (which imports plenty from this file
+// too) -- same reasoning geminiProvider.ts's own LlmTier import already
+// documents.
+import type { LlmProvider } from "./llm.js";
+
 // "Sanskrit" is valid here even though it's never a real student-cohort
 // medium (mirrors src/lib/supabase/types.ts's own Medium in the web app --
 // see that file's comment for the full reasoning). Only chat_events.medium
@@ -66,6 +72,12 @@ export type ChatOrchestrationRequest =
       message: string;
       image?: ImageAttachment | null;
       history: ChatTurn[];
+      // The student's own student_wallets.llm_provider choice (gemini
+      // default, anthropic if they've switched) -- falls back to the
+      // global LLM_PROVIDER env default when omitted (getChatReply's own
+      // behavior), which only still happens for a caller/version that
+      // predates this field.
+      provider?: LlmProvider;
     }
   | {
       mode: "staff";
@@ -145,6 +157,8 @@ export type TopicSummaryRequest = {
   responseLanguage?: Medium;
   chapter: string;
   topic: string;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type TopicSummaryResponse = {
@@ -194,6 +208,9 @@ export type TopicExercisesRequest = {
   // parameter for the pattern-specific and concept-specific generation
   // paths.
   requestedType?: ExerciseType;
+  // See ChatOrchestrationRequest's own comment. Inherited by
+  // GenerateTopicExerciseRequest below too (it extends this type).
+  provider?: LlmProvider;
 };
 
 // id is the answered_questions row id -- every exercise returned to a
@@ -382,6 +399,8 @@ export type GenerateConceptExercisesRequest = {
   // Set only when the student picked a specific type rather than "Any" --
   // see ExerciseType's own comment and buildConceptExerciseGenerationPrompt.
   requestedType?: ExerciseType;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type GenerateConceptExercisesResponse = {
@@ -431,6 +450,8 @@ export type GradeExerciseRequest = {
   userId: string;
   exerciseId: string;
   studentAnswer: string;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type ExerciseVerdict = "correct" | "partially_correct" | "incorrect";
@@ -547,6 +568,8 @@ export type GeneratePracticePaperRequest = {
   // to "Medium" ("Moderate" in the UI), same posture as every other
   // optional refinement in this file (requestedType, requestedDifficulty).
   difficulty?: DifficultyLevel;
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 export type PracticePaperQuestion = {
@@ -593,6 +616,8 @@ export type EvaluatePracticePaperRequest = {
   // image in a single request; every other image-taking request type above
   // (ChatOrchestrationRequest) stays singular and untouched.
   images: ImageAttachment[];
+  // See ChatOrchestrationRequest's own comment.
+  provider?: LlmProvider;
 };
 
 // id here is the caller's own practice_paper_questions.id, echoed back so

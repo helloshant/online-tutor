@@ -2,7 +2,6 @@
 
 import { useActionState, useMemo, useState } from "react";
 import type { Board, BoardGradeSubject, Grade, Medium, Subject } from "@/lib/supabase/types";
-import { PRICE_PER_SUBJECT_INR } from "@/lib/pricing";
 import { confirmSelection, type OnboardingState } from "./actions";
 
 const MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
@@ -37,7 +36,6 @@ export function OnboardingWizard({
   const [gradeId, setGradeId] = useState(initial?.gradeId ?? "");
   const [medium, setMedium] = useState<Medium | "">(initial?.medium ?? "");
   const [subjectIds, setSubjectIds] = useState<Set<string>>(new Set(initial?.subjectIds ?? []));
-  const [clickedIntent, setClickedIntent] = useState<"trial" | "pay" | null>(null);
   const [state, formAction, pending] = useActionState(confirmSelection, initialState);
 
   const availableSubjects = useMemo(() => {
@@ -215,7 +213,7 @@ export function OnboardingWizard({
 
         {step === 3 && (
           <section>
-            <h2 className="text-lg font-semibold">Confirm your subscription</h2>
+            <h2 className="text-lg font-semibold">Confirm your selection</h2>
             <dl className="mt-6 space-y-3 text-sm">
               <div className="flex justify-between border-b border-border pb-2">
                 <dt className="text-foreground/75">Board</dt>
@@ -229,16 +227,10 @@ export function OnboardingWizard({
                 <dt className="text-foreground/75">Medium</dt>
                 <dd className="font-medium">{medium}</dd>
               </div>
-              <div className="flex justify-between border-b border-border pb-2">
+              <div className="flex justify-between pb-2">
                 <dt className="text-foreground/75">Subjects</dt>
                 <dd className="text-right font-medium">
                   {selectedSubjects.map((s) => s.name).join(", ")}
-                </dd>
-              </div>
-              <div className="flex justify-between pt-1 text-base">
-                <dt className="font-semibold">Total</dt>
-                <dd className="font-semibold">
-                  ₹{selectedSubjects.length * PRICE_PER_SUBJECT_INR}/month
                 </dd>
               </div>
             </dl>
@@ -253,34 +245,16 @@ export function OnboardingWizard({
 
               {state?.error && <p className="mb-3 text-sm text-red-600">{state.error}</p>}
 
-              {/* Two distinct, honestly-labeled actions -- native HTML
-                  submits whichever button's own name/value pair was
-                  clicked, which confirmSelection reads as `intent` (see
-                  that action's own comment). Start free trial is primary
-                  and first, since it's what every brand-new signup wants;
-                  Skip trial is for someone deliberately here to pay (e.g.
-                  arrived via the dashboard's own Subscribe/Pay banner). */}
+              {/* Setting this up is free -- the tutor itself runs on a
+                  prepaid token wallet (recharged from /account), not a
+                  per-subject subscription fee, so there's nothing to pay
+                  or choose a trial over here. */}
               <button
                 type="submit"
-                name="intent"
-                value="trial"
-                onClick={() => setClickedIntent("trial")}
                 disabled={pending}
                 className="w-full rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-60"
               >
-                {pending && clickedIntent === "trial" ? "Starting…" : "Start free trial"}
-              </button>
-              <button
-                type="submit"
-                name="intent"
-                value="pay"
-                onClick={() => setClickedIntent("pay")}
-                disabled={pending}
-                className="mt-2 w-full rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-brand/5 disabled:opacity-60"
-              >
-                {pending && clickedIntent === "pay"
-                  ? "Redirecting…"
-                  : `Skip trial — pay ₹${selectedSubjects.length * PRICE_PER_SUBJECT_INR}/month now`}
+                {pending ? "Starting…" : "Start learning"}
               </button>
             </form>
           </section>

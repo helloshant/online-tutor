@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolveMonthlyTokenLimit, startOfCurrentMonthIso } from "@/lib/usageLimits";
 
 const USD_FORMATTER = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -54,8 +53,7 @@ export default async function ObservabilityPage() {
     { count: rejectedCount },
     { count: chapterNotesHitCount },
     { data: subjectEvents },
-    { data: monthlyLlmEvents },
-    { data: usageOverrides },
+    { data: wallets },
   ] = await Promise.all([
     admin.auth.admin.listUsers({ perPage: 1000 }),
     admin.from("profiles").select("*"),
@@ -79,27 +77,11 @@ export default async function ObservabilityPage() {
     // one's scoped to source='llm' for the cost/token table; this one needs
     // every source to compute a reused/grounded/ungrounded/rejected split).
     admin.from("chat_events").select("subject_id, source, grounded").limit(20000),
-    // For the "Monthly usage vs quota" section below -- deliberately a
-    // SEPARATE, calendar-month-scoped query from llmEvents above (which is
-    // all-time, for the cost table). Same JS-side aggregation tradeoff as
-    // everywhere else on this page (see the comment above), not the
-    // Postgres-aggregate RPC /api/chat itself uses on the hot path
-    // (monthly_llm_tokens_for_user) -- this report only needs the whole
-    // roster at once, which that per-user RPC isn't shaped for, and this
-    // page is loaded rarely enough that pulling the month's raw rows here
-    // is fine at this scale, same as every other rollup on it.
-    admin
-      .from("chat_events")
-      .select("user_id, total_tokens")
-      .eq("source", "llm")
-      .gte("created_at", startOfCurrentMonthIso())
-      .limit(10000),
-    // Admin-set per-student overrides (see supabase/migrations/
-    // 0037_student_token_usage_limits.sql) -- joined against the monthly
-    // usage above via resolveMonthlyTokenLimit, same helper /api/chat
-    // itself uses, so this report can never disagree with what's actually
-    // enforced for a given student.
-    admin.from("student_usage_limits").select("user_id, monthly_token_limit"),
+    // For the "Wallet balances" section below -- every student's current
+    // prepaid balance (see supabase/migrations/0055_student_wallets.sql),
+    // the thing that actually decides whether the tutor will answer for
+    // them now, replacing the old monthly-quota-vs-usage report.
+    admin.from("student_wallets").select("user_id, balance_tokens, llm_provider"),
   ]);
 
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
@@ -175,59 +157,28 @@ export default async function ObservabilityPage() {
     })
     .sort((a, b) => b.costUsd - a.costUsd);
 
-  const monthlyUsageByUser = new Map<string, number>();
-  for (const ev of monthlyLlmEvents ?? []) {
-    monthlyUsageByUser.set(ev.user_id, (monthlyUsageByUser.get(ev.user_id) ?? 0) + (ev.total_tokens ?? 0));
-  }
-  const overrideByUser = new Map(
-    (usageOverrides ?? []).map((o) => [o.user_id, { monthly_token_limit: o.monthly_token_limit }])
-  );
-
-  // Every student (role='user') who either asked something this month or
-  // has an admin-set override worth showing -- staff is excluded entirely
-  // (unmetered, see /api/chat/route.ts), and a student with neither is
-  // omitted rather than padding this list out with rows that are all
-  // "0 used / platform default, nothing to see" and tell an admin nothing
-  // actionable.
-  const quotaUserIds = new Set<string>([...monthlyUsageByUser.keys(), ...overrideByUser.keys()]);
-
-  const quotaRows = Array.from(quotaUserIds)
-    .filter((userId) => (profileById.get(userId)?.role ?? "user") === "user")
-    .map((userId) => {
-      const profile = profileById.get(userId);
-      const user = userById.get(userId);
-      const usedThisMonth = monthlyUsageByUser.get(userId) ?? 0;
-      const override = overrideByUser.get(userId) ?? null;
-      // Same resolveMonthlyTokenLimit /api/chat itself enforces with --
-      // this report can never disagree with what's actually applied to a
-      // given student's next question.
-      const { unlimited, limit } = resolveMonthlyTokenLimit(override);
-      const pctUsed = unlimited ? 0 : Math.round((usedThisMonth / limit) * 100);
-      const overLimit = !unlimited && usedThisMonth >= limit;
+  // Every student (role='user') with a wallet row -- staff is excluded
+  // entirely (unmetered, no wallet at all, see /api/chat/route.ts).
+  // Exhausted/low balances float to the top, since those are what an
+  // admin actually needs to act on; everyone else sorts by balance
+  // ascending behind them.
+  const walletRows = (wallets ?? [])
+    .filter((w) => (profileById.get(w.user_id)?.role ?? "user") === "user")
+    .map((w) => {
+      const profile = profileById.get(w.user_id);
+      const user = userById.get(w.user_id);
       return {
-        userId,
+        userId: w.user_id,
         name: profile?.full_name ?? "—",
         email: user?.email ?? "(no email)",
-        usedThisMonth,
-        unlimited,
-        limit,
-        hasOverride: override !== null,
-        pctUsed,
-        overLimit,
+        balance: w.balance_tokens,
+        provider: w.llm_provider,
+        exhausted: w.balance_tokens <= 0,
       };
     })
-    // Over-limit and closest-to-limit float to the top -- unlimited
-    // students sort last (nothing to watch for them), ties broken by raw
-    // usage so a heavy unlimited user still surfaces below the ones
-    // actually worth admin attention rather than getting lost.
-    .sort((a, b) => {
-      if (a.unlimited !== b.unlimited) return a.unlimited ? 1 : -1;
-      if (b.pctUsed !== a.pctUsed) return b.pctUsed - a.pctUsed;
-      return b.usedThisMonth - a.usedThisMonth;
-    });
+    .sort((a, b) => a.balance - b.balance);
 
-  const overLimitCount = quotaRows.filter((r) => r.overLimit).length;
-  const nearLimitCount = quotaRows.filter((r) => !r.overLimit && !r.unlimited && r.pctUsed >= 80).length;
+  const exhaustedCount = walletRows.filter((r) => r.exhausted).length;
 
   return (
     <div>
@@ -313,77 +264,53 @@ export default async function ObservabilityPage() {
       </section>
 
       <section className="mt-8 rounded-xl border border-border bg-surface">
-        <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">Monthly usage vs quota</h2>
+        <h2 className="border-b border-border px-4 py-3 text-sm font-semibold">Wallet balances</h2>
         <p className="px-4 pt-3 text-xs text-foreground/68">
-          This calendar month&apos;s token usage against each student&apos;s allowance -- the same cap
-          enforced live in /api/chat (see supabase/migrations/0037_student_token_usage_limits.sql). Only
-          students with usage this month or an admin-set override are listed; open a student&apos;s page
-          to change their limit.
-          {overLimitCount > 0 && (
-            <span className="ml-1 font-medium text-red-600">{overLimitCount} over limit.</span>
-          )}
-          {nearLimitCount > 0 && (
-            <span className="ml-1 font-medium text-yellow-700"> {nearLimitCount} near limit (≥80%).</span>
+          Every student&apos;s current prepaid token balance (see supabase/migrations/
+          0055_student_wallets.sql) -- the thing that actually gates every LLM-spending request now. Open
+          a student&apos;s page to grant tokens.
+          {exhaustedCount > 0 && (
+            <span className="ml-1 font-medium text-red-600">{exhaustedCount} out of tokens.</span>
           )}
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] text-left text-sm">
+          <table className="w-full min-w-[600px] text-left text-sm">
             <thead className="border-b border-border text-xs uppercase text-foreground/68">
               <tr>
                 <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Used this month</th>
-                <th className="px-4 py-3">Limit</th>
-                <th className="px-4 py-3">Progress</th>
+                <th className="px-4 py-3">Balance</th>
+                <th className="px-4 py-3">Model</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {quotaRows.map((row) => (
+              {walletRows.map((row) => (
                 <tr key={row.userId} className="border-b border-border last:border-0 hover:bg-brand/5">
                   <td className="px-4 py-3">
                     <div className="font-medium">{row.name}</div>
                     <div className="text-xs text-foreground/68">{row.email}</div>
                   </td>
-                  <td className="px-4 py-3">{row.usedThisMonth.toLocaleString()}</td>
+                  <td className="px-4 py-3">{row.balance.toLocaleString()}</td>
+                  <td className="px-4 py-3 capitalize">{row.provider}</td>
                   <td className="px-4 py-3">
-                    {row.unlimited ? "Unlimited" : row.limit.toLocaleString()}
-                    {row.hasOverride && !row.unlimited && (
-                      <span className="ml-1 text-xs text-foreground/65">(override)</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {!row.unlimited && (
-                      <div className="h-1.5 w-28 overflow-hidden rounded-full bg-foreground/10">
-                        <div
-                          className={`h-full rounded-full ${row.overLimit ? "bg-red-500" : row.pctUsed >= 80 ? "bg-yellow-500" : "bg-brand"}`}
-                          style={{ width: `${Math.min(100, row.pctUsed)}%` }}
-                        />
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {row.unlimited ? (
-                      <span className="text-foreground/65">—</span>
-                    ) : row.overLimit ? (
-                      <span className="font-medium text-red-600">Over limit</span>
-                    ) : row.pctUsed >= 80 ? (
-                      <span className="font-medium text-yellow-700">Near limit ({row.pctUsed}%)</span>
+                    {row.exhausted ? (
+                      <span className="font-medium text-red-600">Out of tokens</span>
                     ) : (
-                      <span className="text-foreground/75">OK ({row.pctUsed}%)</span>
+                      <span className="text-foreground/75">OK</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link href={`/admin/users/${row.userId}`} className="text-brand hover:underline">
-                      Manage limit
+                      Grant tokens
                     </Link>
                   </td>
                 </tr>
               ))}
-              {quotaRows.length === 0 && (
+              {walletRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-foreground/68">
-                    No student usage recorded this month yet.
+                  <td colSpan={5} className="px-4 py-8 text-center text-foreground/68">
+                    No students yet.
                   </td>
                 </tr>
               )}

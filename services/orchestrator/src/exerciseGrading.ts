@@ -7,7 +7,7 @@
 // genuinely different-but-valid method as correct, not just a literal
 // match.
 import { buildGradingPrompt } from "./prompts.js";
-import { getChatReply, type LlmCallContext } from "./llm.js";
+import { getChatReply, type LlmCallContext, type LlmProvider } from "./llm.js";
 import type { ExerciseVerdict, Medium } from "./types.js";
 
 const MAX_TOKENS = 400;
@@ -38,8 +38,11 @@ export async function gradeExerciseAnswer(params: {
   expectedAnswer: string;
   studentAnswer: string;
   event: LlmCallContext;
+  // The requesting student's own llm_provider choice -- see
+  // GradeExerciseRequest's own comment in types.ts.
+  provider?: LlmProvider;
 }): Promise<{ verdict: ExerciseVerdict; feedback: string } | null> {
-  const { event, ...promptParams } = params;
+  const { event, provider, ...promptParams } = params;
   const systemPrompt = buildGradingPrompt(promptParams);
   const { text } = await getChatReply({
     systemPrompt,
@@ -51,6 +54,7 @@ export async function gradeExerciseAnswer(params: {
     // their mastery tracking -- never the place to cut cost. See llm.ts's
     // own LlmTier comment.
     tier: "flagship",
+    provider,
   });
 
   const verdictMatch = text.match(VERDICT_LINE);

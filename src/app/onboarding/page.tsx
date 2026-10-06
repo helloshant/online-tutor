@@ -11,24 +11,25 @@ export default async function OnboardingPage() {
 
   const supabase = await createClient();
 
+  // Board/grade/subject selection is saved "active" the instant it's
+  // submitted (see onboarding/actions.ts) -- there's no more incomplete/
+  // unpaid state to resume, so a row existing at all means onboarding is
+  // already done.
   const { data: existing } = await supabase
     .from("subscriptions")
     .select("id, status, board_id, grade_id, medium")
     .eq("user_id", user.id)
-    .in("status", ["pending_payment", "active"])
+    .eq("status", "active")
     .maybeSingle();
 
-  if (existing?.status === "active") redirect("/dashboard");
+  if (existing) redirect("/dashboard");
 
-  const [{ data: boards }, { data: grades }, { data: subjects }, { data: mappings }, { data: existingSubjects }] =
+  const [{ data: boards }, { data: grades }, { data: subjects }, { data: mappings }] =
     await Promise.all([
       supabase.from("boards").select("*").order("name"),
       supabase.from("grades").select("*").order("level"),
       supabase.from("subjects").select("*").order("name"),
       supabase.from("board_grade_subjects").select("*"),
-      existing
-        ? supabase.from("subscription_subjects").select("subject_id").eq("subscription_id", existing.id)
-        : Promise.resolve({ data: [] as { subject_id: string }[] }),
     ]);
 
   // ICSE isn't offered yet (see the home page's own "Currently we are not
@@ -43,16 +44,6 @@ export default async function OnboardingPage() {
       grades={grades ?? []}
       subjects={subjects ?? []}
       mappings={mappings ?? []}
-      initial={
-        existing
-          ? {
-              boardId: existing.board_id,
-              gradeId: existing.grade_id,
-              medium: existing.medium,
-              subjectIds: (existingSubjects ?? []).map((s) => s.subject_id),
-            }
-          : undefined
-      }
     />
   );
 }
