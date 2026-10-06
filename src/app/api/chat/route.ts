@@ -116,6 +116,10 @@ type ExerciseContext = {
   chapter: string;
   topic: string;
   exercises: { question: string; answer: string }[];
+  // 1-based display number of exercises[0] within the student's full,
+  // original list -- see the truncation below for why this is no longer
+  // always 1.
+  startNumber: number;
 };
 
 // Same fix as parseTopicContext above, extended to the exercises shown
@@ -141,8 +145,7 @@ function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
     chapter.length > MAX_TOPIC_LABEL_LENGTH ||
     topic.length > MAX_TOPIC_LABEL_LENGTH ||
     !Array.isArray(exercises) ||
-    exercises.length === 0 ||
-    exercises.length > MAX_EXERCISE_COUNT
+    exercises.length === 0
   ) {
     return undefined;
   }
@@ -167,7 +170,27 @@ function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
     parsedExercises.push({ question, answer });
   }
 
-  return { chapter, topic, exercises: parsedExercises };
+  // Previously: dropping the ENTIRE context once a practice session passed
+  // MAX_EXERCISE_COUNT questions -- confirmed live as the cause of a
+  // report where "answer question 21" got "you forgot to include the
+  // text" from the model, despite question 21 being right there on
+  // screen: the 21-exercise array blew the (back then hard) cap and the
+  // whole thing was discarded, leaving nothing to resolve ANY question
+  // number against, not just the ones past 20. Keeping the MOST RECENT
+  // MAX_EXERCISE_COUNT instead -- a student referencing a question by
+  // number is almost always asking about something just generated, same
+  // "most recent" reasoning chat-panel.tsx's own exerciseEntry lookup
+  // already uses -- and recording startNumber so the numbered list built
+  // below keeps each kept exercise's REAL on-screen number instead of
+  // silently renumbering from 1, which would make "question 21" resolve
+  // to the wrong exercise once truncated.
+  const startIndex = Math.max(0, parsedExercises.length - MAX_EXERCISE_COUNT);
+  return {
+    chapter,
+    topic,
+    exercises: parsedExercises.slice(startIndex),
+    startNumber: startIndex + 1,
+  };
 }
 
 // One row of the syllabus this request's topics were drawn from, WITH its
@@ -649,11 +672,14 @@ async function handleChatRequest(request: Request) {
   // keeps a student's "question 2" reference resolvable without ballooning
   // history by up to MAX_EXERCISE_COUNT extra turns.
   if (exerciseContext && orchestrationRequest.mode === "student") {
+    // startNumber keeps these matching the student's own on-screen
+    // numbering even after parseExerciseContext's truncation -- see its
+    // own comment.
     const questionsList = exerciseContext.exercises
-      .map((e, i) => `${i + 1}. ${e.question}`)
+      .map((e, i) => `${exerciseContext.startNumber + i}. ${e.question}`)
       .join("\n");
     const answersList = exerciseContext.exercises
-      .map((e, i) => `${i + 1}. ${e.answer}`)
+      .map((e, i) => `${exerciseContext.startNumber + i}. ${e.answer}`)
       .join("\n");
     orchestrationRequest.history.push(
       {
