@@ -12,7 +12,7 @@ const FEATURES = [
   },
   {
     title: "Answers in your language",
-    body: "English, Sanskrit, or Bengali — chosen once at subscription, honoured in every reply.",
+    body: "English, Hindi, or Bengali — chosen once at subscription, honoured in every reply. Studying Sanskrit? That subject always answers in Sanskrit.",
   },
   {
     title: "Simple, transparent pricing",
