@@ -92,9 +92,24 @@ const AZURE_TIER_DEPLOYMENTS: Record<LlmTier, string> = {
 // highest-volume work, and the cheapest (Flash-Lite) on what's never shown
 // directly to a student. All three are already priced in
 // services/observability/src/pricing.ts.
+//
+// standard was gemini-2.5-flash until Google retired it for new/existing
+// callers -- reported directly in production: a real 404 ("This model
+// models/gemini-2.5-flash is no longer available... use
+// models/gemini-3.8-flash"), confirmed straight from Google's own API
+// response, not a guess. flagship/economy are still on their original 2.5
+// names below (gemini-2.5-pro, gemini-2.5-flash-lite) -- same generation
+// Google just retired flash from, so they may be silently broken the same
+// way and just haven't been hit by a real request yet. Verify against
+// Google's own model list before trusting either (a web search for current
+// Gemini model names/pricing turned out NOT reliable enough to risk a
+// second guess here -- several aggregator sites disagreed with each other
+// on what "the current Gemini 3 models" even are):
+//   curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" \
+//     | grep -o '"name": "models/[^"]*"' | sort -u
 const GEMINI_TIER_MODELS: Record<LlmTier, string> = {
   flagship: process.env.GEMINI_MODEL_FLAGSHIP || "gemini-2.5-pro",
-  standard: process.env.GEMINI_MODEL_STANDARD || "gemini-2.5-flash",
+  standard: process.env.GEMINI_MODEL_STANDARD || "gemini-3.8-flash",
   economy: process.env.GEMINI_MODEL_ECONOMY || "gemini-2.5-flash-lite",
 };
 

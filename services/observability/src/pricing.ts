@@ -34,9 +34,21 @@ const DEFAULT_ANTHROPIC_PRICING: Record<string, PricingRate> = {
 // history) never realistically approach 200K tokens, so the flat rate is
 // accurate for actual usage; set a LLM_PRICING_JSON override if that
 // changes.
+//
+// gemini-2.5-flash has NO entry here anymore -- Google retired it (see
+// llm.ts's own comment on GEMINI_TIER_MODELS for the production 404 that
+// caught this) in favor of gemini-3.8-flash, whose real rate isn't added
+// here: the only numbers found for it were a time-limited introductory
+// price from third-party aggregator sites that disagreed with each other,
+// not confirmed against Google's own pricing page -- exactly the kind of
+// unverified guess that got gemini-2.5-flash's own replacement name wrong
+// the first time. Until confirmed, a gemini-3.8-flash call reports token
+// counts with no dollar cost (getPricing returns null, same as any other
+// unpriced model) rather than a dollar figure that might be confidently
+// wrong. Set it via LLM_PRICING_JSON once you've confirmed the real rate
+// (e.g. from an invoice, or Google's own https://ai.google.dev/pricing).
 const DEFAULT_GEMINI_PRICING: Record<string, PricingRate> = {
   "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  "gemini-2.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   "gemini-2.5-flash-lite": { inputPerMTok: 0.1, outputPerMTok: 0.4 },
 };
 
