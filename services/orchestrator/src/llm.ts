@@ -51,9 +51,14 @@ export type LlmTier = "flagship" | "standard" | "economy";
 // Anthropic model ids are stable, ready-to-use strings -- tiering works
 // immediately here with no extra setup, and all three defaults are already
 // in pricing.ts's own built-in rate table, so cost tracking needs no
-// LLM_PRICING_JSON change either.
+// LLM_PRICING_JSON change either. flagship and standard both default to
+// Sonnet 5 ($3/$15 per MTok) rather than Opus -- a deliberate choice over
+// Opus's $5/$25: this app's own flagship-tier work (chat tutoring, exercise
+// grading) doesn't need Opus-level capability to do well, so there's no
+// reason to pay its ~40% premium on both tiers with the highest combined
+// volume. economy stays Haiku 4.5 ($1/$5), unrelated to this change.
 const ANTHROPIC_TIER_MODELS: Record<LlmTier, string> = {
-  flagship: process.env.ANTHROPIC_MODEL_FLAGSHIP || "claude-opus-5",
+  flagship: process.env.ANTHROPIC_MODEL_FLAGSHIP || "claude-sonnet-5",
   standard: process.env.ANTHROPIC_MODEL_STANDARD || "claude-sonnet-5",
   economy: process.env.ANTHROPIC_MODEL_ECONOMY || "claude-haiku-4-5",
 };
