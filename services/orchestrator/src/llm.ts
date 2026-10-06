@@ -248,7 +248,13 @@ export async function getGradingReply(params: {
     provider === "azure-openai"
       ? await getAzureOpenAIGradingReply({ ...providerParams, model })
       : provider === "gemini"
-        ? await getGeminiGradingReply({ ...providerParams, model })
+        ? // tier is passed through here (unlike the other two providers,
+          // which have no thinking-budget concept) -- see
+          // getGeminiGradingReply's own comment on why leaving it out
+          // left this path just as exposed to silent truncation as the
+          // chat path was before that was fixed, and arguably worse here:
+          // this is a live judgment on a real student's answer sheet.
+          await getGeminiGradingReply({ ...providerParams, model, tier })
         : await getAnthropicGradingReply({ ...providerParams, model });
   reportLlmCall(event, reply, startedAt);
   return reply;

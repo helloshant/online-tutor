@@ -63,13 +63,37 @@ function toGeminiRole(role: ChatTurn["role"]): "user" | "model" {
 // there. Disabled (thinkingBudget: 0) for standard and economy -- writing a
 // practice question from an archetype, or the answer-bank/emphasis work
 // economy does, doesn't need extended reasoning, it needs fast, direct
-// output matching a spelled-out format. Left at Gemini's own default
-// (undefined -- automatic) for flagship: chat tutoring and grading are
-// where multi-step reasoning (this app's own [STEP]-by-[STEP] math,
-// judgment-call grading) can genuinely benefit from it, and that path is
-// one on-demand call at a time, not a 41-call batch.
+// output matching a spelled-out format. A bounded, non-zero budget for
+// flagship: chat tutoring and grading are where multi-step reasoning (this
+// app's own [STEP]-by-[STEP] math, judgment-call grading) can genuinely
+// benefit from it, and that path is one on-demand call at a time, not a
+// 41-call batch -- but "automatic" (undefined, Gemini's own default, used
+// here until this was confirmed as the cause) is NOT safe to leave
+// unbounded: Gemini counts thinking tokens against the SAME
+// maxOutputTokens budget as the visible reply, so automatic thinking can
+// (and, confirmed live via chat_events, routinely did -- a two-step
+// compound-interest problem got a 61-token reply, cut off mid-sentence,
+// after presumably consuming nearly the entire 1536-token cap on hidden
+// thinking) consume almost the whole budget and leave the actual answer
+// truncated with no warning. FLAGSHIP_THINKING_BUDGET below bounds that,
+// and getGeminiReply/getGeminiGradingReply add it on top of the caller's
+// own maxTokens when it applies, so the visible completion always gets
+// the FULL maxTokens regardless of how much (bounded) thinking happens
+// first.
+const FLAGSHIP_THINKING_BUDGET = 2048;
+
 function resolveThinkingConfig(tier: LlmTier): { thinkingBudget: number } | undefined {
-  return tier === "flagship" ? undefined : { thinkingBudget: 0 };
+  return tier === "flagship"
+    ? { thinkingBudget: FLAGSHIP_THINKING_BUDGET }
+    : { thinkingBudget: 0 };
+}
+
+// Adds FLAGSHIP_THINKING_BUDGET on top of the caller's own maxTokens only
+// when thinking is actually bounded-but-nonzero (flagship) -- see
+// resolveThinkingConfig's own comment. Zero extra for standard/economy
+// (thinkingBudget: 0, nothing to reserve room for).
+function resolveMaxOutputTokens(maxTokens: number, tier: LlmTier): number {
+  return tier === "flagship" ? maxTokens + FLAGSHIP_THINKING_BUDGET : maxTokens;
 }
 
 export async function getGeminiReply(params: {
@@ -111,7 +135,7 @@ export async function getGeminiReply(params: {
     contents,
     config: {
       systemInstruction: resolveSystemInstruction(systemPrompt),
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: resolveMaxOutputTokens(maxTokens, tier),
       thinkingConfig: resolveThinkingConfig(tier),
     },
   });
@@ -149,8 +173,9 @@ export async function getGeminiGradingReply(params: {
   images: ImageAttachment[];
   maxTokens: number;
   model: string;
+  tier: LlmTier;
 }): Promise<LlmReply> {
-  const { systemPrompt, images, maxTokens, model } = params;
+  const { systemPrompt, images, maxTokens, model, tier } = params;
   const client = getClient();
 
   const parts: Part[] = [
@@ -169,7 +194,8 @@ export async function getGeminiGradingReply(params: {
     contents: [{ role: "user", parts }],
     config: {
       systemInstruction: systemPrompt,
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: resolveMaxOutputTokens(maxTokens, tier),
+      thinkingConfig: resolveThinkingConfig(tier),
       responseMimeType: "application/json",
     },
   });
