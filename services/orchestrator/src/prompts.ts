@@ -312,9 +312,18 @@ If you are ever unsure whether adding emphasis somewhere would require rephrasin
 // that never requested one, and is what exerciseParser.ts needs to
 // extract ExerciseItem.type at all. See ExerciseType's own comment for
 // the four values this must be one of.
+// The "concise and direct" clause on A: was added after exercise generation
+// was reported running noticeably slower/more expensive on one provider --
+// the real cause turned out to be this prompt never asking for a LENGTH
+// bound at all, so a more verbose-by-default model had nothing here pushing
+// back: "complete... showing steps" alone places no ceiling on how much it
+// elaborates each step. Still requires every step (never trade away
+// correctness/completeness for brevity), just removes the restated
+// question, throat-clearing preamble, and padding a terser answer wouldn't
+// need.
 const EXERCISE_FORMAT_INSTRUCTIONS = `Format each exercise exactly as:
 Q: <question>
-A: <complete worked solution, showing steps>
+A: <complete worked solution, showing steps -- concise and direct: the necessary working/reasoning for each step and nothing more, no restating the question, no preamble, no padding a step with explanation beyond what solving it actually requires>
 Type: <one of MCQ, short_answer, long_answer, numerical -- whichever this question actually is>
 
 Separate exercises with a line containing only ---. Output nothing else: no preamble, no numbering, no closing remarks.`;
@@ -328,7 +337,7 @@ Separate exercises with a line containing only ---. Output nothing else: no prea
 // tag and keeps the plain format above completely unchanged.
 const EXERCISE_FORMAT_INSTRUCTIONS_WITH_PATTERN = `Format each exercise exactly as:
 Q: <question>
-A: <complete worked solution, showing steps>
+A: <complete worked solution, showing steps -- concise and direct: the necessary working/reasoning for each step and nothing more, no restating the question, no preamble, no padding a step with explanation beyond what solving it actually requires>
 Pattern: <the number of the pattern above this exercise instantiates>
 Type: <one of MCQ, short_answer, long_answer, numerical -- whichever this question actually is>
 
