@@ -719,26 +719,39 @@ export function ChatPanel({
             }
           : undefined;
 
-      // Same "still the last thing shown" criterion as topicContext above,
-      // built from whichever TopicPractice mount was last on screen (see
-      // handleTopicExercisesChanged/handleMessageExercisesChanged) -- lets
-      // a follow-up like "I don't understand question 2" resolve against
-      // real exercise text instead of nothing. Sent alongside topicContext,
-      // not instead of it: a topic bubble can show BOTH a summary and its
-      // own exercises, and a follow-up might reference either.
+      // Deliberately NOT the same "must still be the very last thing shown"
+      // criterion as topicContext above -- reported directly: a student
+      // who'd sent even one unrelated message after an exercise batch (or
+      // simply scrolled back up to an earlier batch and asked about one of
+      // its questions by number) got NO exercise context at all on a
+      // follow-up like "answer question 29", since by then that exercise
+      // bubble was no longer `lastEntry` -- the model had nothing real to
+      // resolve the question number against and visibly guessed/hallucinated
+      // instead. A student referencing a question BY NUMBER has already
+      // told us unambiguously which kind of context they mean; scanning
+      // back for the most recent entry that actually has exercises (not
+      // requiring it be the literal last entry) resolves that correctly in
+      // the common case -- scrolling back to an earlier batch within the
+      // same practice session -- at the acceptable cost of occasionally
+      // resurfacing a stale batch if the student has since moved on to a
+      // different topic entirely, which is still strictly better than the
+      // silent empty-context hallucination this replaces.
+      const exerciseEntry = timelineRef.current.findLast(
+        (e) => e.exercises && e.exercises.length > 0,
+      );
       const exerciseContext =
-        lastEntry?.exercises && lastEntry.exercises.length > 0
-          ? lastEntry.kind === "topic"
+        exerciseEntry?.exercises && exerciseEntry.exercises.length > 0
+          ? exerciseEntry.kind === "topic"
             ? {
-                chapter: lastEntry.topic.chapter,
-                topic: lastEntry.topic.topic,
-                exercises: lastEntry.exercises,
+                chapter: exerciseEntry.topic.chapter,
+                topic: exerciseEntry.topic.topic,
+                exercises: exerciseEntry.exercises,
               }
-            : lastEntry.matchedTopic
+            : exerciseEntry.matchedTopic
               ? {
-                  chapter: lastEntry.matchedTopic.chapter,
-                  topic: lastEntry.matchedTopic.topic,
-                  exercises: lastEntry.exercises,
+                  chapter: exerciseEntry.matchedTopic.chapter,
+                  topic: exerciseEntry.matchedTopic.topic,
+                  exercises: exerciseEntry.exercises,
                 }
               : undefined
           : undefined;
