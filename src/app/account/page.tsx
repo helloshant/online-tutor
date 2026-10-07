@@ -73,12 +73,20 @@ export default async function AccountPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
-      <Link
-        href="/dashboard"
-        className="text-sm text-foreground/68 hover:text-foreground"
-      >
-        ← Back to dashboard
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/dashboard"
+          className="text-sm text-foreground/68 hover:text-foreground"
+        >
+          ← Back to dashboard
+        </Link>
+        <Link
+          href="/pricing"
+          className="text-sm text-foreground/68 hover:text-foreground"
+        >
+          Pricing
+        </Link>
+      </div>
 
       <h1 className="mt-3 text-lg font-semibold">Account</h1>
 

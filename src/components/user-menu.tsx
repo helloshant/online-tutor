@@ -65,6 +65,14 @@ export function UserMenu({ userName }: { userName: string }) {
           >
             Account
           </Link>
+          <Link
+            href="/pricing"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block px-3 py-1.5 text-sm text-foreground/88 hover:bg-brand/5"
+          >
+            Pricing
+          </Link>
           <LogoutButton className="block w-full px-3 py-1.5 text-left text-sm text-foreground/88 hover:bg-brand/5 disabled:opacity-60" />
         </div>
       )}
