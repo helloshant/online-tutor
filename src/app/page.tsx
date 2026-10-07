@@ -16,7 +16,7 @@ const FEATURES = [
   },
   {
     title: "Simple, transparent pricing",
-    body: "Pay per subject with CCAvenue. Add or drop subjects whenever your plan changes.",
+    body: "Free setup, then a prepaid token wallet -- ₹500 for 200,000 tokens. No monthly fees.",
   },
 ];
 
@@ -26,6 +26,9 @@ export default function Home() {
       <header className="flex items-center justify-between px-6 py-5 sm:px-10">
         <span className="text-lg font-semibold text-brand">SyllabusMate</span>
         <nav className="flex items-center gap-4 text-sm font-medium">
+          <Link href="/pricing" className="text-foreground/82 hover:text-foreground">
+            Pricing
+          </Link>
           <Link href="/login" className="text-foreground/82 hover:text-foreground">
             Log in
           </Link>
@@ -76,6 +79,10 @@ export default function Home() {
       <footer className="border-t border-border px-6 py-6 text-center text-xs text-foreground/65">
         <p>SyllabusMate — built for students, by subject, by syllabus.</p>
         <p className="mt-2 flex items-center justify-center gap-3">
+          <Link href="/pricing" className="hover:underline">
+            Pricing
+          </Link>
+          <span aria-hidden="true">·</span>
           <Link href="/terms" className="hover:underline">
             Terms &amp; Conditions
           </Link>
