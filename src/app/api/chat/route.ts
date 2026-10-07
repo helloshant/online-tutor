@@ -152,9 +152,31 @@ function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
     return undefined;
   }
 
+  // Every per-item problem below (wrong shape, missing/empty field,
+  // oversized field) now SKIPS just that one item instead of returning
+  // undefined for the whole array -- confirmed live as the cause of a
+  // report where "solve question 10" got "you haven't provided the text
+  // for the question" from the model, despite question 10 being right
+  // there on screen: a DIFFERENT exercise earlier in that same 10-item
+  // batch (a long-answer worked solution) had an answer of 2,679
+  // characters, past MAX_EXERCISE_FIELD_LENGTH, which discarded the
+  // ENTIRE exerciseContext under the original all-or-nothing version of
+  // just the length check. Fixing only that one check would have left
+  // this exact same shape of bug reachable through the other two checks
+  // right next to it (a malformed item, or one missing/empty question or
+  // answer) -- those are only ever expected from a malformed/adversarial
+  // payload rather than ordinary content (unlike an oversized field,
+  // which legitimately happens), so unlike the length case there's no
+  // real on-screen numbering for a skipped one to stay consistent with;
+  // skipping is still strictly better than discarding every OTHER valid
+  // exercise over it. The length case is truncated rather than skipped,
+  // since the model only needs the real question text plus enough of the
+  // canonical answer to stay consistent with it, not the complete
+  // original every time -- and skipping it instead, unlike these two,
+  // WOULD have real on-screen numbering to stay consistent with.
   const parsedExercises: { question: string; answer: string }[] = [];
   for (const item of exercises) {
-    if (typeof item !== "object" || item === null) return undefined;
+    if (typeof item !== "object" || item === null) continue;
     const { question, answer } = item as {
       question?: unknown;
       answer?: unknown;
@@ -165,26 +187,14 @@ function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
       !question.trim() ||
       !answer.trim()
     ) {
-      return undefined;
+      continue;
     }
-    // Same bug as MAX_EXERCISE_COUNT's own comment just below describes,
-    // one field at a time: confirmed live as the cause of a report where
-    // "solve question 10" got "you haven't provided the text for the
-    // question" from the model, despite question 10 being right there on
-    // screen -- a DIFFERENT exercise earlier in the SAME 10-item batch (a
-    // long-answer worked solution for an area-under-curves problem) had an
-    // answer of 2,679 characters, past this cap, which discarded the
-    // ENTIRE exerciseContext and left nothing to resolve ANY question
-    // number against, not just the oversized one. Truncating instead of
-    // discarding keeps every exercise (including the one actually
-    // referenced) resolvable -- the model only needs the real question
-    // text plus enough of the canonical answer to stay consistent with it,
-    // not the complete original every time.
     parsedExercises.push({
       question: question.slice(0, MAX_EXERCISE_FIELD_LENGTH),
       answer: answer.slice(0, MAX_EXERCISE_FIELD_LENGTH),
     });
   }
+  if (parsedExercises.length === 0) return undefined;
 
   // Previously: dropping the ENTIRE context once a practice session passed
   // MAX_EXERCISE_COUNT questions -- confirmed live as the cause of a
