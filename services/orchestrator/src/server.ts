@@ -32,6 +32,7 @@ import {
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
 import { extractEmbeddedExercises, parseGeneratedExercises } from "./exerciseParser.js";
+import { recordExerciseGenerationFailure } from "./exerciseFailureLog.js";
 import { getChatReply, getGradingReply } from "./llm.js";
 import type { LlmProvider } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
@@ -2106,7 +2107,7 @@ app.post(
         requestedDifficulty,
         requestedType,
       });
-      const { text } = await getChatReply({
+      let { text } = await getChatReply({
         systemPrompt,
         history: [],
         message: "Generate the exercise now.",
@@ -2127,23 +2128,79 @@ app.post(
         provider: body.provider,
       });
 
-      const parsed = parseGeneratedExercises(text);
-      const first = parsed[0];
+      let parsed = parseGeneratedExercises(text);
+      let first = parsed[0];
+
+      // One bounded retry, same shape as generate-for-concept's own
+      // under-production retry above -- reported directly: a pinned
+      // requestedType layered onto an archetype pattern that doesn't
+      // naturally fit it (e.g. forcing a "numerical" single-value answer
+      // out of a multi-step area-under-a-curve derivation) made the model
+      // noticeably more likely to drift from the strict Q:/A: format
+      // parseGeneratedExercises expects. Free on the common case (a first
+      // attempt that already parses skips this entirely); only fires on
+      // the rare unparseable reply, where it's clearly worth one more LLM
+      // call rather than surfacing "Could not generate a question" to a
+      // student who could very plausibly have gotten a real exercise on
+      // the next click anyway.
       if (!first) {
-        // Silent until now -- GenerateTopicExerciseResponse.exercise: null
-        // deliberately covers this case too (see its own comment: "never
-        // an error response"), which is the right contract for the
-        // client, but left this exact failure mode (model replied, output
-        // just didn't match the Q:/A: format parseGeneratedExercises
-        // expects) completely unobservable server-side -- chat_events only
-        // records a short label, never the completion text itself. Logged
-        // here, truncated, purely for diagnosing a report of "generation
-        // failed" after the fact; never surfaced to the client.
+        const retry = await getChatReply({
+          systemPrompt,
+          history: [],
+          message: "Generate the exercise now.",
+          maxTokens: EXERCISE_MAX_TOKENS,
+          event: {
+            loggable: true,
+            userId: body.userId,
+            mode: "student",
+            boardId: scope.boardId,
+            gradeId: scope.gradeId,
+            subjectId: scope.subjectId,
+            medium: scope.medium,
+            question: `topic-exercises/generate (retry, unparseable): ${body.chapter} / ${body.topic} (${chosen.name})`,
+          },
+          tier: "standard",
+          provider: body.provider,
+        });
+        text = retry.text;
+        parsed = parseGeneratedExercises(text);
+        first = parsed[0];
+      }
+
+      if (!first) {
+        // Still unparseable after the retry -- genuinely exceptional now,
+        // not just the model's usual first-attempt noise.
+        // GenerateTopicExerciseResponse.exercise: null deliberately covers
+        // this case too (see its own comment: "never an error response"),
+        // which is the right contract for the client, but left this exact
+        // failure mode (model replied, output just didn't match the Q:/A:
+        // format parseGeneratedExercises expects) effectively undiagnosable
+        // without direct access to this service's own runtime logs --
+        // chat_events only records a short label, never the completion
+        // text itself. Logged here AND persisted to
+        // exercise_generation_failures (see that table's own migration
+        // comment) so a report of "generation failed" can be diagnosed
+        // straight from Supabase; never surfaced to the client either way.
         console.error(
-          `On-demand topic exercise generation produced unparseable output for ` +
+          `On-demand topic exercise generation produced unparseable output (after retry) for ` +
             `${body.boardName}/${body.gradeName}/${body.subjectName} -- "${body.chapter}" / "${body.topic}" ` +
             `(pattern: "${chosen.name}"): ${text.slice(0, 2000)}`,
         );
+        void recordExerciseGenerationFailure({
+          userId: body.userId,
+          boardId: body.boardId,
+          gradeId: body.gradeId,
+          subjectId: body.subjectId,
+          chapter: body.chapter,
+          topic: body.topic,
+          patternName: chosen.name,
+          archetypeId: chosen.archetypeId,
+          archetypeRunId: chosen.runId,
+          requestedType: requestedType ?? null,
+          requestedDifficulty: requestedDifficulty ?? null,
+          provider: body.provider ?? null,
+          rawOutput: text,
+        });
       }
       const archetypeAttribution = {
         runId: chosen.runId,
