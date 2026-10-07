@@ -26,9 +26,6 @@ export default function Home() {
       <header className="flex items-center justify-between px-6 py-5 sm:px-10">
         <span className="text-lg font-semibold text-brand">SyllabusMate</span>
         <nav className="flex items-center gap-4 text-sm font-medium">
-          <Link href="/pricing" className="text-foreground/82 hover:text-foreground">
-            Pricing
-          </Link>
           <Link href="/login" className="text-foreground/82 hover:text-foreground">
             Log in
           </Link>
