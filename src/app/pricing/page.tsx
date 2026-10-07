@@ -16,6 +16,10 @@ export const metadata = {
 
 const FAQS = [
   {
+    q: "What are tokens?",
+    a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. A ₹500 recharge adds 200,000 of them to your balance.",
+  },
+  {
     q: "Is there a monthly fee?",
     a: "No. There's no subscription and nothing auto-renews. You top up your wallet when you want to, and it's only ever spent when you actually ask a question.",
   },
