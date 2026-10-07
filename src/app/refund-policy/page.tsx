@@ -38,7 +38,7 @@ export default function RefundPolicyPage() {
           <h2 className="text-base font-semibold text-foreground">1. Cancellation Policy</h2>
           <p className="mt-2">You may request cancellation of your subscription at any time. Please note the following:</p>
           <ul className="mt-2 list-disc space-y-1.5 pl-5">
-            <li>Cancellation requests should be submitted by phone at +91-9593930068 or by contacting support.</li>
+            <li>Cancellation requests should be submitted by contacting support.</li>
             <li>Cancelling stops access once processed; it does not refund any part of a period you&apos;ve already paid for.</li>
             <li>Partial refunds for the remainder of an already-paid period are generally not provided unless explicitly approved.</li>
           </ul>
@@ -87,8 +87,6 @@ export default function RefundPolicyPage() {
             For any queries or requests related to refunds or cancellations, please reach out to:
             <br />
             SyllabusMate Support
-            <br />
-            Phone: +91-9593930068
             <br />
             Address: Sapthagiri Sannidhi, Block C, Next Laxminaryana Temple Marathahalli, Bengaluru, 560037
           </p>

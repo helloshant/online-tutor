@@ -3,11 +3,10 @@ import { CallbackForm } from "./callback-form";
 
 // Static shell (this component itself needs no data or auth) around the
 // one interactive piece, CallbackForm -- same "server page, client form"
-// split as /signup. The "24/7 · Toll-free" caption on the reference
-// design this was modeled on was deliberately dropped: the number given,
-// +91-9593930068, is an ordinary 10-digit mobile number, not a toll-free
-// (1800-series) one, so claiming "toll-free" would be actively false, and
-// nothing in this app establishes round-the-clock support hours either.
+// split as /signup. Used to lead with a displayed support number and a
+// tel: link; that's been dropped at the business's request, so the
+// callback-request form (leave your own number, we call you) is now the
+// only contact path this page offers.
 export const metadata = {
   title: "Contact Us — SyllabusMate",
 };
@@ -37,19 +36,15 @@ export default function ContactPage() {
             </svg>
           </div>
 
-          <h1 className="mt-4 text-xl font-semibold">Phone Support</h1>
+          <h1 className="mt-4 text-xl font-semibold">Talk to our team</h1>
           <p className="mt-2 text-sm text-foreground/75">
-            Speak directly with our team for questions about your subscription, billing, or anything
-            else.
+            Leave your number for questions about your subscription, billing, or anything else, and
+            we&apos;ll call you back.
           </p>
-
-          <a href="tel:+919593930068" className="mt-4 text-lg font-semibold text-brand hover:underline">
-            +91 95939 30068
-          </a>
         </div>
 
         <div className="mt-8 border-t border-border pt-6">
-          <h2 className="text-sm font-semibold">Prefer we call you?</h2>
+          <h2 className="text-sm font-semibold">Request a callback</h2>
           <CallbackForm />
         </div>
 

@@ -147,8 +147,6 @@ export default function PrivacyPage() {
             <br />
             SyllabusMate Support
             <br />
-            Phone: +91-9593930068
-            <br />
             Address: Sapthagiri Sannidhi, Block C, Next Laxminaryana Temple Marathahalli, Bengaluru, 560037
           </p>
         </section>

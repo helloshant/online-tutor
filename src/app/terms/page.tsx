@@ -4,8 +4,10 @@ import Link from "next/link";
 // logged in or not, same as /login and /signup). Content supplied directly
 // by the business, not drafted here -- only the service name ("Webmate" in
 // the source text) was swapped for the product's own name (SyllabusMate)
-// to match the rest of the app; the registered company name, address, and
-// phone number in section 12 are left exactly as given.
+// to match the rest of the app; the registered company name and address in
+// section 12 are left exactly as given (the phone number has been dropped
+// at the business's request -- support now runs through /contact's
+// callback-request form instead).
 export const metadata = {
   title: "Terms & Conditions — SyllabusMate",
 };
@@ -127,8 +129,6 @@ export default function TermsPage() {
           <h2 className="text-base font-semibold text-foreground">12. Contact Us</h2>
           <p className="mt-2">
             Odantapuri Financial Services Pvt. Ltd.
-            <br />
-            Phone: +91-9593930068
             <br />
             Address: Sapthagiri Sannidhi, Block C, Next Laxminaryana Temple Marathahalli, Bengaluru, 560037
           </p>
