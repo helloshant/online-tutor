@@ -163,13 +163,27 @@ function parseExerciseContext(raw: unknown): ExerciseContext | undefined {
       typeof question !== "string" ||
       typeof answer !== "string" ||
       !question.trim() ||
-      !answer.trim() ||
-      question.length > MAX_EXERCISE_FIELD_LENGTH ||
-      answer.length > MAX_EXERCISE_FIELD_LENGTH
+      !answer.trim()
     ) {
       return undefined;
     }
-    parsedExercises.push({ question, answer });
+    // Same bug as MAX_EXERCISE_COUNT's own comment just below describes,
+    // one field at a time: confirmed live as the cause of a report where
+    // "solve question 10" got "you haven't provided the text for the
+    // question" from the model, despite question 10 being right there on
+    // screen -- a DIFFERENT exercise earlier in the SAME 10-item batch (a
+    // long-answer worked solution for an area-under-curves problem) had an
+    // answer of 2,679 characters, past this cap, which discarded the
+    // ENTIRE exerciseContext and left nothing to resolve ANY question
+    // number against, not just the oversized one. Truncating instead of
+    // discarding keeps every exercise (including the one actually
+    // referenced) resolvable -- the model only needs the real question
+    // text plus enough of the canonical answer to stay consistent with it,
+    // not the complete original every time.
+    parsedExercises.push({
+      question: question.slice(0, MAX_EXERCISE_FIELD_LENGTH),
+      answer: answer.slice(0, MAX_EXERCISE_FIELD_LENGTH),
+    });
   }
 
   // Previously: dropping the ENTIRE context once a practice session passed
