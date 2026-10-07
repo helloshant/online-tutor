@@ -347,7 +347,9 @@ export type StudentWallet = {
 // supabase/migrations/0055_student_wallets.sql and
 // services/payment/src/ccavenuePayment.ts's wallet-topup branch. Mirrors
 // subscriptions' own CCAvenue pattern: this row's own id is the CCAvenue
-// order_id (prefixed "wtop_" to distinguish from a subscription order_id),
+// order_id (prefixed "w_" to distinguish from a subscription order_id --
+// CCAvenue rejects any order_id over 40 characters, so this prefix is
+// kept as short as possible),
 // amount/tokens are fixed server-side, never client-supplied.
 export type WalletTopup = {
   id: string;

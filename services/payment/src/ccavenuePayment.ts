@@ -71,11 +71,16 @@ export async function initiatePayment(params: {
 // recharge -- kept separate rather than widening initiatePayment itself
 // since the two have genuinely different validation (fixed amount, no
 // pre-existing row to look up) and this way the existing, working
-// subscription path is never touched. The CCAvenue order_id gets a
-// "wtop_" prefix (subscription order_ids stay bare UUIDs, unchanged) so
+// subscription path is never touched. The CCAvenue order_id gets a "w_"
+// prefix (subscription order_ids stay bare UUIDs, unchanged) so
 // handleCallback -- which only ever receives the decrypted response, never
 // the original request -- can tell the two apart deterministically with no
-// extra lookup.
+// extra lookup. Deliberately NOT "wtop_" (the original choice): CCAvenue
+// rejects any order_id over 40 characters with status_message "Order no.
+// should not exceed 40 characters." -- confirmed live as the cause of
+// every wallet recharge failing with order_status "Invalid" -- and
+// "wtop_" + a 36-character UUID is 41, one over. "w_" + the same UUID is
+// 38, safely under.
 export async function initiateWalletTopup(params: {
   topupId: string;
   userId: string;
@@ -105,7 +110,7 @@ export async function initiateWalletTopup(params: {
     return { error: "Invalid wallet top-up amount" };
   }
 
-  const orderId = `wtop_${topup.id}`;
+  const orderId = `w_${topup.id}`;
   const amountRupees = (topup.amount_paise / 100).toFixed(2);
 
   const requestString = new URLSearchParams({
@@ -150,7 +155,7 @@ export async function handleCallback(encResp: string): Promise<{ redirectTo: str
     return { redirectTo: "/subscribe?error=invalid_response" };
   }
 
-  const orderType = orderId.startsWith("wtop_") ? "wallet_topup" : "subscription";
+  const orderType = orderId.startsWith("w_") ? "wallet_topup" : "subscription";
 
   if (orderStatus !== "Success") {
     // Previously: any non-Success status just mapped to the same generic
@@ -188,13 +193,13 @@ export async function handleCallback(encResp: string): Promise<{ redirectTo: str
     }
   }
 
-  // "wtop_" prefix (see initiateWalletTopup above) means this is a wallet
+  // "w_" prefix (see initiateWalletTopup above) means this is a wallet
   // recharge, not a subscription payment -- the only signal available
   // here, since this handler only ever sees CCAvenue's own decrypted
   // response, never the original initiate request. Anything else falls
   // through to the existing, unchanged subscription logic below.
-  if (orderId.startsWith("wtop_")) {
-    return handleWalletTopupCallback(orderId.slice("wtop_".length), orderStatus, trackingId);
+  if (orderId.startsWith("w_")) {
+    return handleWalletTopupCallback(orderId.slice("w_".length), orderStatus, trackingId);
   }
 
   if (orderStatus !== "Success") {
