@@ -20,6 +20,10 @@ const FAQS = [
     a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. A ₹500 recharge adds 200,000 of them to your balance.",
   },
   {
+    q: "How are tokens calculated and consumed?",
+    a: "Each question you ask is costed on how much work it actually took to answer -- a short factual answer costs less than a long, detailed one with diagrams or worked steps. That cost is deducted from your wallet balance automatically as soon as you get your reply, so there's nothing to track yourself -- just watch your balance on the dashboard. Claude draws down your balance faster than Gemini per question, since it costs more to run.",
+  },
+  {
     q: "Is there a monthly fee?",
     a: "No. There's no subscription and nothing auto-renews. You top up your wallet when you want to, and it's only ever spent when you actually ask a question.",
   },
