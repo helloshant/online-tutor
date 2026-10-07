@@ -150,6 +150,44 @@ export async function handleCallback(encResp: string): Promise<{ redirectTo: str
     return { redirectTo: "/subscribe?error=invalid_response" };
   }
 
+  const orderType = orderId.startsWith("wtop_") ? "wallet_topup" : "subscription";
+
+  if (orderStatus !== "Success") {
+    // Previously: any non-Success status just mapped to the same generic
+    // "payment_failed" redirect in both branches below, with nothing
+    // about WHY logged or stored anywhere -- confirmed live as the cause
+    // of a report where a real transaction failed with no way to tell
+    // whether it was a merchant-auth rejection, a declined card, an
+    // abandoned 3D-secure step, or something else. CCAvenue's own
+    // decrypted response carries more than just order_status --
+    // failure_message/status_message typically explain why. Logged AND
+    // persisted to payment_callback_failures (see that table's own
+    // migration comment) so a report like this one is diagnosable
+    // straight from Supabase; never surfaced to the student either way.
+    const failureMessage =
+      params.get("failure_message") ?? params.get("status_message") ?? null;
+    console.error(
+      `CCAvenue payment did not succeed for order ${orderId} (${orderType}): ` +
+        `status="${orderStatus}", message="${failureMessage ?? "(none given)"}", ` +
+        `tracking_id="${trackingId ?? "(none)"}"`,
+    );
+    try {
+      const supabase = getSupabaseClient();
+      const { error: logError } = await supabase.from("payment_callback_failures").insert({
+        order_id: orderId,
+        order_type: orderType,
+        order_status: orderStatus,
+        failure_message: failureMessage,
+        raw_response: decoded.slice(0, 2000),
+      });
+      if (logError) {
+        console.error("Failed to record payment_callback_failures row:", logError);
+      }
+    } catch (err) {
+      console.error("Failed to record payment_callback_failures row:", err);
+    }
+  }
+
   // "wtop_" prefix (see initiateWalletTopup above) means this is a wallet
   // recharge, not a subscription payment -- the only signal available
   // here, since this handler only ever sees CCAvenue's own decrypted
