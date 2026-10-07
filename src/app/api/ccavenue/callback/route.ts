@@ -13,8 +13,18 @@ import { handlePaymentCallback } from "@/lib/paymentClient";
 // decrypting, validating order_status, and activating the subscription all
 // happen in the service (src/lib/paymentClient.ts).
 export async function POST(request: Request) {
-  const url = new URL(request.url);
-  const origin = `${url.protocol}//${url.host}`;
+  // request.url reflects the Node process's own internal bind address
+  // (e.g. 0.0.0.0:3000) when this app runs behind a reverse proxy, not the
+  // public domain the browser actually used -- confirmed live as the
+  // cause of the post-payment redirect pointing the browser at
+  // 0.0.0.0:3000. Same x-forwarded-host/x-forwarded-proto fix already
+  // used for an email's redirectTo in forgot-password/actions.ts and
+  // admin/actions.ts, and for the redirect_url/cancel_url this app hands
+  // CCAvenue in the first place (see /api/ccavenue/initiate and
+  // /api/wallet/recharge/initiate).
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const protocol = request.headers.get("x-forwarded-proto") ?? "http";
+  const origin = `${protocol}://${host}`;
 
   try {
     return await handleCallback(request, origin);

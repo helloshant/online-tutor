@@ -40,8 +40,17 @@ async function handleInitiate(request: Request) {
     return NextResponse.json({ error: "No pending subscription found" }, { status: 404 });
   }
 
-  const url = new URL(request.url);
-  const origin = `${url.protocol}//${url.host}`;
+  // request.url reflects the Node process's own internal bind address
+  // (e.g. 0.0.0.0:3000) when this app runs behind a reverse proxy, not the
+  // public domain the browser actually used -- confirmed live as the
+  // cause of CCAvenue's redirect/cancel URL pointing at 0.0.0.0:3000,
+  // unreachable once the student's browser tried to come back from the
+  // hosted payment page. Same x-forwarded-host/x-forwarded-proto fix
+  // already used for an email's redirectTo in forgot-password/actions.ts
+  // and admin/actions.ts.
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const protocol = request.headers.get("x-forwarded-proto") ?? "http";
+  const origin = `${protocol}://${host}`;
 
   try {
     const result = await initiatePayment({
