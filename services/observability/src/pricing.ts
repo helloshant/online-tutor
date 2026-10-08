@@ -58,6 +58,25 @@ const DEFAULT_ANTHROPIC_PRICING: Record<string, PricingRate> = {
 const DEFAULT_GEMINI_PRICING: Record<string, PricingRate> = {
   "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gemini-2.5-flash-lite": { inputPerMTok: 0.1, outputPerMTok: 0.4 },
+  // Confirmed live as the cause of a report where a student's wallet
+  // balance never moved despite real activity: this deploy's "-latest"
+  // aliases now resolve to gemini-3.8-flash and gemini-3.1-pro-preview
+  // (see chat_events.model), neither of which had an entry here, so
+  // EVERY Gemini call since Google's rollout recorded cost_usd: null --
+  // and the wallet deduction in server.ts below is gated on a non-null
+  // cost, so it silently never fired, for any student, regardless of
+  // provider choice. Rates confirmed against Google's own
+  // ai.google.dev/gemini-api/docs/pricing (as of 2026-10-08):
+  // gemini-3.8-flash uses its STANDARD post-introductory rate ($1.50/
+  // $7.50), not the $0.75/$3.75 rate active through 2026-12-31 -- same
+  // "never default to a temporary intro rate" policy this file's own
+  // Sonnet 5 comment already states, so a stale deploy doesn't silently
+  // under-count cost once the introductory period ends.
+  // gemini-3.1-pro-preview's $2/$12 is its <=200K-context tier (same
+  // "this app's prompts never realistically approach 200K" reasoning as
+  // gemini-2.5-pro above), not its $4/$18 above-200K tier.
+  "gemini-3.8-flash": { inputPerMTok: 1.5, outputPerMTok: 7.5 },
+  "gemini-3.1-pro-preview": { inputPerMTok: 2, outputPerMTok: 12 },
 };
 
 let cachedOverrides: Record<string, PricingRate> | undefined;
