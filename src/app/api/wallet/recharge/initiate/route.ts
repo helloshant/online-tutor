@@ -3,6 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { initiateWalletTopup } from "@/lib/paymentClient";
 import { createPendingWalletTopup } from "@/lib/walletTopup";
+import {
+  BASE_RECHARGE_AMOUNT_PAISE,
+  MAX_RECHARGE_AMOUNT_PAISE,
+  MIN_RECHARGE_AMOUNT_PAISE,
+  isValidRechargeAmountPaise,
+} from "@/lib/walletPricing";
 
 // Every code path below must return through NextResponse.json -- this
 // top-level catch is the backstop so an unexpected throw (e.g. the payment
@@ -21,15 +27,16 @@ export async function POST(request: Request) {
 }
 
 // A thin proxy, same shape as /api/ccavenue/initiate: either creates a
-// fresh pending wallet_topups row (the plain "Recharge" button) or, when
-// `topupId` is given, pays for an EXISTING one instead -- the latter is
-// what a discounted-but-not-free coupon redemption needs (see
-// src/app/account/actions.ts's redeemWalletCoupon, which already created
-// the row and applied the discount; this just completes payment for it).
-// Either way, this app owns the row's writes (same as subscriptions), then
-// hands off to services/payment, which owns the actual CCAvenue
-// integration and independently re-verifies the row before charging it --
-// see initiateWalletTopup in services/payment/src/ccavenuePayment.ts.
+// fresh pending wallet_topups row (the "Recharge" flow -- a preset or a
+// custom amount, see `amountPaise` below) or, when `topupId` is given,
+// pays for an EXISTING one instead -- the latter is what a discounted-
+// but-not-free coupon redemption needs (see src/app/account/actions.ts's
+// redeemWalletCoupon, which already created the row and applied the
+// discount; this just completes payment for it). Either way, this app
+// owns the row's writes (same as subscriptions), then hands off to
+// services/payment, which owns the actual CCAvenue integration and
+// independently re-verifies the row before charging it -- see
+// initiateWalletTopup in services/payment/src/ccavenuePayment.ts.
 async function handleInitiate(request: Request) {
   const supabase = await createClient();
   const {
@@ -43,6 +50,8 @@ async function handleInitiate(request: Request) {
   const body = await request.json().catch(() => null);
   const existingTopupId =
     typeof body?.topupId === "string" ? body.topupId : undefined;
+  const requestedAmountPaise =
+    typeof body?.amountPaise === "number" ? body.amountPaise : undefined;
 
   const admin = createAdminClient();
   let topupId: string;
@@ -67,7 +76,21 @@ async function handleInitiate(request: Request) {
     }
     topupId = topup.id;
   } else {
-    const topup = await createPendingWalletTopup(admin, user.id);
+    // A student-chosen custom amount -- bounds-checked here so a bad
+    // amount gets a real error message instead of silently falling back
+    // to the reference block; re-validated again, independently, by
+    // services/payment/src/ccavenuePayment.ts before any CCAvenue request
+    // is built, which is the actual trust boundary, not this check.
+    const amountPaise = requestedAmountPaise ?? BASE_RECHARGE_AMOUNT_PAISE;
+    if (!isValidRechargeAmountPaise(amountPaise)) {
+      return NextResponse.json(
+        {
+          error: `Enter an amount between ₹${MIN_RECHARGE_AMOUNT_PAISE / 100} and ₹${MAX_RECHARGE_AMOUNT_PAISE / 100}.`,
+        },
+        { status: 400 },
+      );
+    }
+    const topup = await createPendingWalletTopup(admin, user.id, amountPaise);
     if (!topup) {
       return NextResponse.json({ error: "Could not start payment" }, { status: 500 });
     }

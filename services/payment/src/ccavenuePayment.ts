@@ -5,12 +5,22 @@ export type InitiateResult =
   | { encRequest: string; accessCode: string; actionUrl: string }
   | { error: string };
 
-// Fixed top-up block -- confirmed explicitly, not a rate students can pick
-// an arbitrary amount against. Kept here (not just in the web app) since
-// this is also what gets validated against a wallet_topups row before
-// ever building a CCAvenue request -- see initiateWalletTopup below.
-const WALLET_TOPUP_AMOUNT_PAISE = 109_900; // ₹1,099
-const WALLET_TOPUP_TOKENS = 200_000;
+// Reimplemented from src/lib/walletPricing.ts (never shared across a
+// service boundary, same convention as every other cross-service
+// constant in this app) -- THIS is the actual trust boundary for a
+// wallet top-up's amount/tokens, not the web app's own insert. A student
+// can pick any custom amount within these bounds (see
+// initiateWalletTopup below); tokens are always re-derived from
+// amount_paise here, never trusted as stored, except for a coupon-
+// discounted row (see that check's own comment).
+const BASE_RECHARGE_AMOUNT_PAISE = 109_900; // ₹1,099
+const BASE_RECHARGE_TOKENS = 200_000;
+const MIN_RECHARGE_AMOUNT_PAISE = 10_000; // ₹100
+const MAX_RECHARGE_AMOUNT_PAISE = 1_000_000; // ₹10,000
+
+function tokensForAmountPaise(amountPaise: number): number {
+  return Math.round((amountPaise * BASE_RECHARGE_TOKENS) / BASE_RECHARGE_AMOUNT_PAISE);
+}
 
 // origin is the web app's own public origin (it knows this from the
 // incoming request it received from the browser; this service, being
@@ -98,16 +108,32 @@ export async function initiateWalletTopup(params: {
   if (!topup || topup.user_id !== params.userId || topup.status !== "pending_payment") {
     return { error: "No pending wallet top-up found" };
   }
-  // Re-validated against the fixed block, same "never trust a client-
-  // supplied amount" posture as initiatePayment -- the web app route that
-  // creates this row already writes WALLET_TOPUP_AMOUNT_PAISE/
-  // WALLET_TOPUP_TOKENS, but this is the actual trust boundary, not that
-  // route.
-  if (
-    topup.amount_paise !== WALLET_TOPUP_AMOUNT_PAISE ||
-    topup.tokens_credited !== WALLET_TOPUP_TOKENS
-  ) {
-    return { error: "Invalid wallet top-up amount" };
+
+  // A coupon-discounted row deliberately breaks the plain amount->tokens
+  // rate on purpose (full tokens_credited at a REDUCED amount_paise --
+  // see redeemWalletTopupCoupon in coupons.ts) -- detected by whether a
+  // coupon actually claimed THIS topup (coupon_codes.wallet_topup_id),
+  // which only that same function, in this same service, ever sets,
+  // under its own already-validated discount logic (bounded percent,
+  // amount only ever reduced from a row that passed the checks below
+  // when IT was created). Trusted as-is when that's the case; anything
+  // else must satisfy the plain rate and bounds exactly -- this is the
+  // actual trust boundary for amount/tokens, never the web app's own
+  // insert.
+  const { data: appliedCoupon } = await supabase
+    .from("coupon_codes")
+    .select("id")
+    .eq("wallet_topup_id", topup.id)
+    .maybeSingle();
+
+  if (!appliedCoupon) {
+    const amountInBounds =
+      Number.isInteger(topup.amount_paise) &&
+      topup.amount_paise >= MIN_RECHARGE_AMOUNT_PAISE &&
+      topup.amount_paise <= MAX_RECHARGE_AMOUNT_PAISE;
+    if (!amountInBounds || topup.tokens_credited !== tokensForAmountPaise(topup.amount_paise)) {
+      return { error: "Invalid wallet top-up amount" };
+    }
   }
 
   const orderId = `w_${topup.id}`;

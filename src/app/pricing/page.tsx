@@ -17,7 +17,7 @@ export const metadata = {
 const FAQS = [
   {
     q: "What are tokens?",
-    a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. A ₹1,099 recharge adds 200,000 of them to your balance.",
+    a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. ₹1,099 adds 200,000 of them to your balance -- recharge any amount from ₹100 to ₹10,000 and tokens scale proportionally.",
   },
   {
     q: "How are tokens calculated and consumed?",
@@ -93,6 +93,7 @@ export default function PricingPage() {
             </p>
             <p className="mt-1 text-sm text-foreground/68">prepaid, recharge anytime from your account</p>
             <ul className="mt-5 space-y-2.5 text-sm text-foreground/82">
+              <li>Or choose any amount from ₹100 to ₹10,000 -- tokens scale proportionally</li>
               <li>Tokens are spent only when you ask a question or request practice</li>
               <li>No monthly fee, no auto-renewal -- recharge only when you need to</li>
               <li>Unused tokens never expire</li>
