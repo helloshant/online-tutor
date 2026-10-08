@@ -30,7 +30,7 @@ export default async function CouponsPage() {
       <p className="mt-1 max-w-2xl text-sm text-foreground/75">
         Single-use discount codes — a student enters one on the{" "}
         <code className="rounded bg-brand/10 px-1 py-0.5 text-brand">/account</code> page to knock a percentage
-        off a ₹500/200,000-token wallet recharge, or credit the full 200,000 tokens for free outright with a
+        off a ₹1,099/200,000-token wallet recharge, or credit the full 200,000 tokens for free outright with a
         100% code. Each code works exactly once; once redeemed it can never be reused, even by the same
         student.
       </p>

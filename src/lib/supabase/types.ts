@@ -329,10 +329,13 @@ export type LlmProvider = "gemini" | "anthropic";
 
 // Prepaid LLM token wallet -- replaces student_usage_limits/subscriptions'
 // amount_paise as the thing that actually gates usage. balance_tokens is
-// money-denominated (₹500 = 200,000 tokens, see
-// services/observability/src/walletPricing.ts), so choosing "anthropic"
-// (pricier per real LLM token) burns this SAME balance faster rather than
-// costing a separate upgrade fee. See
+// money-denominated, pinned to the real COST of delivering LLM usage
+// (200,000 tokens costs ₹500 in real spend -- see
+// services/observability/src/walletPricing.ts's own comment on why this
+// stays fixed independent of the recharge price, currently ₹1,099, see
+// src/lib/walletTopup.ts), so choosing "anthropic" (pricier per real LLM
+// token) burns this SAME balance faster rather than costing a separate
+// upgrade fee. See
 // supabase/migrations/0055_student_wallets.sql -- every account always has
 // exactly one row (created alongside profiles by handle_new_tutorops_user),
 // starting at balance_tokens: 0, llm_provider: "gemini".

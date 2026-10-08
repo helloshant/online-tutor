@@ -5,7 +5,7 @@
 // separate copy of the same rate services/observability/src/walletPricing.ts
 // uses for the actual wallet-deduction math -- billing math stays owned by
 // that service; this one only ever feeds a label on a page.
-const USD_TO_INR_RATE = Number(process.env.USD_TO_INR_RATE) || 88; // as of 2026-10
+const USD_TO_INR_RATE = Number(process.env.USD_TO_INR_RATE) || 96; // as of 2026-10
 
 const INR_FORMATTER = new Intl.NumberFormat("en-IN", {
   style: "currency",

@@ -85,7 +85,7 @@ export interface RedeemWalletCouponState {
 // redeemWalletTopupCoupon for the actual claim/discount logic, and
 // supabase/migrations/0056_coupon_codes_wallet_topups.sql for why this
 // targets wallet_topups rather than subscriptions now. Creates a fresh
-// pending topup row up front (same fixed ₹500/200,000-token block the
+// pending topup row up front (same fixed ₹1,099/200,000-token block the
 // plain Recharge button creates) since a coupon needs something real to
 // discount -- an abandoned, never-paid row left behind by a student who
 // enters an invalid code or never completes payment is harmless, same as

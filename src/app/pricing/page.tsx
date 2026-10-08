@@ -5,19 +5,19 @@ import Link from "next/link";
 // component, every top-level public page builds its own. Describes the
 // prepaid token wallet that actually gates usage now (see
 // supabase/migrations/0055_student_wallets.sql and src/lib/walletTopup.ts
-// for the real ₹500/200,000-token numbers this page quotes), not the old
+// for the real ₹1,099/200,000-token numbers this page quotes), not the old
 // per-subject subscription fee -- board/grade/subject setup is free and
 // instant (src/app/onboarding/actions.ts no longer charges anything).
 export const metadata = {
   title: "Pricing — SyllabusMate",
   description:
-    "Free to set up. Pay only for what you use with a prepaid token wallet -- ₹500 for 200,000 tokens.",
+    "Free to set up. Pay only for what you use with a prepaid token wallet -- ₹1,099 for 200,000 tokens.",
 };
 
 const FAQS = [
   {
     q: "What are tokens?",
-    a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. A ₹500 recharge adds 200,000 of them to your balance.",
+    a: "Tokens are the currency your wallet holds -- every question you ask or practice set you generate spends some, based on how much work it takes to answer. A ₹1,099 recharge adds 200,000 of them to your balance.",
   },
   {
     q: "How are tokens calculated and consumed?",
@@ -89,7 +89,7 @@ export default function PricingPage() {
           <div className="rounded-2xl border border-brand bg-surface p-6 text-left shadow-sm">
             <p className="text-sm font-semibold text-brand">Token wallet</p>
             <p className="mt-2 text-3xl font-semibold">
-              ₹500 <span className="text-base font-normal text-foreground/68">= 200,000 tokens</span>
+              ₹1,099 <span className="text-base font-normal text-foreground/68">= 200,000 tokens</span>
             </p>
             <p className="mt-1 text-sm text-foreground/68">prepaid, recharge anytime from your account</p>
             <ul className="mt-5 space-y-2.5 text-sm text-foreground/82">

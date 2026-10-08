@@ -9,7 +9,7 @@ export type InitiateResult =
 // an arbitrary amount against. Kept here (not just in the web app) since
 // this is also what gets validated against a wallet_topups row before
 // ever building a CCAvenue request -- see initiateWalletTopup below.
-const WALLET_TOPUP_AMOUNT_PAISE = 50_000; // ₹500
+const WALLET_TOPUP_AMOUNT_PAISE = 109_900; // ₹1,099
 const WALLET_TOPUP_TOKENS = 200_000;
 
 // origin is the web app's own public origin (it knows this from the

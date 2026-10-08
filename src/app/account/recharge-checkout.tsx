@@ -50,7 +50,7 @@ export function RechargeCheckout() {
         disabled={loading}
         className="w-full rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-60"
       >
-        {loading ? "Redirecting to secure checkout…" : "Recharge ₹500 for 200,000 tokens"}
+        {loading ? "Redirecting to secure checkout…" : "Recharge ₹1,099 for 200,000 tokens"}
       </button>
       <p className="mt-3 text-center text-xs text-foreground/68">
         Payments are handled securely by CCAvenue. Your card/UPI details never touch our servers.

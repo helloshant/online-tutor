@@ -10,7 +10,7 @@ import type { Database } from "@/lib/supabase/types";
 // trusted from here) -- same "reimplement rather than share across a
 // service boundary" convention every other cross-service constant in this
 // app already follows.
-export const WALLET_TOPUP_AMOUNT_PAISE = 50_000; // ₹500
+export const WALLET_TOPUP_AMOUNT_PAISE = 109_900; // ₹1,099
 export const WALLET_TOPUP_TOKENS = 200_000;
 
 // Shared by /api/wallet/recharge/initiate (the plain "Recharge" button) and
