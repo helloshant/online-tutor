@@ -43,6 +43,21 @@ export default async function AccountPage() {
   const admin = createAdminClient();
   const wallet = staff ? null : await getWalletBalance(admin, user.id);
 
+  // Ordinary session client -- RLS already lets a student read their own
+  // wallet_topups rows (0055_student_wallets.sql). Completed recharges only
+  // (a pending/abandoned one has no receipt to show); each links to
+  // /api/wallet/receipt/[topupId], which re-derives the PDF from this same
+  // row rather than anything stored here.
+  const { data: topupHistory } = staff
+    ? { data: null }
+    : await supabase
+        .from("wallet_topups")
+        .select("id, amount_paise, tokens_credited, activated_at")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("activated_at", { ascending: false })
+        .limit(20);
+
   const [{ data: board }, { data: grade }, { data: subjectRows }] = subscription
     ? await Promise.all([
         supabase
@@ -168,6 +183,41 @@ export default async function AccountPage() {
               <AiModelSwitcher currentProvider={wallet.provider} />
             </div>
           </div>
+
+          {topupHistory && topupHistory.length > 0 && (
+            <div className="mt-5 rounded-xl border border-border bg-surface p-4 sm:p-5">
+              <h2 className="text-sm font-semibold">Recharge history</h2>
+              <ul className="mt-2.5 divide-y divide-border">
+                {topupHistory.map((topup) => (
+                  <li key={topup.id} className="flex items-center justify-between gap-4 py-2.5 text-sm">
+                    <div>
+                      <p>
+                        ₹{(topup.amount_paise / 100).toFixed(2)}{" "}
+                        <span className="text-foreground/68">
+                          · {topup.tokens_credited.toLocaleString()} tokens
+                        </span>
+                      </p>
+                      <p className="text-xs text-foreground/68">
+                        {topup.activated_at
+                          ? new Date(topup.activated_at).toLocaleDateString("en-IN", {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : "—"}
+                      </p>
+                    </div>
+                    <a
+                      href={`/api/wallet/receipt/${topup.id}`}
+                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground/82 hover:bg-brand/5"
+                    >
+                      Download receipt
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
 
