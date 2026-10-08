@@ -16,7 +16,7 @@ const FEATURES = [
   },
   {
     title: "Simple, transparent pricing",
-    body: "Free setup, then a prepaid token wallet -- ₹1,099 for 200,000 tokens. No monthly fees.",
+    body: "Free setup, then a prepaid token wallet -- ₹1,099 + GST for 200,000 tokens. No monthly fees.",
   },
 ];
 

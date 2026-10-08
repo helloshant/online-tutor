@@ -3,8 +3,10 @@
 import { useRef, useState } from "react";
 import {
   BASE_RECHARGE_AMOUNT_PAISE,
+  GST_RATE,
   MAX_RECHARGE_AMOUNT_PAISE,
   MIN_RECHARGE_AMOUNT_PAISE,
+  chargeAmountPaiseForBase,
   isValidRechargeAmountPaise,
   tokensForAmountPaise,
 } from "@/lib/walletPricing";
@@ -42,6 +44,12 @@ export function RechargeCheckout() {
   const amountPaise = customMode ? Math.round(Number(customRupees || 0) * 100) : selectedPaise;
   const amountValid = customMode ? isValidRechargeAmountPaise(amountPaise) : true;
   const tokens = tokensForAmountPaise(amountPaise);
+  // amountPaise above is always the BASE (pre-GST) price -- GST is added on
+  // top to get what's actually charged; see GST_RATE's own comment in
+  // walletPricing.ts. Preview only -- the real charge is computed server-
+  // side the same way (createPendingWalletTopup in src/lib/walletTopup.ts).
+  const chargePaise = chargeAmountPaiseForBase(amountPaise);
+  const gstPaise = chargePaise - amountPaise;
 
   async function startPayment() {
     if (!amountValid) return;
@@ -139,7 +147,8 @@ export function RechargeCheckout() {
       <p className="mt-3 text-sm text-foreground/75">
         {amountValid ? (
           <>
-            ₹{(amountPaise / 100).toLocaleString()} gets you{" "}
+            ₹{(amountPaise / 100).toLocaleString()} + GST ({(GST_RATE * 100).toFixed(0)}%: ₹
+            {(gstPaise / 100).toFixed(2)}) = ₹{(chargePaise / 100).toFixed(2)}, gets you{" "}
             <span className="font-medium text-foreground">{tokens.toLocaleString()} tokens</span>.
           </>
         ) : (
@@ -155,7 +164,7 @@ export function RechargeCheckout() {
         disabled={loading || !amountValid}
         className="mt-3 w-full rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-60"
       >
-        {loading ? "Redirecting to secure checkout…" : `Recharge ₹${(amountPaise / 100).toLocaleString()}`}
+        {loading ? "Redirecting to secure checkout…" : `Recharge ₹${(chargePaise / 100).toFixed(2)}`}
       </button>
       <p className="mt-3 text-center text-xs text-foreground/68">
         Payments are handled securely by CCAvenue. Your card/UPI details never touch our servers.

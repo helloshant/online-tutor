@@ -9,17 +9,34 @@ export type InitiateResult =
 // service boundary, same convention as every other cross-service
 // constant in this app) -- THIS is the actual trust boundary for a
 // wallet top-up's amount/tokens, not the web app's own insert. A student
-// can pick any custom amount within these bounds (see
-// initiateWalletTopup below); tokens are always re-derived from
-// amount_paise here, never trusted as stored, except for a coupon-
-// discounted row (see that check's own comment).
+// can pick any custom BASE amount within these bounds (see
+// initiateWalletTopup below); tokens are always re-derived from it, never
+// trusted as stored, except for a coupon-discounted row (see that
+// check's own comment).
 const BASE_RECHARGE_AMOUNT_PAISE = 109_900; // ₹1,099
 const BASE_RECHARGE_TOKENS = 200_000;
 const MIN_RECHARGE_AMOUNT_PAISE = 10_000; // ₹100
 const MAX_RECHARGE_AMOUNT_PAISE = 1_000_000; // ₹10,000
+// 18% GST, added on top of whatever BASE amount a student picks -- see
+// GST_RATE's own comment in src/lib/walletPricing.ts for why tokens stay
+// pinned to the base rather than this GST-inclusive total.
+const GST_MULTIPLIER = 118; // base/100 * 118 == base * 1.18, exact integer math
 
 function tokensForAmountPaise(amountPaise: number): number {
   return Math.round((amountPaise * BASE_RECHARGE_TOKENS) / BASE_RECHARGE_AMOUNT_PAISE);
+}
+
+// wallet_topups.amount_paise stores the GST-INCLUSIVE charge (what
+// CCAvenue actually collects) -- this recovers the original BASE price a
+// student picked, the exact inverse of src/lib/walletPricing.ts's own
+// chargeAmountPaiseForBase. Only comes out as a clean multiple of 100
+// (a whole number of rupees) when chargeAmountPaise was genuinely
+// produced by that function from a valid base; anything else (tampered,
+// malformed, or simply never a legitimate GST-inclusive charge) fails
+// the bounds/whole-rupee check below, which is the actual validation --
+// no separate round-trip check needed.
+function baseAmountPaiseFromCharge(chargeAmountPaise: number): number {
+  return (chargeAmountPaise / GST_MULTIPLIER) * 100;
 }
 
 // origin is the web app's own public origin (it knows this from the
@@ -127,11 +144,17 @@ export async function initiateWalletTopup(params: {
     .maybeSingle();
 
   if (!appliedCoupon) {
+    // amount_paise is the GST-INCLUSIVE charge (see createPendingWalletTopup
+    // in src/lib/walletTopup.ts) -- recover the BASE price first before
+    // validating bounds/whole-rupee-ness and the proportional token count,
+    // both of which are defined in terms of the base, not the inclusive total.
+    const baseAmountPaise = baseAmountPaiseFromCharge(topup.amount_paise);
     const amountInBounds =
-      Number.isInteger(topup.amount_paise) &&
-      topup.amount_paise >= MIN_RECHARGE_AMOUNT_PAISE &&
-      topup.amount_paise <= MAX_RECHARGE_AMOUNT_PAISE;
-    if (!amountInBounds || topup.tokens_credited !== tokensForAmountPaise(topup.amount_paise)) {
+      Number.isInteger(baseAmountPaise) &&
+      baseAmountPaise % 100 === 0 &&
+      baseAmountPaise >= MIN_RECHARGE_AMOUNT_PAISE &&
+      baseAmountPaise <= MAX_RECHARGE_AMOUNT_PAISE;
+    if (!amountInBounds || topup.tokens_credited !== tokensForAmountPaise(baseAmountPaise)) {
       return { error: "Invalid wallet top-up amount" };
     }
   }
