@@ -11,6 +11,20 @@ import type { ProfileRole } from "@/lib/supabase/types";
 
 const VALID_ROLES: ProfileRole[] = ["user", "admin", "superadmin"];
 
+// Shared return shape for every subscription-editing action below --
+// reported directly: these were all plain void-returning fire-and-forget
+// actions on native forms with no useActionState wiring, so a click gave
+// no pressed/pending state and no feedback once the action actually
+// finished (silent success, silent no-op alike). Each now returns this so
+// its form can show the student a brief confirmation or error via
+// useActionState, and SubmitButton (src/app/admin/users/[id]/
+// submit-button.tsx) gives every one of them the same pending/disabled
+// press state via useFormStatus.
+export interface AdminActionState {
+  error?: string;
+  success?: string;
+}
+
 // Role changes are superadmin-only -- a plain admin cannot create more
 // admins or superadmins. This check is UX; the database enforces the same
 // rule unconditionally via the profiles_role_change_guard trigger, so this
@@ -41,7 +55,10 @@ export async function setUserRole(userId: string, role: ProfileRole) {
   revalidatePath(`/admin/users/${userId}`);
 }
 
-export async function cancelSubscription(subscriptionId: string, userId: string) {
+export async function cancelSubscription(
+  subscriptionId: string,
+  userId: string,
+): Promise<AdminActionState> {
   await requireAdminPage("users");
   const supabase = await createClient();
   await supabase
@@ -50,6 +67,7 @@ export async function cancelSubscription(subscriptionId: string, userId: string)
     .eq("id", subscriptionId);
   revalidatePath("/admin");
   revalidatePath(`/admin/users/${userId}`);
+  return { success: "Subscription cancelled." };
 }
 
 // Admin-side counterpart to /api/razorpay/verify's activation -- same two
@@ -60,7 +78,10 @@ export async function cancelSubscription(subscriptionId: string, userId: string)
 // actually paid for. Scoped to a currently-pending subscription, same as
 // the real activation route, so this can't accidentally reactivate a
 // cancelled one.
-export async function activateSubscriptionWithoutPayment(subscriptionId: string, userId: string) {
+export async function activateSubscriptionWithoutPayment(
+  subscriptionId: string,
+  userId: string,
+): Promise<AdminActionState> {
   await requireAdminPage("users");
   const supabase = await createClient();
   await supabase
@@ -70,6 +91,7 @@ export async function activateSubscriptionWithoutPayment(subscriptionId: string,
     .eq("status", "pending_payment");
   revalidatePath("/admin");
   revalidatePath(`/admin/users/${userId}`);
+  return { success: "Subscription activated." };
 }
 
 // Lets an admin add/remove subjects on a subscription after the fact --
@@ -80,19 +102,20 @@ export async function activateSubscriptionWithoutPayment(subscriptionId: string,
 // two, but this is re-checked here too, same "don't trust the UI alone"
 // posture as every other admin write) -- editing a cancelled/expired
 // subscription's subjects has no effect on anything.
-export async function updateSubscriptionSubjects(subscriptionId: string, userId: string, formData: FormData) {
+export async function updateSubscriptionSubjects(
+  subscriptionId: string,
+  userId: string,
+  _prevState: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
   await requireAdminPage("users");
   const supabase = await createClient();
 
   const requestedSubjectIds = formData.getAll("subjectIds").map(String).filter(Boolean);
   if (requestedSubjectIds.length === 0) {
     // A subscription always needs at least one subject -- same requirement
-    // onboarding enforces when a student first picks their subjects. Rather
-    // than surface a form error (this page's other admin forms are plain
-    // fire-and-forget actions, no useActionState wiring), just no-op: the
-    // revalidated page re-renders with the previous, still-valid selection
-    // checked.
-    return;
+    // onboarding enforces when a student first picks their subjects.
+    return { error: "Select at least one subject." };
   }
 
   const { data: subscription } = await supabase
@@ -101,7 +124,9 @@ export async function updateSubscriptionSubjects(subscriptionId: string, userId:
     .eq("id", subscriptionId)
     .in("status", ["active", "pending_payment"])
     .maybeSingle();
-  if (!subscription) return;
+  if (!subscription) {
+    return { error: "This subscription can no longer be edited." };
+  }
 
   // Same server-side guard onboarding's confirmSelection uses: don't let a
   // tampered request attach a subject that isn't actually offered for this
@@ -113,7 +138,9 @@ export async function updateSubscriptionSubjects(subscriptionId: string, userId:
     .eq("grade_id", subscription.grade_id)
     .in("subject_id", requestedSubjectIds);
   const validSubjectIds = (validOfferings ?? []).map((o) => o.subject_id);
-  if (validSubjectIds.length === 0) return;
+  if (validSubjectIds.length === 0) {
+    return { error: "None of the selected subjects are offered for this board and grade." };
+  }
 
   await supabase.from("subscription_subjects").delete().eq("subscription_id", subscriptionId);
   await supabase
@@ -139,6 +166,7 @@ export async function updateSubscriptionSubjects(subscriptionId: string, userId:
 
   revalidatePath("/admin");
   revalidatePath(`/admin/users/${userId}`);
+  return { success: "Subjects updated." };
 }
 
 // Lets an admin/superadmin correct a student's board and grade after the
@@ -147,13 +175,20 @@ export async function updateSubscriptionSubjects(subscriptionId: string, userId:
 // the UI alone" posture as updateSubscriptionSubjects above: only offered
 // (and re-checked here) for a subscription that's still 'active' or
 // 'pending_payment'.
-export async function updateSubscriptionBoardGrade(subscriptionId: string, userId: string, formData: FormData) {
+export async function updateSubscriptionBoardGrade(
+  subscriptionId: string,
+  userId: string,
+  _prevState: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
   await requireAdminPage("users");
   const supabase = await createClient();
 
   const boardId = String(formData.get("boardId") ?? "");
   const gradeId = String(formData.get("gradeId") ?? "");
-  if (!boardId || !gradeId) return;
+  if (!boardId || !gradeId) {
+    return { error: "Select a board and grade." };
+  }
 
   const { data: subscription } = await supabase
     .from("subscriptions")
@@ -161,7 +196,9 @@ export async function updateSubscriptionBoardGrade(subscriptionId: string, userI
     .eq("id", subscriptionId)
     .in("status", ["active", "pending_payment"])
     .maybeSingle();
-  if (!subscription) return;
+  if (!subscription) {
+    return { error: "This subscription can no longer be edited." };
+  }
 
   // A subject valid under the old board/grade isn't guaranteed to still be
   // offered under the new one (e.g. a subject that doesn't exist at the
@@ -191,7 +228,12 @@ export async function updateSubscriptionBoardGrade(subscriptionId: string, userI
   // can actually be used for. The admin should pick a subject list that
   // has at least some overlap, or edit subjects on the target board/grade
   // in a separate step first.
-  if (validSubjectIds.length === 0) return;
+  if (validSubjectIds.length === 0) {
+    return {
+      error:
+        "None of the current subjects are offered for the selected board and grade. Edit subjects for the target board/grade separately first.",
+    };
+  }
 
   await supabase.from("subscriptions").update({ board_id: boardId, grade_id: gradeId }).eq("id", subscriptionId);
 
@@ -220,6 +262,7 @@ export async function updateSubscriptionBoardGrade(subscriptionId: string, userI
 
   revalidatePath("/admin");
   revalidatePath(`/admin/users/${userId}`);
+  return { success: "Board and grade updated." };
 }
 
 export async function createUser(formData: FormData) {

@@ -3,19 +3,21 @@ import { notFound } from "next/navigation";
 import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  activateSubscriptionWithoutPayment,
-  cancelSubscription,
   deleteUser,
   grantWalletTokens,
   sendPasswordResetEmail,
   setAccountExpired,
   setUserRole,
-  updateSubscriptionBoardGrade,
-  updateSubscriptionSubjects,
   updateUserProfile,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SetPasswordForm } from "./set-password-form";
+import {
+  ActivateSubscriptionForm,
+  BoardGradeEditorForm,
+  CancelSubscriptionForm,
+  SubjectEditorForm,
+} from "./subscription-forms";
 import type { ProfileRole } from "@/lib/supabase/types";
 
 const ROLE_LABEL: Record<ProfileRole, string> = {
@@ -346,34 +348,10 @@ async function SubscriptionCard({
           <span className="text-sm text-foreground/75">{new Date(row.created_at).toLocaleDateString()}</span>
         </div>
         {row.status === "active" && (
-          <form
-            action={async () => {
-              "use server";
-              await cancelSubscription(row.id, userId);
-            }}
-          >
-            <button
-              type="submit"
-              className="rounded-lg border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-            >
-              Cancel subscription
-            </button>
-          </form>
+          <CancelSubscriptionForm subscriptionId={row.id} userId={userId} />
         )}
         {row.status === "pending_payment" && (
-          <form
-            action={async () => {
-              "use server";
-              await activateSubscriptionWithoutPayment(row.id, userId);
-            }}
-          >
-            <button
-              type="submit"
-              className="rounded-lg border border-green-200 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-            >
-              Activate without payment
-            </button>
-          </form>
+          <ActivateSubscriptionForm subscriptionId={row.id} userId={userId} />
         )}
       </div>
 
@@ -452,51 +430,14 @@ function BoardGradeEditor({
       <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/75 hover:bg-brand/5">
         Edit board / grade
       </summary>
-      <form
-        action={updateSubscriptionBoardGrade.bind(null, subscriptionId, userId)}
-        className="space-y-3 border-t border-border p-3"
-      >
-        <div className="flex flex-wrap gap-3">
-          <label className="flex flex-col gap-1 text-xs text-foreground/75">
-            Board
-            <select
-              name="boardId"
-              defaultValue={boardId}
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-            >
-              {boards.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-foreground/75">
-            Grade
-            <select
-              name="gradeId"
-              defaultValue={gradeId}
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-            >
-              {grades.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
-            Save board / grade
-          </button>
-          <p className="text-xs text-foreground/65">
-            Subjects not offered under the new board/grade are dropped automatically. If none of the
-            current subjects carry over, the change is blocked -- adjust subjects for the target
-            board/grade separately first.
-          </p>
-        </div>
-      </form>
+      <BoardGradeEditorForm
+        subscriptionId={subscriptionId}
+        userId={userId}
+        boardId={boardId}
+        gradeId={gradeId}
+        boards={boards}
+        grades={grades}
+      />
     </details>
   );
 }
@@ -541,28 +482,12 @@ async function SubjectEditor({
       <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground/75 hover:bg-brand/5">
         Edit subjects
       </summary>
-      <form
-        action={updateSubscriptionSubjects.bind(null, subscriptionId, userId)}
-        className="space-y-2 border-t border-border p-3"
-      >
-        <div className="flex flex-wrap gap-2">
-          {options.map((s) => (
-            <label
-              key={s.id}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs has-[:checked]:border-brand has-[:checked]:bg-brand/5"
-            >
-              <input type="checkbox" name="subjectIds" value={s.id} defaultChecked={currentSubjectIds.has(s.id)} />
-              {s.name}
-            </label>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark">
-            Save subjects
-          </button>
-          <p className="text-xs text-foreground/65">At least one subject must stay selected.</p>
-        </div>
-      </form>
+      <SubjectEditorForm
+        subscriptionId={subscriptionId}
+        userId={userId}
+        options={options}
+        currentSubjectIds={currentSubjectIds}
+      />
     </details>
   );
 }
