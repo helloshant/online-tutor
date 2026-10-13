@@ -32,7 +32,22 @@ export type SubscriptionStatus =
   | "cancelled"
   | "expired";
 export type ProfileRole = "user" | "admin" | "superadmin";
-export type ChatRole = "user" | "assistant";
+// "topic_summary" added for a persisted topic bubble (see
+// 0067_persist_topic_summaries_and_exercises.sql) -- its own `content` is
+// the summary text, never a literal exchange with the tutor.
+export type ChatRole = "user" | "assistant" | "topic_summary";
+
+// Mirrors PracticeExerciseItem (src/app/dashboard/topic-practice.tsx) --
+// redefined here rather than imported since that file is client-only
+// ("use client") and this one has to stay importable from server code.
+// Kept in sync with chat_messages.exercises, see that column's own
+// comment.
+export type StoredExercise = {
+  id: string;
+  question: string;
+  answer: string;
+  type?: "MCQ" | "short_answer" | "long_answer" | "numerical" | null;
+};
 
 // Plain `type` object literals (not `interface`) — Supabase's client types
 // check `Row extends Record<string, unknown>` structurally, which
@@ -173,6 +188,11 @@ export type ChatMessage = {
   board_id: string | null;
   grade_id: string | null;
   medium: Medium | null;
+  // Set only on a role: "topic_summary" row -- see that column's own
+  // comment in 0067_persist_topic_summaries_and_exercises.sql.
+  topic_id: string | null;
+  prefer_english: boolean;
+  exercises: StoredExercise[] | null;
 };
 
 export type AnswerValidationStatus =
@@ -828,6 +848,12 @@ export interface Database {
             foreignKeyName: "chat_messages_subject_id_fkey";
             columns: ["subject_id"];
             referencedRelation: "subjects";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_messages_topic_id_fkey";
+            columns: ["topic_id"];
+            referencedRelation: "syllabus_topics";
             referencedColumns: ["id"];
           },
         ];

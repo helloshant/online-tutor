@@ -87,6 +87,8 @@ export function TopicSummaryMessage({
   previewMedium,
   onSummaryLoaded,
   onExercisesChanged,
+  restoredSummary,
+  restoredExercises,
 }: {
   topic: SyllabusTopic;
   preferEnglish: boolean;
@@ -137,10 +139,20 @@ export function TopicSummaryMessage({
   // TopicPractice sees the FULL combined list (this component's initial
   // batch plus whatever PatternPicker adds on demand underneath it).
   onExercisesChanged?: (exercises: PracticeExerciseItem[]) => void;
+  // Set only when this topic's summary/exercises were already persisted
+  // (a reload -- see chat-panel.tsx's own history-load effect) -- seeds
+  // this component's initial state directly instead of starting the
+  // "Relevant Exercises" wizard over, and skips the first summary fetch
+  // entirely (see the fetch effect below). Deliberately NOT restoring the
+  // full wizard navigation state (which sub-topic pill was picked, etc.)
+  // -- only the flat "all exercises" end state, same shape as a chapter
+  // with no real sub-topic data at all already renders.
+  restoredSummary?: string;
+  restoredExercises?: PracticeExerciseItem[];
 }) {
-  const [summary, setSummary] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(restoredSummary ?? null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [loadingSummary, setLoadingSummary] = useState(!restoredSummary);
 
   // "Relevant Exercises" used to first list every OTHER topic sharing this
   // topic's `chapter` (e.g. every other poem in a reader like "Malhar"),
@@ -153,7 +165,7 @@ export function TopicSummaryMessage({
   // `[topic]` -- kept as an array (rather than dropped) only because the
   // "N sibling topics" back-link JSX below still reads its length.
   const [chapterTopics, setChapterTopics] = useState<SyllabusTopic[] | null>(
-    null,
+    restoredExercises?.length ? [topic] : null,
   );
   const [chapterTopicsError, setChapterTopicsError] = useState<string | null>(
     null,
@@ -169,7 +181,7 @@ export function TopicSummaryMessage({
   // quick "show me practice for X" glance, not the same as clicking X in
   // the sidebar itself.
   const [selectedExerciseTopic, setSelectedExerciseTopic] =
-    useState<SyllabusTopic | null>(null);
+    useState<SyllabusTopic | null>(restoredExercises?.length ? topic : null);
 
   // The selected topic's own sub-topic breakdown (see
   // /api/topics/[id]/exercises/subtopics) -- null while still loading
@@ -177,16 +189,18 @@ export function TopicSummaryMessage({
   // with no real sub-topic data at all (in which case selectedSubtopic
   // below is set straight to {kind:"all"} and the picker below never
   // renders -- same flat behavior as before this feature existed).
-  const [subtopics, setSubtopics] = useState<SubtopicOption[] | null>(null);
+  const [subtopics, setSubtopics] = useState<SubtopicOption[] | null>(
+    restoredExercises?.length ? [] : null,
+  );
   const [loadingSubtopics, setLoadingSubtopics] = useState(false);
   // Which pill was clicked -- null means the pill row above is still what
   // should show (only possible when subtopics is non-empty; see
   // handleSelectExerciseTopic).
   const [selectedSubtopic, setSelectedSubtopic] =
-    useState<SubtopicSelection | null>(null);
+    useState<SubtopicSelection | null>(restoredExercises?.length ? { kind: "all" } : null);
 
   const [exercises, setExercises] = useState<PracticeExerciseItem[] | null>(
-    null,
+    restoredExercises?.length ? restoredExercises : null,
   );
   const [exercisesError, setExercisesError] = useState<string | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
@@ -236,7 +250,17 @@ export function TopicSummaryMessage({
   >(null);
   const [loadingFilter, setLoadingFilter] = useState(false);
 
+  // Skips the very first run when a restored summary was already handed in
+  // (a reload, see restoredSummary's own comment) -- still fetches
+  // normally on every later preferEnglish flip, same as a fresh bubble.
+  const skippedRestoredFetchRef = useRef(false);
   useEffect(() => {
+    if (!skippedRestoredFetchRef.current && restoredSummary) {
+      skippedRestoredFetchRef.current = true;
+      return;
+    }
+    skippedRestoredFetchRef.current = true;
+
     let cancelled = false;
 
     (async () => {
@@ -266,6 +290,14 @@ export function TopicSummaryMessage({
     return () => {
       cancelled = true;
     };
+    // restoredSummary deliberately left out -- it's only ever read once,
+    // on this effect's very first run (see skippedRestoredFetchRef above),
+    // to decide whether to skip that one fetch. Listing it as a dependency
+    // would make a later parent re-render (once a fresh bubble's own fetch
+    // finishes and the parent stores its summary back onto this same
+    // entry, see chat-panel.tsx's handleTopicSummaryLoaded) re-run this
+    // effect and re-fetch a summary that's already loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topic.id, preferEnglish]);
 
   // Fires onSummaryLoaded once the placeholder-to-real-content swap above

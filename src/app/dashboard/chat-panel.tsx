@@ -200,6 +200,23 @@ type TimelineEntry =
       preferEnglish: boolean;
       summary?: string;
       exercises?: ExerciseContextItem[];
+      // The chat_messages row id this bubble has been persisted as, once
+      // its summary successfully saves (see handleTopicSummaryLoaded) --
+      // undefined for a bubble whose summary is still loading/failed, or
+      // loaded from history already carrying its own real row id (see the
+      // history-load effect below). Needed to PATCH exercises onto the
+      // right row as TopicPractice's own list grows underneath this
+      // bubble (see handleTopicExercisesChanged).
+      messageId?: string;
+      // Set ONLY when this entry was reconstructed from a persisted
+      // chat_messages row on mount (see the history-load effect below) --
+      // a one-time seed for TopicSummaryMessage's own initial state,
+      // never touched again afterward (same "seed, not a live binding"
+      // convention MessageBubble's own initialExercises already follows).
+      // Lets a reload skip straight to "exercises already shown" instead
+      // of starting the whole Relevant-Exercises wizard over from
+      // nothing -- see TopicSummaryMessage's own comment on this prop.
+      restoredExercises?: PracticeExerciseItem[];
     };
 
 // Mirrors ENGLISH_SUBJECT_CODE in src/lib/studentScope.ts, which is the
@@ -496,9 +513,13 @@ export function ChatPanel({
       // student's subscription; a staff preview of one board/grade
       // (boardId/gradeId set, its own separate thread); or unrestricted
       // staff mode (neither set).
+      // syllabus_topics(...) embed resolves a persisted topic-summary
+      // bubble's full topic row via its own topic_id FK (see
+      // 0067_persist_topic_summaries_and_exercises.sql) -- null for every
+      // ordinary 'user'/'assistant' row, which has no topic_id at all.
       let query = supabase
         .from("chat_messages")
-        .select("*")
+        .select("*, syllabus_topics(id, board_id, grade_id, subject_id, medium, chapter, topic, sort_order, created_at)")
         .eq("user_id", user.id)
         .eq("subject_id", subject.id);
       if (subscriptionId) {
@@ -518,11 +539,31 @@ export function ChatPanel({
 
       const { data } = await query.order("created_at", { ascending: true });
       if (!cancelled) {
+        const rows = (data ?? []) as (ChatMessage & { syllabus_topics: SyllabusTopic | null })[];
         setTimeline(
-          ((data as ChatMessage[]) ?? []).map((message) => ({
-            kind: "message",
-            message,
-          })),
+          rows.flatMap((row): TimelineEntry[] => {
+            const { syllabus_topics, ...message } = row;
+            if (row.role === "topic_summary") {
+              // A deleted/renamed topic (syllabus_topics is null) has
+              // nothing left to render this bubble against -- dropped
+              // rather than shown broken, same "fail open by omitting"
+              // posture every other best-effort restore in this app takes.
+              if (!syllabus_topics) return [];
+              return [
+                {
+                  kind: "topic",
+                  entryId: row.id,
+                  messageId: row.id,
+                  topic: syllabus_topics,
+                  preferEnglish: row.prefer_english,
+                  summary: row.content,
+                  exercises: (row.exercises ?? []).map((e) => ({ question: e.question, answer: e.answer })),
+                  restoredExercises: row.exercises ?? undefined,
+                },
+              ];
+            }
+            return [{ kind: "message", message }];
+          }),
         );
         setLoadingHistory(false);
       }
@@ -636,8 +677,16 @@ export function ChatPanel({
   // own comment on why this needs a real content-height commit first).
   // `summary` is null on a failed fetch -- stored as undefined either way
   // (TimelineEntry's own `summary?: string`), same as it starting out.
+  //
+  // A successful load is also persisted (POST /api/chat/topic-summary) so
+  // this bubble survives a reload -- see TimelineEntry's own messageId
+  // comment. Fire-and-forget/fail-open, same posture as every other
+  // non-essential side effect in this app (answer-bank writes, caching):
+  // a failed save just means this one bubble won't be there next time,
+  // never something worth blocking or erroring the chat over, since the
+  // student already has their summary on screen right now either way.
   const handleTopicSummaryLoaded = useCallback(
-    (entryId: string, summary: string | null) => {
+    (entryId: string, topicId: string, preferEnglish: boolean, summary: string | null) => {
       scrollToBottom();
       setTimeline((prev) =>
         prev.map((entry) =>
@@ -646,8 +695,34 @@ export function ChatPanel({
             : entry,
         ),
       );
+      if (!summary) return;
+      (async () => {
+        try {
+          const res = await fetch("/api/chat/topic-summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              topicId,
+              summary,
+              preferEnglish,
+              previewBoardId: boardId ?? undefined,
+              previewGradeId: gradeId ?? undefined,
+              previewMedium: medium ?? undefined,
+            }),
+          });
+          const body = await res.json().catch(() => null);
+          if (!res.ok || typeof body?.id !== "string") return;
+          setTimeline((prev) =>
+            prev.map((entry) =>
+              entry.kind === "topic" && entry.entryId === entryId ? { ...entry, messageId: body.id } : entry,
+            ),
+          );
+        } catch (err) {
+          console.error("Failed to persist topic-summary bubble:", err);
+        }
+      })();
     },
-    [scrollToBottom],
+    [scrollToBottom, boardId, gradeId, medium],
   );
 
   // Keeps a topic bubble's own `exercises` field mirroring whatever
@@ -655,6 +730,11 @@ export function ChatPanel({
   // TimelineEntry's own comment and performSend's exerciseContext below.
   // Trims each item down to question/answer only (ExerciseContextItem),
   // dropping id/type, since nothing past this point needs them.
+  //
+  // Also PATCHes the full list onto this bubble's persisted row (once it
+  // has one -- see messageId's own comment) so a reload restores exactly
+  // what was shown, not just the summary text. Fire-and-forget/fail-open,
+  // same reasoning as handleTopicSummaryLoaded above.
   const handleTopicExercisesChanged = useCallback(
     (entryId: string, exercises: PracticeExerciseItem[]) => {
       setTimeline((prev) =>
@@ -670,6 +750,21 @@ export function ChatPanel({
             : entry,
         ),
       );
+      // Read from the ref (always the latest committed timeline, see its
+      // own effect above), not the `prev` just mapped over above -- purely
+      // for the messageId lookup, so this stays a plain read with no risk
+      // of running twice under React's dev-mode double-invoke of state
+      // updater functions.
+      const current = timelineRef.current.find((entry) => entry.kind === "topic" && entry.entryId === entryId);
+      const messageId = current?.kind === "topic" ? current.messageId : undefined;
+      if (!messageId) return;
+      fetch(`/api/chat/${messageId}/exercises`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exercises }),
+      }).catch((err) => {
+        console.error("Failed to persist topic-bubble exercises:", err);
+      });
     },
     [],
   );
@@ -779,6 +874,9 @@ export function ChatPanel({
         role: "user",
         content: trimmed || "[Image]",
         created_at: new Date().toISOString(),
+        topic_id: null,
+        prefer_english: false,
+        exercises: null,
       };
       setTimeline((prev) => [
         ...prev,
@@ -1132,8 +1230,10 @@ export function ChatPanel({
                 previewBoardId={boardId}
                 previewGradeId={gradeId}
                 previewMedium={medium}
+                restoredSummary={entry.messageId ? entry.summary : undefined}
+                restoredExercises={entry.restoredExercises}
                 onSummaryLoaded={(summary) =>
-                  handleTopicSummaryLoaded(entry.entryId, summary)
+                  handleTopicSummaryLoaded(entry.entryId, entry.topic.id, entry.preferEnglish, summary)
                 }
                 onExercisesChanged={(exercises) =>
                   handleTopicExercisesChanged(entry.entryId, exercises)
