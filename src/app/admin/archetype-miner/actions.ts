@@ -15,6 +15,8 @@ import {
   startCurriculumReconciliation,
   attachChapterMapping,
   ignoreUnmatchedChapter,
+  attachTopicMapping,
+  ignoreUnmatchedTopic,
   startOffScopeContentScan,
   startTopicTranslation,
   startPatternTranslation,
@@ -561,6 +563,45 @@ export async function ignoreUnmatchedChapterAction(formData: FormData): Promise<
   }
   await ignoreUnmatchedChapter({ boardName, gradeName, subjectName, chapter });
   revalidatePath("/admin/archetype-miner/unmatched-chapters");
+}
+
+// See the service's own topicReconciliation.ts for what this fixes --
+// a mined curriculum.topic sitting under a shared "book section" chapter
+// that doesn't identify which real topic it belongs to without reading
+// the question itself. Same shape as attachChapterMappingAction above,
+// one level deeper: writes the chosen real topic onto curriculum.chapter
+// (not topic -- the mined topic value stays exactly as it was).
+export async function attachTopicMappingAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  const chapter = ((formData.get("chapter") as string | null) ?? "").trim();
+  const fromTopic = ((formData.get("fromTopic") as string | null) ?? "").trim();
+  const toTopic = ((formData.get("toTopic") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName || !chapter || !fromTopic || !toTopic) {
+    throw new Error("Board, grade, subject, the chapter, the mined topic, and the real topic to attach to are all required.");
+  }
+  await attachTopicMapping({ boardName, gradeName, subjectName, chapter, fromTopic, toTopic });
+  revalidatePath("/admin/archetype-miner/unmatched-topics");
+}
+
+// See TOPIC_UNMATCHED_IGNORED_FLAG's own comment for what "ignore" means
+// here -- a reviewed, deliberate "no real topic match exists," not a
+// silent skip. Same foreground-throws-on-failure posture as
+// attachTopicMappingAction above.
+export async function ignoreUnmatchedTopicAction(formData: FormData): Promise<void> {
+  await requireAdminPage("archetype_miner");
+  const boardName = ((formData.get("boardName") as string | null) ?? "").trim();
+  const gradeName = ((formData.get("gradeName") as string | null) ?? "").trim();
+  const subjectName = ((formData.get("subjectName") as string | null) ?? "").trim();
+  const chapter = ((formData.get("chapter") as string | null) ?? "").trim();
+  const topic = ((formData.get("topic") as string | null) ?? "").trim();
+  if (!boardName || !gradeName || !subjectName || !chapter || !topic) {
+    throw new Error("Board, grade, subject, the chapter, and the topic to ignore are all required.");
+  }
+  await ignoreUnmatchedTopic({ boardName, gradeName, subjectName, chapter, topic });
+  revalidatePath("/admin/archetype-miner/unmatched-topics");
 }
 
 // See the service's own offScopeContentScan.ts for what this catches --

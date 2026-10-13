@@ -171,6 +171,22 @@ export const OFF_SCOPE_CHECKED_FLAG = "off_scope_checked";
 // as OFF_SCOPE_CHECKED_FLAG above.
 export const CHAPTER_UNMATCHED_IGNORED_FLAG = "chapter_unmatched_ignored";
 
+// Sibling of CHAPTER_UNMATCHED_IGNORED_FLAG for topicReconciliation.ts's
+// own manual-review UI -- set when an admin looks at a mined
+// curriculum.topic value (with real sample question text) sitting under a
+// chapter that's a known shared "book section" (several real syllabus
+// topics sharing one chapter value, e.g. a Bengali grammar section or a
+// story anthology) and decides, from the question's own content, that it
+// genuinely can't be placed under any one of that section's real topics --
+// a question-type description with no identifying content (e.g. "line
+// analysis" with no story named), or content that doesn't belong to this
+// scope at all. A DIFFERENT flag from CHAPTER_UNMATCHED_IGNORED_FLAG on
+// purpose: a signature can need review at either level independently (its
+// chapter could already be fine while its topic still needs a human
+// look, or vice versa), and conflating the two would mean reviewing one
+// silently (and wrongly) excuses the other from ever being looked at.
+export const TOPIC_UNMATCHED_IGNORED_FLAG = "topic_unmatched_ignored";
+
 export type QuestionSignature = {
   question_id: string;
   education_context: EducationContext;

@@ -26,6 +26,11 @@ import {
   type CurriculumReconciliationPreview,
 } from "./curriculumReconciliation.js";
 import {
+  computeUnmatchedTopicsAcrossAllScopes,
+  attachTopicMapping,
+  ignoreUnmatchedTopic,
+} from "./topicReconciliation.js";
+import {
   previewOffScopeContentScan,
   runOffScopeContentScan,
   isOffScopeContentScanInProgress,
@@ -661,6 +666,59 @@ app.post("/v1/curriculum-reconciliation/ignore", requireSharedSecret, async (req
   } catch (err) {
     console.error(`Failed to mark chapter "${chapter}" as ignored:`, err);
     res.status(502).json({ error: "Failed to mark chapter as ignored" });
+  }
+});
+
+// See topicReconciliation.ts's own top comment for what this fixes --
+// a mined curriculum.topic sitting under a shared "book section" chapter
+// (several real syllabus topics under one chapter value) that doesn't
+// identify which real topic it belongs to without reading the actual
+// question text. Same unscoped, read-only, cross-catalogue shape as
+// curriculum-reconciliation/unmatched-all above.
+app.get("/v1/topic-reconciliation/unmatched-all", requireSharedSecret, async (_req: Request, res: Response) => {
+  try {
+    const entries = await computeUnmatchedTopicsAcrossAllScopes();
+    res.json({ entries });
+  } catch (err) {
+    console.error("Failed to compute unmatched topics across all scopes:", err);
+    res.status(502).json({ error: "Failed to compute unmatched topics across all scopes" });
+  }
+});
+
+app.post("/v1/topic-reconciliation/attach", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  const body = req.body as Record<string, unknown>;
+  const chapter = typeof body.chapter === "string" ? body.chapter.trim() : "";
+  const fromTopic = typeof body.fromTopic === "string" ? body.fromTopic.trim() : "";
+  const toTopic = typeof body.toTopic === "string" ? body.toTopic.trim() : "";
+  if (!scope || !chapter || !fromTopic || !toTopic) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, chapter, fromTopic, and toTopic are all required" });
+    return;
+  }
+  try {
+    const result = await attachTopicMapping({ ...scope, chapter, fromTopic, toTopic });
+    res.json(result);
+  } catch (err) {
+    console.error(`Failed to attach topic mapping "${fromTopic}" -> "${toTopic}" under "${chapter}":`, err);
+    res.status(400).json({ error: err instanceof Error ? err.message : "Failed to attach topic mapping" });
+  }
+});
+
+app.post("/v1/topic-reconciliation/ignore", requireSharedSecret, async (req: Request, res: Response) => {
+  const scope = readCrossRunMergeScope(req.body as Record<string, unknown>);
+  const body = req.body as Record<string, unknown>;
+  const chapter = typeof body.chapter === "string" ? body.chapter.trim() : "";
+  const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+  if (!scope || !chapter || !topic) {
+    res.status(400).json({ error: "boardName, gradeName, subjectName, chapter, and topic are all required" });
+    return;
+  }
+  try {
+    const result = await ignoreUnmatchedTopic({ ...scope, chapter, topic });
+    res.json(result);
+  } catch (err) {
+    console.error(`Failed to mark topic "${topic}" under "${chapter}" as ignored:`, err);
+    res.status(502).json({ error: "Failed to mark topic as ignored" });
   }
 });
 

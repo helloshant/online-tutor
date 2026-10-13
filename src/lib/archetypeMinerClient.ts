@@ -551,6 +551,117 @@ export async function ignoreUnmatchedChapter(
   return { questionsMarked: body.questionsMarked };
 }
 
+export type UnmatchedTopicEntry = {
+  boardName: string;
+  gradeName: string;
+  subjectName: string;
+  chapter: string;
+  topic: string;
+  questionCount: number;
+  sampleQuestions: { ref: string; text: string; concept: string }[];
+  acceptableTopics: string[];
+};
+
+function isUnmatchedTopicEntry(value: unknown): value is UnmatchedTopicEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.boardName === "string" &&
+    typeof v.gradeName === "string" &&
+    typeof v.subjectName === "string" &&
+    typeof v.chapter === "string" &&
+    typeof v.topic === "string" &&
+    typeof v.questionCount === "number" &&
+    Array.isArray(v.sampleQuestions) &&
+    Array.isArray(v.acceptableTopics)
+  );
+}
+
+// The human-in-the-loop counterpart to listUnmatchedChapters above, one
+// level deeper -- see the service's own topicReconciliation.ts for the
+// full reasoning. Unscoped deliberately, same reasoning as that function:
+// every board/grade/subject at once, each row carrying real sample
+// question text (plus the mined curriculum.concept, which independently
+// corroborates a human reviewer's own read of the question) and this
+// chapter's own real topic list, so an admin can browse and act on the
+// whole catalogue from one page.
+export async function listUnmatchedTopics(): Promise<UnmatchedTopicEntry[]> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/topic-reconciliation/unmatched-all`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    headers: sharedSecret ? { "x-internal-api-key": sharedSecret } : undefined,
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Listing unmatched topics failed with status ${res.status}`);
+  }
+  if (!Array.isArray(body?.entries) || !body.entries.every(isUnmatchedTopicEntry)) {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return body.entries;
+}
+
+// Attaches one unmatched topic value, under one shared chapter, for one
+// scope, onto a real within-chapter topic an admin picked by hand after
+// reading the actual question text -- the service itself still verifies
+// toTopic is a real, verbatim topic under that exact chapter before
+// writing anything. Rewrites curriculum.chapter to toTopic; the mined
+// topic value itself is left exactly as it was (now correctly understood
+// as a genuine within-topic concept, not an ambiguous label).
+export async function attachTopicMapping(
+  params: CurriculumReconciliationScope & { chapter: string; fromTopic: string; toTopic: string }
+): Promise<{ questionsUpdated: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/topic-reconciliation/attach`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Attaching topic mapping failed with status ${res.status}`);
+  }
+  if (typeof body?.questionsUpdated !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { questionsUpdated: body.questionsUpdated };
+}
+
+// Marks one unmatched topic value, under one chapter, for one scope, as
+// reviewed and genuinely unplaceable -- see TOPIC_UNMATCHED_IGNORED_FLAG's
+// own comment for what this means and why it's tracked separately from
+// CHAPTER_UNMATCHED_IGNORED_FLAG.
+export async function ignoreUnmatchedTopic(
+  params: CurriculumReconciliationScope & { chapter: string; topic: string }
+): Promise<{ questionsMarked: number }> {
+  const url = `${getArchetypeMinerUrl().replace(/\/$/, "")}/v1/topic-reconciliation/ignore`;
+  const sharedSecret = process.env.ARCHETYPE_MINER_SHARED_SECRET;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sharedSecret ? { "x-internal-api-key": sharedSecret } : {}),
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Ignoring unmatched topic failed with status ${res.status}`);
+  }
+  if (typeof body?.questionsMarked !== "number") {
+    throw new Error("Archetype-miner returned an unexpected response shape");
+  }
+  return { questionsMarked: body.questionsMarked };
+}
+
 export type OffScopeScanScope = { boardName: string; gradeName: string; subjectName: string };
 // flaggedQuestions: how many questions in this scope are SITTING, right
 // now, with a pending "off-scope" review-queue item -- distinct from
