@@ -205,7 +205,31 @@ export async function findArchetypesForTopic(params: {
       .filter((r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic)
       .map((r) => r.topic);
     if (matchedTopics.length === 0) continue;
-    const subTopic = modeOf(matchedTopics);
+    // subTopic is deliberately derived from a STRICTER subset than the
+    // relevance check above: only questions whose own mined r.chapter
+    // equals targetTopic, i.e. the real chapter name correctly landed in
+    // the chapter field, which is exactly when r.topic is a genuine
+    // within-chapter concept. A question that only matched via the
+    // targetChapter fallback above (the degenerate "chapter is just the
+    // subject name" convention this file's own header comment documents
+    // for most of the CBSE Grade 11/12 catalog) has a DIFFERENT chapter's
+    // real name sitting in r.topic, not a sub-topic of THIS chapter --
+    // confirmed live: the "Test and Measurement in Sports" sub-topic
+    // picker was showing "Management of Sporting Events" and every other
+    // Physical Education chapter name as if they were sub-topics of it,
+    // because every one of that subject's questions shares the exact same
+    // degenerate chapter value ("Physical Education"), so the fallback
+    // alone made them all look relevant to every chapter at once. Still
+    // included in matchedTopics/relevance above (unchanged) so generation
+    // grounding and bank-hit filtering keep the recall that fallback was
+    // added for -- only the user-facing subTopic LABEL is tightened.
+    // subTopic ends up null (and this archetype simply has none to show
+    // in the picker, same as a chapter with nothing mined at all) when
+    // every match came through the fallback only.
+    const strictTopics = resolved
+      .filter((r) => normalize(r.chapter) === targetTopic)
+      .map((r) => r.topic);
+    const subTopic = modeOf(strictTopics);
 
     const dist = row.archetype.stats?.difficulty_distribution;
     // All-zero (no question ever classified) is treated the same as no
