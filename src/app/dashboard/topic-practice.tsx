@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
 import { FeedbackButtons } from "@/components/feedback-buttons";
 import { PatternPicker, type PatternPickerExercise } from "./pattern-picker";
@@ -201,7 +201,33 @@ export function TopicPractice({
     }
   }
 
+  // Reported directly: clicking a pattern pill generates a new question
+  // appended below everything already on screen, but nothing scrolled it
+  // into view -- a student had to notice and manually scroll down to find
+  // it. chat-panel.tsx's own auto-scroll only reacts to its `timeline`
+  // state, which this component's exercises never touch (see the
+  // `pickerAdded` comment above), so a newly generated question here was
+  // never going to trigger it. exerciseRefs + scrollTargetId scroll
+  // exactly the new <li> into view once it mounts, deliberately NOT tied
+  // to `exercises` growing in general -- initialExercises growing (a
+  // parent's own "Generate more exercises" click) already lands the
+  // student where they clicked, with no reason to yank the view again.
+  const exerciseRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  // A ref, not state -- this only needs to survive from the click handler
+  // to the next effect run, never trigger a render of its own. Cleared
+  // via the ref itself (not setState) once consumed, so this effect never
+  // schedules a render from inside itself.
+  const pendingScrollIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const id = pendingScrollIdRef.current;
+    if (!id) return;
+    exerciseRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    pendingScrollIdRef.current = null;
+  }, [exercises]);
+
   function handleExerciseGenerated(exercise: PatternPickerExercise) {
+    pendingScrollIdRef.current = exercise.id;
     setPickerAdded((prev) => [...prev, exercise]);
   }
 
@@ -222,7 +248,13 @@ export function TopicPractice({
             {exercises.map((ex, i) => {
               const state = getGradeState(ex.id);
               return (
-                <li key={ex.id}>
+                <li
+                  key={ex.id}
+                  ref={(el) => {
+                    if (el) exerciseRefs.current.set(ex.id, el);
+                    else exerciseRefs.current.delete(ex.id);
+                  }}
+                >
                   <p className="whitespace-pre-wrap font-medium">
                     {i + 1}.{" "}
                     {ex.type && (
