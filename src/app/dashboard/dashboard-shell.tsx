@@ -197,8 +197,18 @@ export function DashboardShell({
       : []),
   ];
 
+  // h-dvh, not h-screen -- h-screen is a static 100vh, which on a phone
+  // browser is measured including the address bar even while it's showing,
+  // making the page taller than what's actually visible. The mobile bottom
+  // nav below is a shrink-0 flex child pinned past the end of that
+  // overflow, with no scroll affordance on this outer div to reach it (only
+  // the content area in between scrolls) -- reported directly as "can't
+  // switch subjects on mobile, the bar isn't visible," which is exactly
+  // what a cut-off bottom nav looks like. h-dvh tracks the real, currently-
+  // visible viewport height instead, shrinking and growing with the address
+  // bar rather than ignoring it.
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-dvh flex-col bg-background">
       <header className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-brand">SyllabusMate</span>
