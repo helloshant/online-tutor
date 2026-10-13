@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MathText } from "@/components/math-text";
 import { FeedbackButtons } from "@/components/feedback-buttons";
+import { LoadingIndicator } from "@/components/loading-indicator";
 import { PatternPicker, type PatternPickerExercise } from "./pattern-picker";
 
 // See the orchestrator's own ExerciseType comment -- a small, curated,
@@ -69,6 +70,7 @@ export function TopicPractice({
   subTopic,
   suppressPatternPicker,
   initialExercises,
+  loadingInitialExercises,
   emptyLabel,
   onExercisesChanged,
 }: {
@@ -102,6 +104,20 @@ export function TopicPractice({
   // click-to-load batch -- omitted for an ordinary chat reply, which has
   // no such batch and starts with nothing but the pattern picker.
   initialExercises?: PracticeExerciseItem[];
+  // Set only by TopicSummaryMessage's own "Relevant Exercises" flow, true
+  // while its own exercises fetch is still in flight (initialExercises is
+  // undefined for that same reason) -- lets this component show its own
+  // loading state for the list, rather than the parent gating this whole
+  // component's mount behind that fetch finishing first the way it used
+  // to. That gate was why "Practice a specific pattern" visibly popped in
+  // late: PatternPicker (rendered unconditionally below, regardless of
+  // this flag) only ever started ITS OWN, unrelated patterns fetch once
+  // mounted, so delaying the mount delayed that fetch's start for no
+  // reason. Reported directly. Omitted (default false) for an ordinary
+  // chat reply's mount, which has no such in-flight fetch of its own --
+  // initialExercises there is already resolved by the time ChatPanel
+  // renders it.
+  loadingInitialExercises?: boolean;
   // Shown only when initialExercises was explicitly provided but came
   // back empty (TopicSummaryMessage's own "nothing banked/generated for
   // this topic" case) -- omitted for an ordinary chat reply, where
@@ -234,7 +250,19 @@ export function TopicPractice({
   return (
     <div>
       {exercises.length === 0 ? (
-        emptyLabel && <p className="text-foreground/68">{emptyLabel}</p>
+        loadingInitialExercises ? (
+          // The lookup checks the answer bank first (instant) but falls
+          // through to the LLM on a miss, which can take a few seconds --
+          // this makes that wait visible instead of a silent gap. Moved
+          // here from TopicSummaryMessage's own render (see
+          // loadingInitialExercises' own comment above) along with the
+          // mount itself.
+          <p className="text-sm text-foreground/68">
+            <LoadingIndicator label="Asking the tutor for relevant exercises…" />
+          </p>
+        ) : (
+          emptyLabel && <p className="text-foreground/68">{emptyLabel}</p>
+        )
       ) : (
         <>
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/65">

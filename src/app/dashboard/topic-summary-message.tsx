@@ -811,54 +811,44 @@ export function TopicSummaryMessage({
                       <p className="mb-2 text-red-600">{exercisesError}</p>
                     )}
 
-                    {/* The lookup checks the answer bank first (instant) but falls
-                        through to the LLM on a miss, which can take a few
-                        seconds -- this makes that wait visible instead of just a
-                        silent gap while exercises is still null. */}
-                    {exercises === null && loadingExercises ? (
-                      <p className="text-sm text-foreground/68">
-                        <LoadingIndicator label="Asking the tutor for relevant exercises…" />
-                      </p>
-                    ) : exercises === null ? null : (
-                      <>
-                        {topicTags.length > 0 && (
-                          <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-foreground/65">
-                              Refine by tag:
-                            </span>
-                            {topicTags.map((t) => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() =>
-                                  activeTagFilter === t
-                                    ? clearTagFilter()
-                                    : handleFilterByTag(t)
-                                }
-                                className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
-                                  activeTagFilter === t
-                                    ? "bg-brand text-white"
-                                    : "bg-brand/10 text-brand hover:bg-brand/20"
-                                }`}
-                              >
-                                {t}
-                              </button>
-                            ))}
-                            {activeTagFilter && (
-                              <button
-                                type="button"
-                                onClick={clearTagFilter}
-                                className="text-xs text-foreground/65 hover:underline"
-                              >
-                                Clear
-                              </button>
-                            )}
-                          </div>
+                    {topicTags.length > 0 && (
+                      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-foreground/65">
+                          Refine by tag:
+                        </span>
+                        {topicTags.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() =>
+                              activeTagFilter === t
+                                ? clearTagFilter()
+                                : handleFilterByTag(t)
+                            }
+                            className={`rounded-full px-2 py-0.5 text-xs font-medium transition ${
+                              activeTagFilter === t
+                                ? "bg-brand text-white"
+                                : "bg-brand/10 text-brand hover:bg-brand/20"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                        {activeTagFilter && (
+                          <button
+                            type="button"
+                            onClick={clearTagFilter}
+                            className="text-xs text-foreground/65 hover:underline"
+                          >
+                            Clear
+                          </button>
                         )}
+                      </div>
+                    )}
 
-                        {loadingFilter ? (
-                          <p className="text-foreground/68">Filtering…</p>
-                        ) : activeTagFilter ? (
+                    {loadingFilter ? (
+                      <p className="text-foreground/68">Filtering…</p>
+                    ) : activeTagFilter ? (
                           // Tag-filtered results come from a different endpoint
                           // (/api/answer-bank/search) with no stable id in its
                           // response shape -- shown immediately, same as before
@@ -904,7 +894,7 @@ export function TopicSummaryMessage({
                               </ol>
                             </>
                           )
-                        ) : (
+                        ) : exercises === null && !loadingExercises ? null : (
                           <TopicPractice
                             // Reported directly: switching topics within
                             // this SAME bubble (via "All topics in this
@@ -958,13 +948,26 @@ export function TopicSummaryMessage({
                             suppressPatternPicker={
                               selectedSubtopic?.kind === "concept"
                             }
-                            initialExercises={exercises}
+                            // Lets PatternPicker mount (and kick off its own
+                            // patterns fetch) the moment a sub-topic is
+                            // picked, instead of waiting for THIS exercises
+                            // fetch to finish first -- the two used to run
+                            // one after the other (TopicPractice, and the
+                            // PatternPicker it renders, only mounted once
+                            // `exercises` was already non-null), so "Practice
+                            // a specific pattern" visibly popped in late even
+                            // though it has no real dependency on the
+                            // exercise list itself. Reported directly.
+                            // initialExercises left optional/undefined while
+                            // still loading (TopicPractice's own default is
+                            // an empty list) -- this flag is what tells it
+                            // that's a load in progress, not "nothing here."
+                            initialExercises={exercises ?? undefined}
+                            loadingInitialExercises={exercises === null}
                             emptyLabel="No exercises available for this topic yet."
                             onExercisesChanged={onExercisesChanged}
                           />
                         )}
-                      </>
-                    )}
                     {/* Repeats the top-of-panel back link (see above) once
                         more below the exercise list AND the pattern picker
                         -- without this, going back to a different sub-topic
