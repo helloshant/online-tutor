@@ -174,11 +174,19 @@ export async function findArchetypesForTopic(params: {
     console.error("Segmented-question lookup for per-year counts failed (patterns will show with no year counts):", segError);
   }
 
-  const chapterByQuestion = new Map<string, { chapter: string; topic: string }>();
+  // topic is genuinely optional here (matches SignatureRow's own type) --
+  // a question re-chaptered by 0064_fix_shifted_curriculum_chapters.sql
+  // (the chapter/topic-shifted-by-one-level pattern -- confirmed live for
+  // CBSE Physical Education and WB Geography, see that migration's own
+  // comment) has no finer within-chapter concept to report, by design,
+  // rather than a fabricated one. Previously required both fields truthy,
+  // which dropped such a question from chapter-level matching entirely --
+  // too strict: its chapter is real and known, only its topic isn't.
+  const chapterByQuestion = new Map<string, { chapter: string; topic: string | null }>();
   for (const s of (signatureRows ?? []) as SignatureRow[]) {
     const curriculum = s.signature?.curriculum;
-    if (!curriculum?.chapter || !curriculum?.topic) continue;
-    chapterByQuestion.set(`${s.run_id}:${s.question_id}`, { chapter: curriculum.chapter, topic: curriculum.topic });
+    if (!curriculum?.chapter) continue;
+    chapterByQuestion.set(`${s.run_id}:${s.question_id}`, { chapter: curriculum.chapter, topic: curriculum.topic ?? null });
   }
 
   const yearByQuestion = new Map<string, number>();
@@ -200,11 +208,11 @@ export async function findArchetypesForTopic(params: {
   for (const row of rows) {
     const resolved = row.archetype.supporting_question_ids
       .map((qid) => chapterByQuestion.get(`${row.run_id}:${qid}`))
-      .filter((v): v is { chapter: string; topic: string } => Boolean(v));
-    const matchedTopics = resolved
-      .filter((r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic)
-      .map((r) => r.topic);
-    if (matchedTopics.length === 0) continue;
+      .filter((v): v is { chapter: string; topic: string | null } => Boolean(v));
+    const matched = resolved.filter(
+      (r) => normalize(r.chapter) === targetChapter || normalize(r.chapter) === targetTopic,
+    );
+    if (matched.length === 0) continue;
     // subTopic is deliberately derived from a STRICTER subset than the
     // relevance check above: only questions whose own mined r.chapter
     // equals targetTopic, i.e. the real chapter name correctly landed in
@@ -220,7 +228,7 @@ export async function findArchetypesForTopic(params: {
     // because every one of that subject's questions shares the exact same
     // degenerate chapter value ("Physical Education"), so the fallback
     // alone made them all look relevant to every chapter at once. Still
-    // included in matchedTopics/relevance above (unchanged) so generation
+    // included in matched/relevance above (unchanged) so generation
     // grounding and bank-hit filtering keep the recall that fallback was
     // added for -- only the user-facing subTopic LABEL is tightened.
     // subTopic ends up null (and this archetype simply has none to show
@@ -228,7 +236,8 @@ export async function findArchetypesForTopic(params: {
     // every match came through the fallback only.
     const strictTopics = resolved
       .filter((r) => normalize(r.chapter) === targetTopic)
-      .map((r) => r.topic);
+      .map((r) => r.topic)
+      .filter((t): t is string => t !== null);
     const subTopic = modeOf(strictTopics);
 
     const dist = row.archetype.stats?.difficulty_distribution;
