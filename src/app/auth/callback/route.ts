@@ -13,7 +13,20 @@ const JUST_SIGNED_UP_WINDOW_MS = 60_000;
 // a `code` to exchange for a session: Google OAuth (?next=/dashboard) and
 // password-recovery links (?next=/reset-password) both go through here.
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  // request.url's own origin reflects the Node process's internal bind
+  // address (e.g. 0.0.0.0:3000) when this app runs behind a reverse proxy,
+  // not the public domain the browser actually used -- confirmed live as
+  // the cause of the post-Google-sign-in redirect landing on 0.0.0.0:3000
+  // instead of the real domain. Same x-forwarded-host/x-forwarded-proto fix
+  // already used for an email's redirectTo in forgot-password/actions.ts
+  // and admin/actions.ts, and for the post-payment redirect in
+  // /api/ccavenue/callback -- missed here since this route's own redirect
+  // target (the final `${origin}${safeNext}` below) was built from
+  // request.url directly instead.
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const protocol = request.headers.get("x-forwarded-proto") ?? "http";
+  const origin = `${protocol}://${host}`;
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
   const safeNext = next.startsWith("/") ? next : "/dashboard";
