@@ -592,8 +592,24 @@ export function ChatPanel({
     });
   }, []);
 
+  // Length, not the array itself -- an in-place update to an EXISTING
+  // entry (a topic bubble's own exercises list growing via
+  // handleTopicExercisesChanged/handleMessageExercisesChanged below) still
+  // changes `timeline`'s own identity, which used to blanket-scroll all
+  // the way to the bottom of the whole pane on every single pattern-picker
+  // click -- fighting (and, since it runs after, winning over)
+  // TopicPractice's own much more targeted "scroll the new question itself
+  // into view" behavior (see topic-practice.tsx's own exerciseRefs/
+  // pendingScrollIdRef). Reported directly: clicking a pattern pill never
+  // actually landed on the question it had just generated. Comparing
+  // against the previous length restores this effect to what its own
+  // comment above already says it's for -- a genuinely NEW entry (a sent
+  // message, a clicked topic) -- without touching the three other,
+  // deliberate scrollToBottom() calls elsewhere in this file.
+  const prevTimelineLengthRef = useRef(timeline.length);
   useEffect(() => {
-    scrollToBottom();
+    if (timeline.length > prevTimelineLengthRef.current) scrollToBottom();
+    prevTimelineLengthRef.current = timeline.length;
   }, [timeline, scrollToBottom]);
 
   // Tracks whether the student was sitting at the bottom BEFORE the next
