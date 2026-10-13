@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseAnonKey, getSupabaseServiceRoleKey, getSupabaseUrl } from "@/lib/supabase/env";
 import { SIGNUP_CAMPAIGN_COOKIE, SIGNUP_SOURCE_COOKIE } from "@/lib/attribution";
 import { ACTIVE_SESSION_COOKIE } from "@/lib/singleSession";
 
@@ -56,6 +57,36 @@ export async function proxy(request: NextRequest) {
     const { data: profile } = await supabase.from("profiles").select("current_session_id").eq("id", user.id).maybeSingle();
     const activeSessionCookie = request.cookies.get(ACTIVE_SESSION_COOKIE)?.value;
     if (profile?.current_session_id && profile.current_session_id !== activeSessionCookie) {
+      // Diagnostic only (see 0063_session_kicks.sql): this check can't tell
+      // a genuine "signed in elsewhere" from this same browser's own cookie
+      // failing to round-trip (confirmed possible with compression/data-
+      // saver mobile browsers) -- recording both ids at the moment of the
+      // kick is what lets that be told apart after the fact, instead of
+      // reconstructed later from an incomplete picture. Best-effort: a
+      // logging failure (including the service-role key itself being
+      // unavailable in this runtime) must never block the actual sign-out,
+      // so this is wrapped in its own try/catch and fire-and-forget (not
+      // awaited).
+      try {
+        const admin = createSupabaseClient(getSupabaseUrl(), getSupabaseServiceRoleKey(), {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+        admin
+          .from("session_kicks")
+          .insert({
+            user_id: user.id,
+            path: request.nextUrl.pathname,
+            cookie_session_id: activeSessionCookie ?? null,
+            db_session_id: profile.current_session_id,
+            user_agent: request.headers.get("user-agent"),
+          })
+          .then(({ error }) => {
+            if (error) console.error("Failed to record session_kicks row:", error);
+          });
+      } catch (err) {
+        console.error("Failed to record session_kicks row:", err);
+      }
+
       // Triggers the cookies() setAll callback above, which reassigns
       // `response` (via closure) to carry the cleared Supabase auth
       // cookies. Building the actual redirect as a SEPARATE response

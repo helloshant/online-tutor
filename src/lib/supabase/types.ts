@@ -325,6 +325,18 @@ export type LoginLockout = {
   locked_until: string | null;
 };
 
+// Diagnostic log for the single-active-device mismatch kick -- see
+// 0063_session_kicks.sql and src/proxy.ts.
+export type SessionKick = {
+  id: string;
+  user_id: string;
+  path: string;
+  cookie_session_id: string | null;
+  db_session_id: string;
+  user_agent: string | null;
+  created_at: string;
+};
+
 export type LlmProvider = "gemini" | "anthropic";
 
 // Prepaid LLM token wallet -- replaces student_usage_limits/subscriptions'
@@ -1090,6 +1102,12 @@ export interface Database {
         Row: LoginLockout;
         Insert: Partial<LoginLockout>;
         Update: Partial<LoginLockout>;
+        Relationships: [];
+      };
+      session_kicks: {
+        Row: SessionKick;
+        Insert: Partial<SessionKick>;
+        Update: Partial<SessionKick>;
         Relationships: [];
       };
       student_wallets: {
