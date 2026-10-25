@@ -1,0 +1,13 @@
+-- Lets a signed-in student's own browser subscribe to postgres_changes on
+-- their own student_wallets row (already readable under RLS: "Students can
+-- view their own wallet", see 0055_student_wallets.sql) for an instant,
+-- no-reload token-balance update in the dashboard header the moment a chat
+-- reply's real cost gets deducted (services/observability/src/server.ts's
+-- own deduct_wallet call) or a recharge lands -- same pattern
+-- 0050_single_device_session.sql already established for profiles'
+-- current_session_id (see src/components/single-session-guard.tsx). Without
+-- this, the balance dashboard-shell.tsx shows was a one-time read at page
+-- load, with no way to ever reflect spend/recharge short of a full reload.
+-- Reported directly: "the token utilization ticker... is not getting
+-- updated in real time."
+alter publication supabase_realtime add table student_wallets;

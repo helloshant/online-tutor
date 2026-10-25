@@ -81,6 +81,7 @@ export default async function DashboardPage({
 
     return (
       <DashboardShell
+        userId={user.id}
         userName={profile?.full_name ?? user.email ?? "Staff"}
         subscriptionId={null}
         boardId={previewBoardId}
@@ -129,6 +130,7 @@ export default async function DashboardPage({
 
   return (
     <DashboardShell
+      userId={user.id}
       userName={profile?.full_name ?? user.email ?? "Student"}
       subscriptionId={subscription.id}
       boardId={subscription.board_id}

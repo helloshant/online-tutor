@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
 import { UserMenu } from "@/components/user-menu";
 import { ChatPanel } from "./chat-panel";
 import { SyllabusPanel } from "./syllabus-panel";
@@ -81,6 +82,7 @@ type MainTab = "subjects" | "topics" | "trends" | "chat" | "practice" | "inbox";
 const TAB_LABELS: Partial<Record<MainTab, string>> = { trends: "Past years" };
 
 export function DashboardShell({
+  userId,
   userName,
   subscriptionId,
   boardId,
@@ -94,6 +96,12 @@ export function DashboardShell({
   allGrades = [],
   walletBalance = null,
 }: {
+  // Only actually used to scope the wallet-balance realtime subscription
+  // below (staff have no wallet, so this is otherwise unused on that
+  // branch) -- threaded through anyway since every caller already has it
+  // (dashboard/page.tsx's own `user.id`), simpler than making it optional
+  // for one branch.
+  userId: string;
   userName: string;
   subscriptionId: string | null;
   boardId: string | null;
@@ -110,7 +118,8 @@ export function DashboardShell({
   allGrades?: { id: string; name: string }[];
   // Set only for a real student (see dashboard/page.tsx's own
   // getWalletBalance call) -- null for staff, who have no wallet and see
-  // no banner at all.
+  // no banner at all. Just the INITIAL value from that page load -- see
+  // the liveWalletBalance state below, which is what's actually rendered.
   walletBalance?: number | null;
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
@@ -135,6 +144,54 @@ export function DashboardShell({
   // content below) so switching tabs never loses any panel's local state
   // (e.g. the chat timeline's ephemeral topic bubbles).
   const [mainTab, setMainTab] = useState<MainTab>("chat");
+
+  // Seeded from the page-load prop, then kept live below -- see the
+  // subscription effect's own comment. Lives as separate state (not just
+  // read off the prop directly) specifically so a push from the
+  // subscription can update what's rendered without needing a server
+  // round trip or a page reload.
+  const [liveWalletBalance, setLiveWalletBalance] = useState(walletBalance);
+  // Reported directly: the token balance banner was a one-time read from
+  // page load -- it never moved again for the rest of the session, no
+  // matter how many chat replies spent from the wallet or how much a
+  // recharge added, short of a full reload. The actual deduction
+  // (services/observability/src/server.ts's own deduct_wallet, after it
+  // computes a call's real cost) and the actual credit (a CCAvenue
+  // recharge activating) both happen server-side, off this page entirely,
+  // so there's no client-side event to hook this to -- a live Postgres
+  // subscription on the student's own wallet row is what actually notices
+  // either one. Same pattern already established for profiles'
+  // current_session_id (see single-session-guard.tsx and
+  // 0050_single_device_session.sql) -- see 0069_student_wallets_realtime.sql
+  // for the matching publication grant this relies on. Skipped entirely
+  // for staff (walletBalance is null and stays null for them, same as
+  // before this effect existed -- they have no wallet row to subscribe to
+  // in the first place).
+  useEffect(() => {
+    if (walletBalance === null || walletBalance === undefined) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`wallet-balance-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "student_wallets", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const nextBalance = (payload.new as { balance_tokens: number }).balance_tokens;
+          setLiveWalletBalance(nextBalance);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // walletBalance itself deliberately left out of the deps -- this only
+    // needs to decide ONCE (on mount) whether a subscription makes sense at
+    // all (a real student vs. staff); re-subscribing every time the balance
+    // itself changes would tear down and recreate the channel on every
+    // single update it just delivered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   const selectedSubject =
     subjects.find((s) => s.id === selectedSubjectId) ?? null;
@@ -249,20 +306,21 @@ export function DashboardShell({
           student should always be able to see it, not just notice it after
           hitting zero. This is purely informational -- the actual gate is
           the pre-call balance check every LLM-spending route performs (see
-          src/lib/walletBalance.ts), not anything here. */}
-      {walletBalance !== null && walletBalance !== undefined && (
+          src/lib/walletBalance.ts), not anything here. Reads liveWalletBalance,
+          not the walletBalance prop directly -- see that state's own comment. */}
+      {liveWalletBalance !== null && liveWalletBalance !== undefined && (
         <div
           className={`flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-2 text-xs text-foreground/75 ${
-            walletBalance <= 0 ? "bg-red-50" : "bg-brand/5"
+            liveWalletBalance <= 0 ? "bg-red-50" : "bg-brand/5"
           }`}
         >
           <span className="rounded-full border border-border bg-surface px-2.5 py-1 font-medium">
-            {walletBalance <= 0 ? (
+            {liveWalletBalance <= 0 ? (
               <span className="text-red-600">Out of tokens</span>
             ) : (
               <>
                 <span className="text-foreground">
-                  {walletBalance.toLocaleString()}
+                  {liveWalletBalance.toLocaleString()}
                 </span>{" "}
                 tokens left
               </>
