@@ -849,6 +849,10 @@ export type GeneratePracticePaperRequest = {
   // comments. Omitted entirely reproduces the original hardcoded 20
   // MCQ/15 short/6 long composition unchanged.
   questionMix?: QuestionMix;
+  // The practice panel's own "number of questions" input -- clamped
+  // server-side to [MIN_PRACTICE_PAPER_QUESTIONS,
+  // MAX_PRACTICE_PAPER_QUESTIONS]; only meaningful alongside questionMix.
+  totalQuestions?: number;
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

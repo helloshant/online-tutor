@@ -5,13 +5,17 @@ import type { ExerciseType } from "./types.js";
 // v1. Reported directly as wanted after all: "options to select how much
 // percentage of the topics should be MCQ, Short answer, and Long Answer,"
 // plus a Numerical option for Physics/Chemistry-type subjects (see
-// practice-panel.tsx's own NUMERICAL_SUBJECT_CODES). What's still fixed,
-// preserving the "reads like a real, fixed-length mock exam" property the
-// original hardcoded blueprint cared about (see this file's own git
-// history): the total QUESTION COUNT, not total marks -- marks now vary
-// with whichever mix a student picks, same as a real exam's total would
-// if you swapped its own section weights around.
-export const PRACTICE_PAPER_TOTAL_QUESTIONS = 41;
+// practice-panel.tsx's own NUMERICAL_SUBJECT_CODES), and -- a follow-up
+// report -- the total question count itself. Default stays 41 (the
+// original hardcoded blueprint's own total) for a caller that doesn't ask
+// for a specific count; MIN/MAX bound what a caller CAN ask for, mirrored
+// in practice-panel.tsx's own number input and re-validated in
+// /api/practice-papers' own route -- generation is 1 LLM call per
+// question at bounded concurrency (see server.ts's own CONCURRENCY), so
+// an unbounded count would be an unbounded-length, unbounded-cost request.
+export const DEFAULT_PRACTICE_PAPER_QUESTIONS = 41;
+export const MIN_PRACTICE_PAPER_QUESTIONS = 10;
+export const MAX_PRACTICE_PAPER_QUESTIONS = 60;
 
 export type BlueprintSection = {
   type: ExerciseType;
@@ -80,20 +84,34 @@ function apportion(
   return counts;
 }
 
-// questionMix omitted entirely reproduces the original hardcoded blueprint
-// exactly, byte for byte -- no behavior change for a caller that predates
-// this feature. When given, percentages are normalized to sum to 100
-// first (a slightly-off client total -- 99 or 101 from rounding in the
-// picker UI -- shouldn't silently produce a 40 or 42-question paper) and
-// apportioned across the fixed total question count above.
-export function buildPracticeBlueprint(questionMix?: QuestionMix): BlueprintSection[] {
-  const counts = questionMix ? apportionFromMix(questionMix) : DEFAULT_COUNTS;
+// questionMix AND totalQuestions both omitted reproduces the original
+// hardcoded blueprint exactly, byte for byte -- no behavior change for a
+// caller that predates this feature. When questionMix is given,
+// percentages are normalized to sum to 100 first (a slightly-off client
+// total -- 99 or 101 from rounding in the picker UI -- shouldn't silently
+// produce a short or long paper) and apportioned across totalQuestions
+// (clamped to [MIN_PRACTICE_PAPER_QUESTIONS, MAX_PRACTICE_PAPER_QUESTIONS],
+// defaulting to DEFAULT_PRACTICE_PAPER_QUESTIONS when omitted -- the web
+// app's own route already enforces these same bounds before this is ever
+// called, this is just defensive). totalQuestions given WITHOUT a
+// questionMix is ignored -- there's no mix to scale against, and
+// DEFAULT_COUNTS' own fixed 41 is what "no mix" has always meant.
+export function buildPracticeBlueprint(
+  questionMix?: QuestionMix,
+  totalQuestions?: number,
+): BlueprintSection[] {
+  const counts = questionMix
+    ? apportionFromMix(questionMix, totalQuestions)
+    : DEFAULT_COUNTS;
   return (Object.entries(counts) as [ExerciseType, number][])
     .filter(([, count]) => count > 0)
     .map(([type, count]) => ({ type, count, marksEach: MARKS_EACH[type] }));
 }
 
-function apportionFromMix(questionMix: QuestionMix): Record<ExerciseType, number> {
+function apportionFromMix(
+  questionMix: QuestionMix,
+  totalQuestions?: number,
+): Record<ExerciseType, number> {
   const full: Record<ExerciseType, number> = {
     MCQ: questionMix.MCQ ?? 0,
     short_answer: questionMix.short_answer ?? 0,
@@ -113,5 +131,13 @@ function apportionFromMix(questionMix: QuestionMix): Record<ExerciseType, number
     ]),
   ) as Record<ExerciseType, number>;
 
-  return apportion(normalized, PRACTICE_PAPER_TOTAL_QUESTIONS);
+  const clampedTotal =
+    totalQuestions && Number.isFinite(totalQuestions)
+      ? Math.max(
+          MIN_PRACTICE_PAPER_QUESTIONS,
+          Math.min(MAX_PRACTICE_PAPER_QUESTIONS, Math.round(totalQuestions)),
+        )
+      : DEFAULT_PRACTICE_PAPER_QUESTIONS;
+
+  return apportion(normalized, clampedTotal);
 }

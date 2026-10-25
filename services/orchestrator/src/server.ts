@@ -2531,18 +2531,20 @@ async function generatePracticePaperQuestion(params: {
 
 // A student can select any number of chapters, even the whole syllabus --
 // no cap on the request itself (reported directly: an earlier version
-// capped this at 4, which was unwanted). This builds a full, fixed
-// 80-mark paper from buildPracticeBlueprint -- see its own comment on why
-// this isn't student-configurable, and why it no longer scales with
-// selection size (an earlier version did, which was the actual cause of a
-// separate report that the paper's own total marks looked wrong/
-// inconsistent). topics is shuffled once up front so the round-robin below
-// draws a varied sample across a large selection instead of
-// deterministically only ever reaching the first few chapters in array
-// order -- the blueprint's own question count is fixed regardless of
+// capped this at 4, which was unwanted). The paper's own total question
+// count and type mix are student-chosen (questionMix/totalQuestions, see
+// buildPracticeBlueprint), but deliberately NOT scaled by how many
+// chapters were selected -- an earlier version did that, which was the
+// actual cause of a separate report that the paper's own total marks
+// looked wrong/inconsistent (varying 21-30ish depending on selection size
+// instead of reading like a real, fixed-length mock exam). topics is
+// shuffled once up front so the round-robin below draws a varied sample
+// across a large selection instead of deterministically only ever
+// reaching the first few chapters in array order -- the blueprint's own
+// question count depends only on what the student asked for, never on
 // selection size, so without this, selecting the whole syllabus would
-// silently only ever generate questions from whichever chapter happened to
-// be resolved first.
+// silently only ever generate questions from whichever chapter happened
+// to be resolved first.
 app.post(
   "/v1/practice-paper/generate",
   requireSharedSecret,
@@ -2610,6 +2612,17 @@ app.post(
             ),
           )
         : undefined;
+    // The practice panel's own "number of questions" input -- same
+    // lenient/defensive posture as questionMix just above (the web app's
+    // own route already validates this is an integer within
+    // [MIN_PRACTICE_PAPER_QUESTIONS, MAX_PRACTICE_PAPER_QUESTIONS]);
+    // buildPracticeBlueprint itself clamps into range and falls back to
+    // DEFAULT_PRACTICE_PAPER_QUESTIONS for anything non-finite.
+    const totalQuestions =
+      typeof body.totalQuestions === "number" &&
+      Number.isFinite(body.totalQuestions)
+        ? body.totalQuestions
+        : undefined;
     // Shuffled (not the caller's own resolution order) -- see the route
     // comment above on why: the round-robin below only ever draws
     // `jobs.length` topics total, which is far fewer than a large/whole-
@@ -2622,7 +2635,7 @@ app.post(
       medium,
     };
 
-    const blueprint = buildPracticeBlueprint(questionMix);
+    const blueprint = buildPracticeBlueprint(questionMix, totalQuestions);
     const jobs: { type: ExerciseType; marks: number }[] = blueprint.flatMap(
       (section) =>
         Array.from({ length: section.count }, () => ({
@@ -2634,13 +2647,16 @@ app.post(
     try {
       const questions: PracticePaperQuestion[] = [];
       let topicCursor = 0;
-      // Bounded concurrency -- not full parallelism (the fixed blueprint is
-      // 41 LLM calls every time now, see practiceBlueprint.ts -- unnecessary
-      // load on the provider all at once) and not sequential (too slow for a
-      // student waiting on this request). Raised from 5 to 8 alongside the
-      // blueprint's move to a fixed 80-mark/41-question paper, so this still
-      // finishes in a similar number of batches (~5) as the old smaller
-      // blueprint did at concurrency 5.
+      // Bounded concurrency -- not full parallelism (the blueprint is up to
+      // MAX_PRACTICE_PAPER_QUESTIONS LLM calls every time, see
+      // practiceBlueprint.ts -- unnecessary load on the provider all at
+      // once) and not sequential (too slow for a student waiting on this
+      // request). Raised from 5 to 8 when the blueprint moved to a fixed
+      // 80-mark/41-question paper, so that still finished in a similar
+      // number of batches (~5) as the old smaller blueprint did at
+      // concurrency 5 -- kept at 8 now that the question count is itself
+      // student-chosen (see /api/practice-papers' own maxDuration comment
+      // for how its upper bound was sized against this).
       const CONCURRENCY = 8;
       for (let i = 0; i < jobs.length; i += CONCURRENCY) {
         const chunk = jobs.slice(i, i + CONCURRENCY);

@@ -31,6 +31,11 @@ const VALID_EXERCISE_TYPES: ExerciseType[] = [
 // the Numerical slider for an ineligible subject, but that's a UI
 // convenience, not the trust boundary.
 const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
+// Mirrors the orchestrator's own practiceBlueprint.ts constants of the
+// same name -- see that file's own comment on why a bound exists at all
+// (1 LLM call per question, so an unbounded count is unbounded cost/time).
+const MIN_PRACTICE_PAPER_QUESTIONS = 10;
+const MAX_PRACTICE_PAPER_QUESTIONS = 60;
 
 // POST generates a fresh paper for one or more selected chapters -- no cap
 // on how many (a student can select the entire syllabus if they want, see
@@ -145,6 +150,29 @@ async function handlePost(request: Request) {
       );
     }
     questionMix = body.questionMix as QuestionMix;
+  }
+
+  // The practice panel's own "number of questions" input -- same lenient-
+  // default-but-strict-when-sent posture as questionMix just above:
+  // omitted falls back to the orchestrator's own default (41, the
+  // original fixed total); sent, it must be a real integer within bounds.
+  let totalQuestions: number | undefined;
+  if (body?.totalQuestions !== undefined) {
+    const n = body.totalQuestions;
+    if (
+      typeof n !== "number" ||
+      !Number.isInteger(n) ||
+      n < MIN_PRACTICE_PAPER_QUESTIONS ||
+      n > MAX_PRACTICE_PAPER_QUESTIONS
+    ) {
+      return NextResponse.json(
+        {
+          error: `totalQuestions must be a whole number between ${MIN_PRACTICE_PAPER_QUESTIONS} and ${MAX_PRACTICE_PAPER_QUESTIONS}.`,
+        },
+        { status: 400 },
+      );
+    }
+    totalQuestions = n;
   }
 
   const { data: profile } = await supabase
@@ -282,6 +310,7 @@ async function handlePost(request: Request) {
       })),
       difficulty,
       questionMix,
+      totalQuestions,
       provider,
     });
 
@@ -461,8 +490,10 @@ async function handleGet(request: Request) {
   });
 }
 
-// Paper generation now fires a fixed 41 sequential-ish LLM calls in bounded
-// chunks (see practiceBlueprint.ts's move to a fixed 80-mark paper) --
-// raised from 60s to comfortably cover that larger batch count, well past
-// the platform's default route timeout either way.
-export const maxDuration = 180;
+// Paper generation fires up to MAX_PRACTICE_PAPER_QUESTIONS sequential-ish
+// LLM calls in bounded chunks of CONCURRENCY (see the orchestrator's own
+// practiceBlueprint.ts/server.ts) -- raised from 180s to 240s when that
+// upper bound grew from a fixed 41 to a student-chosen up-to-60 (8 batches
+// at concurrency 8, vs. 6 before, same ~30s/batch budget scaled up), well
+// past the platform's default route timeout either way.
+export const maxDuration = 240;

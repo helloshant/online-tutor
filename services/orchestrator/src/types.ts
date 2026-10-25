@@ -573,11 +573,17 @@ export type GeneratePracticePaperRequest = {
   // optional refinement in this file (requestedType, requestedDifficulty).
   difficulty?: DifficultyLevel;
   // The practice panel's own question-type-mix picker (percentages of the
-  // paper's fixed total question count that should be each type) -- see
+  // paper's total question count that should be each type) -- see
   // practiceBlueprint.ts's own QuestionMix/buildPracticeBlueprint comments.
   // Omitted entirely reproduces the original hardcoded 20 MCQ/15 short/6
   // long composition unchanged.
   questionMix?: QuestionMix;
+  // The practice panel's own "number of questions" input -- clamped to
+  // [MIN_PRACTICE_PAPER_QUESTIONS, MAX_PRACTICE_PAPER_QUESTIONS] by
+  // buildPracticeBlueprint; only meaningful alongside questionMix (see that
+  // function's own comment on why totalQuestions alone, with no mix, is
+  // ignored).
+  totalQuestions?: number;
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

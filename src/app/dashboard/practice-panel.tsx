@@ -52,6 +52,16 @@ const DEFAULT_NUMERICAL_TYPE_MIX: Record<ExerciseType, number> = {
   numerical: 20,
 };
 
+// Mirrors the orchestrator's own practiceBlueprint.ts constants of the
+// same name -- see that file's own comment on why a bound exists at all
+// (1 LLM call per question, so an unbounded count is unbounded cost/time).
+// DEFAULT matches the original hardcoded blueprint's own total (20 MCQ +
+// 15 short + 6 long = 41) exactly, so a student who never touches this
+// control gets the same paper length as before this feature existed.
+const MIN_QUESTION_COUNT = 10;
+const MAX_QUESTION_COUNT = 60;
+const DEFAULT_QUESTION_COUNT = 41;
+
 // Same local-mirror convention as ExerciseType above. Wire values match the
 // orchestrator's own DifficultyLevel ("Easy" | "Medium" | "Hard") exactly --
 // only the UI labels differ ("Moderate"/"Difficult" read better to a student
@@ -174,6 +184,9 @@ export function PracticePanel({
     numericalEligible ? DEFAULT_NUMERICAL_TYPE_MIX : DEFAULT_TYPE_MIX,
   );
   const typeMixTotal = availableTypes.reduce((sum, t) => sum + (typeMix[t] || 0), 0);
+  // Sticky per-session preference, same reasoning as difficulty/typeMix
+  // above -- deliberately NOT reset by resetToPicker().
+  const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT);
   const [history, setHistory] = useState<HistoryPaper[] | null>(null);
 
   const [activePaper, setActivePaper] = useState<Paper | null>(null);
@@ -315,6 +328,19 @@ export function PracticePanel({
     setTypeMix((prev) => ({ ...prev, [type]: clamped }));
   }
 
+  // Same clamp-immediately reasoning as setTypeMixValue above -- a student
+  // typing "500" or "0" should land on a real, in-range value right away,
+  // not something a separate validation message has to explain is invalid
+  // (unlike typeMixTotal, which DOES need that -- there's no single value
+  // to clamp a percentage split down to).
+  function setQuestionCountValue(raw: string) {
+    const parsed = Math.round(Number(raw));
+    const clamped = Number.isFinite(parsed)
+      ? Math.max(MIN_QUESTION_COUNT, Math.min(MAX_QUESTION_COUNT, parsed))
+      : DEFAULT_QUESTION_COUNT;
+    setQuestionCount(clamped);
+  }
+
   function resetToPicker() {
     setActivePaper(null);
     setSubmission(null);
@@ -351,6 +377,7 @@ export function PracticePanel({
           questionMix: Object.fromEntries(
             availableTypes.map((t) => [t, typeMix[t] || 0]),
           ),
+          totalQuestions: questionCount,
         }),
       });
       const body = await res.json();
@@ -556,12 +583,43 @@ export function PracticePanel({
                 </div>
               </div>
 
+              {/* Reported directly, as a follow-up to the type-mix picker
+                  just below: "allow to set the number of questions" too --
+                  see MIN/MAX_QUESTION_COUNT's own comment on the bound
+                  (generation is 1 LLM call per question). Placed BEFORE
+                  the type-mix picker, not after, since "how many
+                  questions" is the more natural thing to settle first --
+                  typeMixTotal's own split then applies to whatever total
+                  is set here. */}
+              <div className="mt-4">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="font-semibold uppercase tracking-wide text-foreground/65">
+                    Number of questions
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={MIN_QUESTION_COUNT}
+                      max={MAX_QUESTION_COUNT}
+                      step={1}
+                      value={questionCount}
+                      onChange={(e) => setQuestionCountValue(e.target.value)}
+                      className="w-24 rounded border border-border bg-background px-1.5 py-1 text-sm text-foreground"
+                    />
+                    <span className="text-foreground/65">
+                      ({MIN_QUESTION_COUNT}-{MAX_QUESTION_COUNT})
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               {/* Reported directly: "give the users options to select how
                   much percentage of the topics should be MCQ, Short
                   answer, and Long Answer," plus Numerical for Physics/
                   Chemistry-type subjects -- see availableTypes' own
                   comment on the subject gating. Percentages are of the
-                  paper's own fixed total question count (not marks), same
+                  paper's own total question count above (not marks), same
                   as the orchestrator's own QuestionMix -- see
                   practiceBlueprint.ts. Number inputs, not sliders: a
                   slider reads fine for "roughly more of this, less of
