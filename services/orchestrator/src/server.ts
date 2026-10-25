@@ -36,7 +36,7 @@ import { recordExerciseGenerationFailure } from "./exerciseFailureLog.js";
 import { getChatReply, getGradingReply } from "./llm.js";
 import type { LlmProvider } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
-import { buildPracticeBlueprint } from "./practiceBlueprint.js";
+import { buildPracticeBlueprint, type QuestionMix } from "./practiceBlueprint.js";
 import { parsePracticePaperGrading } from "./practicePaperGrading.js";
 import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
@@ -2588,6 +2588,28 @@ app.post(
     )
       ? (body.difficulty as DifficultyLevel)
       : "Medium";
+    // The practice panel's own type-mix picker -- see
+    // practiceBlueprint.ts's own QuestionMix comment. Lenient, not a 400,
+    // same posture as difficulty just above: the web app's own route
+    // already validates this (percentages sum to 100, numerical only for
+    // a numerical-eligible subject) before ever reaching here, so this is
+    // only a defensive pass against a malformed/unexpected shape --
+    // non-finite or out-of-range values are dropped rather than trusted,
+    // and buildPracticeBlueprint itself falls back to the original
+    // composition if nothing valid survives (see its own apportionFromMix
+    // comment on a zero sum).
+    const questionMix: QuestionMix | undefined =
+      body.questionMix && typeof body.questionMix === "object"
+        ? Object.fromEntries(
+            Object.entries(body.questionMix as Record<string, unknown>).filter(
+              (entry): entry is [ExerciseType, number] =>
+                VALID_TYPES.includes(entry[0] as ExerciseType) &&
+                typeof entry[1] === "number" &&
+                Number.isFinite(entry[1]) &&
+                entry[1] >= 0,
+            ),
+          )
+        : undefined;
     // Shuffled (not the caller's own resolution order) -- see the route
     // comment above on why: the round-robin below only ever draws
     // `jobs.length` topics total, which is far fewer than a large/whole-
@@ -2600,7 +2622,7 @@ app.post(
       medium,
     };
 
-    const blueprint = buildPracticeBlueprint();
+    const blueprint = buildPracticeBlueprint(questionMix);
     const jobs: { type: ExerciseType; marks: number }[] = blueprint.flatMap(
       (section) =>
         Array.from({ length: section.count }, () => ({

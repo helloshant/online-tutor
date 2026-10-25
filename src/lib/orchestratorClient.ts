@@ -823,6 +823,14 @@ export async function invalidateCachedTopicSummary(
 // resolved by the web app, not the orchestrator.
 export type PracticePaperTopic = { id: string; chapter: string; topic: string };
 
+// Mirrors the orchestrator's own QuestionMix (practiceBlueprint.ts) --
+// percentage (0-100) of the paper's fixed total question count that
+// should be each type. Missing keys mean 0%; percentages don't need to
+// sum to exactly 100 (the orchestrator normalizes), though
+// /api/practice-papers' own route requires exactly 100 from the client
+// before ever reaching here.
+export type QuestionMix = Partial<Record<ExerciseType, number>>;
+
 export type GeneratePracticePaperRequest = {
   userId: string;
   boardId: string;
@@ -836,6 +844,11 @@ export type GeneratePracticePaperRequest = {
   // The practice panel's own difficulty slider -- see the orchestrator's
   // own GeneratePracticePaperRequest comment.
   difficulty?: DifficultyLevel;
+  // The practice panel's own question-type-mix picker -- see
+  // practiceBlueprint.ts's own QuestionMix/buildPracticeBlueprint
+  // comments. Omitted entirely reproduces the original hardcoded 20
+  // MCQ/15 short/6 long composition unchanged.
+  questionMix?: QuestionMix;
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

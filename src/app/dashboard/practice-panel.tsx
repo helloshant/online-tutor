@@ -17,6 +17,41 @@ const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   numerical: "Numerical",
 };
 
+// Same local-mirror convention as pattern-picker.tsx/topic-summary-message.tsx's
+// own identical constant -- see their shared comment on why this is subject
+// CODE, not name, and why only these five.
+const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
+
+// Percentage (0-100) of the paper's fixed total question count that should
+// be each type -- see the orchestrator's own practiceBlueprint.ts/
+// QuestionMix comments. Reported directly as wanted: "options to select
+// how much percentage of the topics should be MCQ, Short answer, and Long
+// Answer," plus Numerical for Physics/Chemistry-type subjects -- this was
+// deliberately out of scope for v1 (a fixed 20 MCQ/15 short/6 long
+// composition, see that file's own git history), reopened here.
+//
+// Two different defaults, not one with numerical defaulted to 0 -- a
+// numerical-eligible subject gets a real slice of numerical by default
+// (20%) rather than requiring every student to discover and manually turn
+// it on; an ineligible subject never shows the slider at all (see
+// availableTypes below), so its own default has no numerical key to carry.
+// Both default sets are deliberately round numbers for a picker UI, not a
+// strict reproduction of the old hardcoded ratio (which was ~49/37/15) --
+// the whole point of this feature is that a student can change these
+// anyway, there's nothing special about matching the old default exactly.
+const DEFAULT_TYPE_MIX: Record<ExerciseType, number> = {
+  MCQ: 50,
+  short_answer: 30,
+  long_answer: 20,
+  numerical: 0,
+};
+const DEFAULT_NUMERICAL_TYPE_MIX: Record<ExerciseType, number> = {
+  MCQ: 40,
+  short_answer: 25,
+  long_answer: 15,
+  numerical: 20,
+};
+
 // Same local-mirror convention as ExerciseType above. Wire values match the
 // orchestrator's own DifficultyLevel ("Easy" | "Medium" | "Hard") exactly --
 // only the UI labels differ ("Moderate"/"Difficult" read better to a student
@@ -101,13 +136,25 @@ export function PracticePanel({
   boardId,
   gradeId,
   subjectId,
+  subjectCode,
   medium,
 }: {
   boardId: string;
   gradeId: string;
   subjectId: string;
+  // See NUMERICAL_SUBJECT_CODES' own comment -- gates whether the type-mix
+  // picker below offers a Numerical slider at all.
+  subjectCode: string;
   medium: Medium;
 }) {
+  const numericalEligible = NUMERICAL_SUBJECT_CODES.has(subjectCode);
+  // Every available type for THIS subject, in display order -- drives both
+  // which sliders render and what availableTypes.length "100% split among
+  // N types" math the picker below does.
+  const availableTypes: ExerciseType[] = numericalEligible
+    ? ["MCQ", "short_answer", "long_answer", "numerical"]
+    : ["MCQ", "short_answer", "long_answer"];
+
   const [chapters, setChapters] = useState<string[] | null>(null);
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
     new Set(),
@@ -117,6 +164,16 @@ export function PracticePanel({
   // generates one paper most likely wants the next one at the same level
   // too, not silently reset to Moderate every time they click "New paper").
   const [difficulty, setDifficulty] = useState<Difficulty>("Medium");
+  // Sticky per-session preference, same reasoning as difficulty above --
+  // deliberately NOT reset by resetToPicker(). Seeded once from whichever
+  // default set applies to this subject (see numericalEligible above);
+  // genuinely a `useState` initializer function, not a bare value, so it
+  // only runs once at mount rather than re-evaluating (and silently
+  // overwriting anything the student already typed) on every render.
+  const [typeMix, setTypeMix] = useState<Record<ExerciseType, number>>(() =>
+    numericalEligible ? DEFAULT_NUMERICAL_TYPE_MIX : DEFAULT_TYPE_MIX,
+  );
+  const typeMixTotal = availableTypes.reduce((sum, t) => sum + (typeMix[t] || 0), 0);
   const [history, setHistory] = useState<HistoryPaper[] | null>(null);
 
   const [activePaper, setActivePaper] = useState<Paper | null>(null);
@@ -245,6 +302,19 @@ export function PracticePanel({
     });
   }
 
+  // Clamped to 0-100 and rounded to a whole percent here rather than left
+  // to the <input type="number"> element's own min/max/step (which only
+  // constrain the spinner arrows, not direct typing/pasting) -- a student
+  // typing "150" or "-5" should land on a real, in-range value immediately,
+  // not something the running total below has to explain is invalid.
+  function setTypeMixValue(type: ExerciseType, raw: string) {
+    const parsed = Math.round(Number(raw));
+    const clamped = Number.isFinite(parsed)
+      ? Math.max(0, Math.min(100, parsed))
+      : 0;
+    setTypeMix((prev) => ({ ...prev, [type]: clamped }));
+  }
+
   function resetToPicker() {
     setActivePaper(null);
     setSubmission(null);
@@ -255,7 +325,7 @@ export function PracticePanel({
   }
 
   async function handleGenerate() {
-    if (selectedChapters.size === 0 || generating) return;
+    if (selectedChapters.size === 0 || generating || typeMixTotal !== 100) return;
     setGenerating(true);
     setGenerateError(null);
     try {
@@ -274,6 +344,13 @@ export function PracticePanel({
           gradeId,
           medium,
           difficulty,
+          // Only this subject's own availableTypes -- an ineligible
+          // subject's leftover `numerical: 0` from DEFAULT_TYPE_MIX never
+          // gets sent, so the server-side numerical-eligibility check
+          // never even has a nonzero value to see.
+          questionMix: Object.fromEntries(
+            availableTypes.map((t) => [t, typeMix[t] || 0]),
+          ),
         }),
       });
       const body = await res.json();
@@ -479,6 +556,62 @@ export function PracticePanel({
                 </div>
               </div>
 
+              {/* Reported directly: "give the users options to select how
+                  much percentage of the topics should be MCQ, Short
+                  answer, and Long Answer," plus Numerical for Physics/
+                  Chemistry-type subjects -- see availableTypes' own
+                  comment on the subject gating. Percentages are of the
+                  paper's own fixed total question count (not marks), same
+                  as the orchestrator's own QuestionMix -- see
+                  practiceBlueprint.ts. Number inputs, not sliders: a
+                  slider reads fine for "roughly more of this, less of
+                  that" but gives no way to land on an exact value like 35%
+                  without a lot of fiddly dragging, and the running total
+                  below needs an exact number to validate against anyway. */}
+              <div className="mt-4">
+                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground/65">
+                  Question mix
+                </span>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {availableTypes.map((type) => (
+                    <label
+                      key={type}
+                      className="flex flex-col gap-1 rounded-lg border border-border px-2 py-1.5 text-xs"
+                    >
+                      <span className="text-foreground/75">
+                        {EXERCISE_TYPE_LABELS[type]}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={typeMix[type] ?? 0}
+                          onChange={(e) =>
+                            setTypeMixValue(type, e.target.value)
+                          }
+                          className="w-full min-w-0 rounded border border-border bg-background px-1.5 py-1 text-sm text-foreground"
+                        />
+                        <span className="text-foreground/65">%</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p
+                  className={`mt-1.5 text-xs ${
+                    typeMixTotal === 100
+                      ? "text-foreground/65"
+                      : "font-medium text-red-600"
+                  }`}
+                >
+                  {typeMixTotal === 100
+                    ? "Total: 100%"
+                    : `Total: ${typeMixTotal}% -- must add up to 100%`}
+                </p>
+              </div>
+
               {generateError && (
                 <p className="mt-3 text-sm text-red-600">{generateError}</p>
               )}
@@ -486,7 +619,11 @@ export function PracticePanel({
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={selectedChapters.size === 0 || generating}
+                disabled={
+                  selectedChapters.size === 0 ||
+                  generating ||
+                  typeMixTotal !== 100
+                }
                 className="mt-4 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
               >
                 {generating ? (

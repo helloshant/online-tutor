@@ -3,6 +3,10 @@
 // too) -- same reasoning geminiProvider.ts's own LlmTier import already
 // documents.
 import type { LlmProvider } from "./llm.js";
+// Type-only, same reasoning as the LlmProvider import above -- erased at
+// compile time, so the reverse import practiceBlueprint.ts has of
+// ExerciseType (just below) never becomes a real runtime circular import.
+import type { QuestionMix } from "./practiceBlueprint.js";
 
 // "Sanskrit" is valid here even though it's never a real student-cohort
 // medium (mirrors src/lib/supabase/types.ts's own Medium in the web app --
@@ -568,6 +572,12 @@ export type GeneratePracticePaperRequest = {
   // to "Medium" ("Moderate" in the UI), same posture as every other
   // optional refinement in this file (requestedType, requestedDifficulty).
   difficulty?: DifficultyLevel;
+  // The practice panel's own question-type-mix picker (percentages of the
+  // paper's fixed total question count that should be each type) -- see
+  // practiceBlueprint.ts's own QuestionMix/buildPracticeBlueprint comments.
+  // Omitted entirely reproduces the original hardcoded 20 MCQ/15 short/6
+  // long composition unchanged.
+  questionMix?: QuestionMix;
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

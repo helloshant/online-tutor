@@ -562,6 +562,7 @@ export function DashboardShell({
                     boardId={boardId}
                     gradeId={gradeId}
                     subjectId={selectedSubject.id}
+                    subjectCode={selectedSubject.code}
                     medium={syllabusMediumFor(
                       selectedSubject,
                       boardName,

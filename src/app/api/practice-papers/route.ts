@@ -10,10 +10,27 @@ import {
 import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { generatePracticePaper } from "@/lib/orchestratorClient";
-import type { DifficultyLevel } from "@/lib/orchestratorClient";
+import type { DifficultyLevel, ExerciseType, QuestionMix } from "@/lib/orchestratorClient";
 import type { Medium } from "@/lib/supabase/types";
 
 const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
+const VALID_EXERCISE_TYPES: ExerciseType[] = [
+  "MCQ",
+  "short_answer",
+  "long_answer",
+  "numerical",
+];
+// Mirrors topic-practice.tsx/pattern-picker.tsx/topic-summary-message.tsx's
+// own identical constant -- see their shared comment on why this is
+// subject CODE, not name, and why only these five: Numerical only makes
+// sense for Mathematics/Physics/Chemistry, plus the two combined-science
+// subjects that cover physics/chemistry content without a standalone
+// Physics/Chemistry subject of their own at that grade (CBSE's "Science"
+// and West Bengal Board's "Physical Science"). Re-checked here server-side
+// rather than trusted from the client -- practice-panel.tsx already hides
+// the Numerical slider for an ineligible subject, but that's a UI
+// convenience, not the trust boundary.
+const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
 
 // POST generates a fresh paper for one or more selected chapters -- no cap
 // on how many (a student can select the entire syllabus if they want, see
@@ -90,6 +107,46 @@ async function handlePost(request: Request) {
     );
   }
 
+  // The practice panel's own type-mix picker -- optional, same lenient-
+  // default posture as difficulty above (generatePracticePaper/the
+  // orchestrator's own buildPracticeBlueprint falls back to the original
+  // 20 MCQ/15 short/6 long composition when this is omitted), so an old
+  // cached client page mid-deploy still generates a sensible paper rather
+  // than a 400. When it IS sent, though, it's validated strictly -- unlike
+  // difficulty's silent fallback, a malformed mix here is a real client
+  // bug (the picker itself enforces summing to 100 before enabling
+  // Generate) worth surfacing, not something to silently paper over.
+  let questionMix: QuestionMix | undefined;
+  if (body?.questionMix !== undefined) {
+    const entries =
+      body.questionMix && typeof body.questionMix === "object"
+        ? Object.entries(body.questionMix as Record<string, unknown>)
+        : [];
+    const shapeValid =
+      entries.length > 0 &&
+      entries.every(
+        ([type, value]) =>
+          VALID_EXERCISE_TYPES.includes(type as ExerciseType) &&
+          typeof value === "number" &&
+          Number.isFinite(value) &&
+          value >= 0,
+      );
+    const sum = entries.reduce(
+      (total, [, v]) => total + (typeof v === "number" ? v : 0),
+      0,
+    );
+    if (!shapeValid || Math.round(sum) !== 100) {
+      return NextResponse.json(
+        {
+          error:
+            "questionMix must give MCQ/short_answer/long_answer/numerical percentages that add up to 100.",
+        },
+        { status: 400 },
+      );
+    }
+    questionMix = body.questionMix as QuestionMix;
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
@@ -156,6 +213,21 @@ async function handlePost(request: Request) {
     scope.medium,
   );
 
+  // Re-checked here, server-side, now that the real subject code is known
+  // -- practice-panel.tsx already hides the Numerical slider for an
+  // ineligible subject, but that's a UI convenience, not the trust
+  // boundary (see NUMERICAL_SUBJECT_CODES' own comment).
+  if (
+    questionMix?.numerical &&
+    questionMix.numerical > 0 &&
+    !NUMERICAL_SUBJECT_CODES.has(subject?.code ?? "")
+  ) {
+    return NextResponse.json(
+      { error: "Numerical questions aren't available for this subject." },
+      { status: 400 },
+    );
+  }
+
   // A requested label can be a real chapter name OR (for a subject whose
   // syllabus_topics rows all share one chapter value, e.g. WBBSE Geography/
   // Bengali -- see practice-panel.tsx's own comment on this) a topic name
@@ -209,6 +281,7 @@ async function handlePost(request: Request) {
         topic: t.topic,
       })),
       difficulty,
+      questionMix,
       provider,
     });
 
