@@ -107,7 +107,7 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
 
   const { data: questionRows } = await admin
     .from("practice_paper_questions")
-    .select("id, answered_question_id, question_type, marks")
+    .select("id, answered_question_id, question_type, marks, scenario")
     .eq("paper_id", paperId);
   if (!questionRows || questionRows.length === 0) {
     return NextResponse.json(
@@ -223,6 +223,7 @@ async function handlePost(request: Request, { id: paperId }: { id: string }) {
           answeredQuestionId: q.answered_question_id,
           type: q.question_type,
           marks: q.marks,
+          scenario: q.scenario ?? undefined,
         })),
         images,
         provider: wallet.provider,

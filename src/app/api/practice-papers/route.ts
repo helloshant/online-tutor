@@ -10,15 +10,26 @@ import {
 import { getWalletBalance, WALLET_EXHAUSTED_MESSAGE } from "@/lib/walletBalance";
 import { toArchetypeGradeOrYear } from "@/lib/archetypeGradeName";
 import { generatePracticePaper } from "@/lib/orchestratorClient";
-import type { DifficultyLevel, ExerciseType, QuestionMix } from "@/lib/orchestratorClient";
+import type {
+  DifficultyLevel,
+  PracticePaperQuestionType,
+  QuestionMix,
+} from "@/lib/orchestratorClient";
 import type { Medium } from "@/lib/supabase/types";
 
 const VALID_DIFFICULTIES: DifficultyLevel[] = ["Easy", "Medium", "Hard"];
-const VALID_EXERCISE_TYPES: ExerciseType[] = [
+// Mirrors the orchestrator's own VALID_PRACTICE_PAPER_TYPES -- see
+// PracticePaperQuestionType's own comment for why 'sa'/'assertion_reasoning'/
+// 'case_study' exist as a practice-paper-only extension rather than a
+// widened app-wide ExerciseType.
+const VALID_EXERCISE_TYPES: PracticePaperQuestionType[] = [
   "MCQ",
   "short_answer",
   "long_answer",
   "numerical",
+  "sa",
+  "assertion_reasoning",
+  "case_study",
 ];
 // Mirrors topic-practice.tsx/pattern-picker.tsx/topic-summary-message.tsx's
 // own identical constant -- see their shared comment on why this is
@@ -131,7 +142,7 @@ async function handlePost(request: Request) {
       entries.length > 0 &&
       entries.every(
         ([type, value]) =>
-          VALID_EXERCISE_TYPES.includes(type as ExerciseType) &&
+          VALID_EXERCISE_TYPES.includes(type as PracticePaperQuestionType) &&
           typeof value === "number" &&
           Number.isFinite(value) &&
           value >= 0,
@@ -356,9 +367,13 @@ async function handlePost(request: Request) {
           question_type: q.type,
           marks: q.marks,
           sort_order: q.sortOrder,
+          // Set only for a Case Study sub-part -- see the orchestrator's
+          // own PracticePaperQuestion.groupId/scenario comment.
+          group_id: q.groupId ?? null,
+          scenario: q.scenario ?? null,
         })),
       )
-      .select("id, answered_question_id, question_type, marks, sort_order");
+      .select("id, answered_question_id, question_type, marks, sort_order, group_id, scenario");
 
     if (questionsError || !questionRows) {
       console.error(
@@ -388,6 +403,8 @@ async function handlePost(request: Request) {
               byAnsweredId.get(row.answered_question_id)?.question ?? "",
             type: row.question_type,
             marks: row.marks,
+            groupId: row.group_id ?? undefined,
+            scenario: row.scenario ?? undefined,
             // A freshly generated paper has no submission yet -- explicit
             // null (not an omitted field) matches GET /[id]'s own shape,
             // which practice-panel.tsx relies on: it renders the graded

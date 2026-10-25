@@ -97,6 +97,51 @@ export function parseGeneratedExercises(text: string): ParsedExercise[] {
   return rows;
 }
 
+// Parses buildCaseStudyGenerationPrompt's own fixed SCENARIO:/SUBPART N
+// (M mark(s)):/Q:/A: format (prompts.ts) into a shared scenario plus its 3
+// sub-parts, in order. Deliberately its own parser, not a reuse of
+// parseGeneratedExercises above -- a case study is 4 pieces of text from
+// ONE generation call (one scenario + 3 Q/A pairs), not N independent
+// ----separated exercise blocks, so the format itself is genuinely
+// different, not just a new Type: value within the existing one. Returns
+// null on any structural mismatch (missing scenario, fewer than 3
+// subparts) -- the caller treats that the same as any other generation
+// failure, skipping this one case-study slot rather than storing a
+// partial/malformed group.
+const SCENARIO_LINE = /^SCENARIO:\s*([\s\S]*?)(?=\n^SUBPART\s+1\b)/im;
+// The trailing alternative is (?![\s\S]), not a plain $ -- under the /m
+// flag $ matches the end of EVERY line, not just the end of the string,
+// which would make the lazy answer capture stop at the first line break
+// inside the LAST subpart's own answer instead of the text's real end,
+// silently truncating any multi-line solution -- same bug class
+// EXERCISE_BLOCK_PATTERN's own comment above already warns about for the
+// identical reason, confirmed here too while writing this.
+const SUBPART_BLOCK = /^SUBPART\s+(\d+)\s*\([^)]*\):\s*\nQ:\s*([\s\S]*?)\r?\n^A:\s*([\s\S]*?)(?=\n^SUBPART\s+\d+\b|(?![\s\S]))/gim;
+
+export type ParsedCaseStudy = {
+  scenario: string;
+  subparts: { question: string; answer: string }[];
+};
+
+export function parseCaseStudyGeneration(text: string): ParsedCaseStudy | null {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+  const scenarioMatch = normalized.match(SCENARIO_LINE);
+  const scenario = scenarioMatch?.[1]?.trim();
+  if (!scenario) return null;
+
+  const subparts: { question: string; answer: string }[] = [];
+  for (const match of normalized.matchAll(SUBPART_BLOCK)) {
+    const question = match[2]?.trim();
+    const answer = match[3]?.trim();
+    if (!question || !answer) continue;
+    subparts.push({ question, answer });
+  }
+
+  if (subparts.length < 3) return null;
+  return { scenario, subparts: subparts.slice(0, 3) };
+}
+
 // Finds a `[EXERCISES]...[/EXERCISES]` block the tutor's own chat reply may
 // contain (see buildTutorSystemPrompt's rule on this -- used only when the
 // student explicitly asks for practice exercises mid-conversation, as

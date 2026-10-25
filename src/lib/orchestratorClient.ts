@@ -823,13 +823,27 @@ export async function invalidateCachedTopicSummary(
 // resolved by the web app, not the orchestrator.
 export type PracticePaperTopic = { id: string; chapter: string; topic: string };
 
+// Mirrors the orchestrator's own PracticePaperQuestionType
+// (practiceBlueprint.ts) -- see its own comment on why this is a separate
+// union from ExerciseType (used by topic-practice/pattern-picker/chat
+// elsewhere in this app), not a widening of it: 'sa'/'assertion_reasoning'/
+// 'case_study' are real CBSE-style types this app's practice papers can
+// now generate, but they're never persisted to the shared answer bank
+// (confirmed directly it has no `type` column at all) and have no meaning
+// outside this one feature.
+export type PracticePaperQuestionType =
+  | ExerciseType
+  | "sa"
+  | "assertion_reasoning"
+  | "case_study";
+
 // Mirrors the orchestrator's own QuestionMix (practiceBlueprint.ts) --
-// percentage (0-100) of the paper's fixed total question count that
-// should be each type. Missing keys mean 0%; percentages don't need to
-// sum to exactly 100 (the orchestrator normalizes), though
-// /api/practice-papers' own route requires exactly 100 from the client
-// before ever reaching here.
-export type QuestionMix = Partial<Record<ExerciseType, number>>;
+// percentage (0-100) of the paper's total question count that should be
+// each type. Missing keys mean 0%; percentages don't need to sum to
+// exactly 100 (the orchestrator normalizes), though /api/practice-papers'
+// own route requires exactly 100 from the client before ever reaching
+// there.
+export type QuestionMix = Partial<Record<PracticePaperQuestionType, number>>;
 
 export type GeneratePracticePaperRequest = {
   userId: string;
@@ -860,9 +874,13 @@ export type GeneratePracticePaperRequest = {
 export type PracticePaperQuestion = {
   answeredQuestionId: string;
   question: string;
-  type: ExerciseType;
+  type: PracticePaperQuestionType;
   marks: number;
   sortOrder: number;
+  // Set only for a Case Study sub-part -- see the orchestrator's own
+  // PracticePaperQuestion comment.
+  groupId?: string;
+  scenario?: string;
 };
 
 export type GeneratePracticePaperResponse = {
@@ -914,8 +932,11 @@ export type EvaluatePracticePaperRequest = {
   questions: {
     id: string;
     answeredQuestionId: string;
-    type: ExerciseType;
+    type: PracticePaperQuestionType;
     marks: number;
+    // Set only for a Case Study sub-part -- see the orchestrator's own
+    // EvaluatePracticePaperRequest comment.
+    scenario?: string;
   }[];
   // One or more photographed answer-sheet pages -- the one place in this
   // client that sends more than a single image in one request; every other

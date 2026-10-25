@@ -6,6 +6,7 @@ import type {
   Medium,
   SyllabusTopic,
 } from "./types.js";
+import type { PracticePaperQuestionType } from "./practiceBlueprint.js";
 
 // Reported directly: a reply laying out data as a table (standard trig
 // ratios across several angles) came back "jumbled" in the chat window --
@@ -393,6 +394,91 @@ function describeTypeAsk(type: ExerciseType, count: number): string {
   }
 }
 
+// CBSE-style practice-paper type instructions -- passed as
+// customTypeInstruction to buildExerciseGenerationPrompt/
+// buildConceptExerciseGenerationPrompt (see those params' own comment),
+// not routed through describeTypeAsk's own ExerciseType switch, since
+// neither of these two types exists in the app-wide ExerciseType.
+//
+// sa sits between the existing short_answer (2 marks, relabeled "VSA" in
+// this feature's own picker) and long_answer (5 marks, "LA") -- real
+// structured working, short of a full derivation.
+export function describeShortAnswerTypeInstruction(count: number): string {
+  const plural = count === 1 ? "This question" : `All ${count} questions`;
+  return `${plural} must be a short-answer question requiring 2-3 steps of structured working -- formula application with clearly shown intermediate steps, more substantial than a quick one-line response but well short of a full derivation or proof.`;
+}
+
+// The CBSE board exam's own fixed 4-option Assertion-Reason format --
+// deliberately spelled out exactly (not left to the model's own idea of
+// "assertion-reasoning"), since a real student has seen this exact option
+// wording on real papers and anything else would read as wrong.
+export function describeAssertionReasoningTypeInstruction(count: number): string {
+  const plural = count === 1 ? "This question" : `All ${count} questions`;
+  return `${plural} must be an Assertion-Reason question in this exact CBSE format: state an Assertion (A) and a Reason (R) as two separate statements about the topic, then exactly these four lettered options as part of the question text:
+(a) Both A and R are true, and R is the correct explanation of A.
+(b) Both A and R are true, but R is NOT the correct explanation of A.
+(c) A is true, but R is false.
+(d) A is false, but R is true.
+State the correct letter and a brief explanation of why in the solution.`;
+}
+
+// The shared scenario/passage + 3 sub-parts (1/1/2 marks) format for a
+// Case Study question -- a genuinely different shape from every other
+// practice-paper type (one generation call produces 4 pieces of text, not
+// 1), so this is its own prompt and parser (see exerciseParser.ts's
+// parseCaseStudyGeneration) rather than reusing
+// buildExerciseGenerationPrompt's single Q:/A: format. Deliberately
+// ungrounded (no archetype/concept lookup, unlike every other practice-
+// paper question) -- a case study is a real-world scenario translated
+// into this subject's methods, not an instantiation of one specific mined
+// reasoning pattern, so there's nothing archetype grounding would add
+// here that forcing it wouldn't also distort.
+export function buildCaseStudyGenerationPrompt(params: {
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  responseLanguage?: Medium;
+  chapter: string;
+  topic: string;
+  requestedDifficulty?: DifficultyLevel;
+}): string {
+  const {
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    responseLanguage = medium,
+    chapter,
+    topic,
+    requestedDifficulty,
+  } = params;
+  const difficultyAsk = requestedDifficulty
+    ? `\n\n${describeDifficultyLevel(requestedDifficulty)}`
+    : "";
+
+  return `You are writing a CBSE-style case-study-based question for a ${gradeName} student studying ${subjectName} under the ${boardName} curriculum.
+
+Chapter: "${chapter}"
+Topic: "${topic}"
+
+Write ONLY in ${responseLanguage}, regardless of what language this prompt is in. Write a short real-world scenario or practical situation (2-4 sentences, no sub-questions in it) that naturally leads into this topic's own concepts, followed by exactly 3 sub-questions that ask the student to translate the scenario into this subject's methods and solve it: the first two worth 1 mark each (quick, single-step), the third worth 2 marks (a short multi-step calculation or application building on the first two).${difficultyAsk}
+
+Format your response EXACTLY as:
+SCENARIO: <the shared scenario/passage text>
+SUBPART 1 (1 mark):
+Q: <first sub-question>
+A: <its complete solution>
+SUBPART 2 (1 mark):
+Q: <second sub-question>
+A: <its complete solution>
+SUBPART 3 (2 marks):
+Q: <third sub-question>
+A: <its complete solution>
+
+Output nothing else: no preamble, no numbering beyond what's shown above, no closing remarks.`;
+}
+
 // One real, historically-mined reasoning pattern for this exact chapter/
 // topic (see archetypeExercises.ts) -- grounds a generated exercise in a
 // pattern proven to actually appear in this board's real exams, instead
@@ -555,6 +641,17 @@ export function buildExerciseGenerationPrompt(params: {
   // not only the single-pattern one -- every exercise in the batch gets
   // written as this type.
   requestedType?: ExerciseType;
+  // Practice-paper generation's own CBSE-style types (sa,
+  // assertion_reasoning) that don't exist in ExerciseType -- see
+  // PracticePaperQuestionType's own comment on why they're a separate
+  // union rather than widening ExerciseType itself. When given, used
+  // VERBATIM in place of describeTypeAsk(requestedType, count) below;
+  // requestedType is left unset for these calls. The model's own
+  // self-reported "Type:" line (see EXERCISE_FORMAT_INSTRUCTIONS) is
+  // simply ignored by the caller in this case, same as it already is for
+  // every other practice-paper blueprint job -- the requested type always
+  // wins over the model's own self-tag (see server.ts's own comment).
+  customTypeInstruction?: string;
 }): string {
   const {
     subjectName,
@@ -568,6 +665,7 @@ export function buildExerciseGenerationPrompt(params: {
     archetypes = [],
     requestedDifficulty,
     requestedType,
+    customTypeInstruction,
   } = params;
 
   const difficultyAsk = requestedDifficulty
@@ -577,9 +675,11 @@ export function buildExerciseGenerationPrompt(params: {
           : describeDifficultyLevel(requestedDifficulty)
       }`
     : "";
-  const typeAsk = requestedType
-    ? `\n\n${describeTypeAsk(requestedType, count)}`
-    : "";
+  const typeAsk = customTypeInstruction
+    ? `\n\n${customTypeInstruction}`
+    : requestedType
+      ? `\n\n${describeTypeAsk(requestedType, count)}`
+      : "";
   // "Vary the difficulty slightly" only makes sense when nothing specific
   // was requested -- a requested difficulty replaces it with difficultyAsk
   // instead, which would otherwise directly contradict "vary."
@@ -634,6 +734,8 @@ export function buildConceptExerciseGenerationPrompt(params: {
   // Set only when the student picked a specific type rather than "Any" --
   // see ExerciseType's own comment and describeTypeAsk.
   requestedType?: ExerciseType;
+  // See buildExerciseGenerationPrompt's own identical comment.
+  customTypeInstruction?: string;
   // Practice-paper generation's own difficulty slider only -- see
   // describeDifficultyLevel's own comment (this path has no archetype
   // concept at all, so it always uses that general fallback, never
@@ -652,11 +754,14 @@ export function buildConceptExerciseGenerationPrompt(params: {
     conceptContent,
     count,
     requestedType,
+    customTypeInstruction,
     requestedDifficulty,
   } = params;
-  const typeAsk = requestedType
-    ? `\n\n${describeTypeAsk(requestedType, count)}`
-    : "";
+  const typeAsk = customTypeInstruction
+    ? `\n\n${customTypeInstruction}`
+    : requestedType
+      ? `\n\n${describeTypeAsk(requestedType, count)}`
+      : "";
   const difficultyAsk = requestedDifficulty
     ? `\n\n${describeDifficultyLevel(requestedDifficulty)}`
     : "";
@@ -792,8 +897,12 @@ export function buildPracticePaperGradingPrompt(params: {
     id: string;
     question: string;
     expectedAnswer: string;
-    type: ExerciseType;
+    type: PracticePaperQuestionType;
     marks: number;
+    // Set only for a Case Study sub-part -- see
+    // EvaluatePracticePaperRequest's own comment on why this is assembled
+    // here rather than baked into `question` at storage time.
+    scenario?: string;
   }[];
 }): string {
   const { subjectName, medium, questions } = params;
@@ -804,7 +913,7 @@ export function buildPracticePaperGradingPrompt(params: {
         q,
         i,
       ) => `${i + 1}. [Q ID: ${q.id}] (${q.type}, ${q.marks} mark${q.marks === 1 ? "" : "s"})
-Question: ${q.question}
+Question: ${q.scenario ? `Scenario: ${q.scenario}\n\n${q.question}` : q.question}
 Expected answer (the student has NOT seen this): ${q.expectedAnswer}`,
     )
     .join("\n\n");
@@ -817,9 +926,9 @@ ${questionsBlock}
 TASK
 First, read the attached image(s) and transcribe what the student actually wrote for each question, matching their handwriting to the question numbers above -- their numbering may not exactly match the order given here, so match by the question's own content, not position alone. A question the student left blank or never attempted scores 0.
 
-For each MCQ question: score is either the FULL marks (their chosen option exactly matches the expected answer) or 0 -- no partial credit for a multiple-choice question.
+For each MCQ or Assertion-Reasoning question: score is either the FULL marks (their chosen option exactly matches the expected answer) or 0 -- no partial credit for a single-best-option question.
 
-For every short_answer/long_answer/numerical question: judge by whether their final result and reasoning are sound, NOT by whether their wording, method, or level of detail matches the expected answer exactly -- the same principle as grading any other open-ended answer. A different valid method reaching the same correct result earns full marks. Partial credit (including half-marks) is expected and appropriate for a right final answer reached through incomplete or flawed reasoning, or a partially correct answer -- never more than that question's own max, never negative.
+For every other question (short-answer, long-answer, numerical, and Case Study sub-parts included): judge by whether their final result and reasoning are sound, NOT by whether their wording, method, or level of detail matches the expected answer exactly -- the same principle as grading any other open-ended answer. A different valid method reaching the same correct result earns full marks. Partial credit (including half-marks) is expected and appropriate for a right final answer reached through incomplete or flawed reasoning, or a partially correct answer -- never more than that question's own max, never negative. A Case Study sub-part's own question text already includes the shared scenario it belongs to -- grade it on its own terms as an independent question, not against the other sub-parts from the same scenario.
 
 Write each question's feedback ONLY in ${medium}, regardless of what language this prompt is in -- one short sentence, pointing at the specific thing that was right or wrong. Also write one 1-2 sentence overall summary of how the student did across the whole paper, also in ${medium}.
 

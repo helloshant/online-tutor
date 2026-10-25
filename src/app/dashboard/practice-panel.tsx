@@ -8,13 +8,35 @@ import type { Medium } from "@/lib/supabase/types";
 
 // Same local-mirror convention as pattern-picker.tsx/topic-practice.tsx --
 // never imported across the server-only orchestratorClient.ts boundary
-// into a client component.
-type ExerciseType = "MCQ" | "short_answer" | "long_answer" | "numerical";
+// into a client component. Widened with the real CBSE board-exam section
+// types reported as wanted: 'sa' (Short Answer, 3 marks -- distinct from
+// the original 'short_answer', relabeled "VSA" below at 2 marks),
+// 'assertion_reasoning' (1 mark, fixed 4-option format), and 'case_study'
+// (a shared scenario split into 3 independently-graded sub-parts, 1+1+2
+// marks) -- see the orchestrator's own PracticePaperQuestionType comment
+// for why these three live in their OWN union rather than widening the
+// app-wide ExerciseType used elsewhere in this app (topic practice,
+// pattern picker, chat).
+type ExerciseType =
+  | "MCQ"
+  | "short_answer"
+  | "long_answer"
+  | "numerical"
+  | "sa"
+  | "assertion_reasoning"
+  | "case_study";
+// short_answer/long_answer relabeled "VSA"/"LA" here now that the
+// genuinely distinct SA (3 marks) and Assertion-Reasoning badges also
+// exist alongside them -- "Short answer" next to a new "SA" badge would
+// read as the same thing twice at a glance.
 const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   MCQ: "MCQ",
-  short_answer: "Short answer",
-  long_answer: "Long answer",
+  short_answer: "VSA",
+  long_answer: "LA",
   numerical: "Numerical",
+  sa: "SA",
+  assertion_reasoning: "Assertion-Reason",
+  case_study: "Case Study",
 };
 
 // Same local-mirror convention as pattern-picker.tsx/topic-summary-message.tsx's
@@ -36,19 +58,26 @@ const NUMERICAL_SUBJECT_CODES = new Set(["MATH", "PHY", "CHEM", "SC", "PS"]);
 // it on; an ineligible subject never shows the slider at all (see
 // availableTypes below), so its own default has no numerical key to carry.
 // Both default sets are deliberately round numbers for a picker UI, not a
-// strict reproduction of the old hardcoded ratio (which was ~49/37/15) --
-// the whole point of this feature is that a student can change these
-// anyway, there's nothing special about matching the old default exactly.
+// strict reproduction of the real CBSE paper's own ratio (18 MCQ/2 A-R/5
+// VSA/6 SA/4 LA/3 case-study) -- the whole point of this feature is that a
+// student can change these anyway, there's nothing special about matching
+// a real paper's exact proportions.
 const DEFAULT_TYPE_MIX: Record<ExerciseType, number> = {
-  MCQ: 50,
-  short_answer: 30,
-  long_answer: 20,
+  MCQ: 40,
+  assertion_reasoning: 5,
+  short_answer: 15,
+  sa: 15,
+  long_answer: 10,
+  case_study: 15,
   numerical: 0,
 };
 const DEFAULT_NUMERICAL_TYPE_MIX: Record<ExerciseType, number> = {
-  MCQ: 40,
-  short_answer: 25,
-  long_answer: 15,
+  MCQ: 30,
+  assertion_reasoning: 5,
+  short_answer: 15,
+  sa: 10,
+  long_answer: 10,
+  case_study: 10,
   numerical: 20,
 };
 
@@ -99,6 +128,12 @@ type PaperQuestion = {
   marks: number;
   score: number | null;
   feedback: string | null;
+  // Set only for a Case Study sub-part -- see the orchestrator's own
+  // PracticePaperQuestion.groupId/scenario comment. Consecutive questions
+  // sharing the same groupId are one scenario's own 3 sub-parts, rendered
+  // as one grouped card (see buildDisplayItems below).
+  groupId?: string;
+  scenario?: string;
 };
 
 type Paper = {
@@ -108,6 +143,73 @@ type Paper = {
   createdAt: string;
   questions: PaperQuestion[];
 };
+
+// One entry in the active paper's own rendered list -- either an ordinary
+// single question, or a whole Case Study scenario's 3 sub-parts grouped
+// under one shared heading/number, matching how a real exam paper numbers
+// a case study as ONE question with lettered sub-parts rather than 3
+// separate ones. `questions` is already in server-assigned sortOrder, and
+// a scenario's 3 sub-parts are always pushed consecutively at generation
+// time (see the orchestrator's own /v1/practice-paper/generate dispatch
+// loop), so grouping by consecutive matching groupId is safe -- no need to
+// handle a case study's sub-parts ever being interleaved with other
+// questions.
+type DisplayItem =
+  | { kind: "question"; number: number; question: PaperQuestion }
+  | {
+      kind: "caseStudy";
+      number: number;
+      scenario: string;
+      subparts: PaperQuestion[];
+    };
+
+function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
+  const items: DisplayItem[] = [];
+  let number = 1;
+  for (let i = 0; i < questions.length; ) {
+    const q = questions[i];
+    if (q.groupId) {
+      const subparts: PaperQuestion[] = [];
+      while (i < questions.length && questions[i].groupId === q.groupId) {
+        subparts.push(questions[i]);
+        i += 1;
+      }
+      items.push({ kind: "caseStudy", number, scenario: q.scenario ?? "", subparts });
+    } else {
+      items.push({ kind: "question", number, question: q });
+      i += 1;
+    }
+    number += 1;
+  }
+  return items;
+}
+
+const SUBPART_LABELS = ["(i)", "(ii)", "(iii)"];
+
+// Shared score/feedback bar, used for both an ordinary question and a
+// Case Study sub-part -- pulled out once both needed the identical JSX
+// rather than duplicating it (a sub-part is graded as its own independent
+// question, see server.ts's own comment on why, so this needed no change
+// at all to work for them, just reuse).
+function QuestionFeedback({ q }: { q: PaperQuestion }) {
+  if (q.score === null) return null;
+  return (
+    <p
+      className={`mt-1.5 rounded-lg p-2 text-sm ${
+        q.score <= 0
+          ? "bg-red-50 text-red-800"
+          : q.score >= q.marks
+            ? "bg-green-50 text-green-800"
+            : "bg-yellow-50 text-yellow-800"
+      }`}
+    >
+      <span className="font-semibold">
+        {q.score}/{q.marks}
+      </span>{" "}
+      {q.feedback}
+    </p>
+  );
+}
 
 type SubmissionStatus = "submitted" | "grading" | "graded" | "failed";
 
@@ -160,10 +262,18 @@ export function PracticePanel({
   const numericalEligible = NUMERICAL_SUBJECT_CODES.has(subjectCode);
   // Every available type for THIS subject, in display order -- drives both
   // which sliders render and what availableTypes.length "100% split among
-  // N types" math the picker below does.
-  const availableTypes: ExerciseType[] = numericalEligible
-    ? ["MCQ", "short_answer", "long_answer", "numerical"]
-    : ["MCQ", "short_answer", "long_answer"];
+  // N types" math the picker below does. The 6 CBSE-style types are always
+  // offered, every subject -- only Numerical is subject-gated (see
+  // NUMERICAL_SUBJECT_CODES' own comment), appended last when eligible.
+  const availableTypes: ExerciseType[] = [
+    "MCQ",
+    "assertion_reasoning",
+    "short_answer",
+    "sa",
+    "long_answer",
+    "case_study",
+    ...(numericalEligible ? (["numerical"] as const) : []),
+  ];
 
   const [chapters, setChapters] = useState<string[] | null>(null);
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
@@ -630,7 +740,7 @@ export function PracticePanel({
                 <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground/65">
                   Question mix
                 </span>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                   {availableTypes.map((type) => (
                     <label
                       key={type}
@@ -746,36 +856,56 @@ export function PracticePanel({
           </p>
 
           <ol className="space-y-4">
-            {activePaper.questions.map((q, i) => (
-              <li key={q.id}>
-                <p className="whitespace-pre-wrap font-medium">
-                  {i + 1}.{" "}
-                  <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
-                    {EXERCISE_TYPE_LABELS[q.type]}
-                  </span>
-                  <span className="mr-1 text-xs font-normal text-foreground/65">
-                    ({q.marks} mark{q.marks === 1 ? "" : "s"})
-                  </span>
-                  <MathText text={q.question} />
-                </p>
-                {q.score !== null && (
-                  <p
-                    className={`mt-1.5 rounded-lg p-2 text-sm ${
-                      q.score <= 0
-                        ? "bg-red-50 text-red-800"
-                        : q.score >= q.marks
-                          ? "bg-green-50 text-green-800"
-                          : "bg-yellow-50 text-yellow-800"
-                    }`}
-                  >
-                    <span className="font-semibold">
-                      {q.score}/{q.marks}
-                    </span>{" "}
-                    {q.feedback}
+            {buildDisplayItems(activePaper.questions).map((item) =>
+              item.kind === "question" ? (
+                <li key={item.question.id}>
+                  <p className="whitespace-pre-wrap font-medium">
+                    {item.number}.{" "}
+                    <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
+                      {EXERCISE_TYPE_LABELS[item.question.type]}
+                    </span>
+                    <span className="mr-1 text-xs font-normal text-foreground/65">
+                      ({item.question.marks} mark{item.question.marks === 1 ? "" : "s"})
+                    </span>
+                    <MathText text={item.question.question} />
                   </p>
-                )}
-              </li>
-            ))}
+                  <QuestionFeedback q={item.question} />
+                </li>
+              ) : (
+                // A Case Study scenario -- one question number, the shared
+                // scenario shown once, then its 3 sub-parts each with their
+                // own marks and (once graded) their own independent
+                // feedback bar. See DisplayItem's own comment.
+                <li key={item.subparts[0]?.groupId ?? item.number}>
+                  <p className="whitespace-pre-wrap font-medium">
+                    {item.number}.{" "}
+                    <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
+                      Case Study
+                    </span>
+                    <span className="mr-1 text-xs font-normal text-foreground/65">
+                      (
+                      {item.subparts.reduce((sum, sp) => sum + sp.marks, 0)}{" "}
+                      marks)
+                    </span>
+                    <MathText text={item.scenario} />
+                  </p>
+                  <ol className="mt-2 space-y-3 pl-4">
+                    {item.subparts.map((sp, i) => (
+                      <li key={sp.id}>
+                        <p className="whitespace-pre-wrap font-medium">
+                          {SUBPART_LABELS[i] ?? `(${i + 1})`}{" "}
+                          <span className="mr-1 text-xs font-normal text-foreground/65">
+                            ({sp.marks} mark{sp.marks === 1 ? "" : "s"})
+                          </span>
+                          <MathText text={sp.question} />
+                        </p>
+                        <QuestionFeedback q={sp} />
+                      </li>
+                    ))}
+                  </ol>
+                </li>
+              ),
+            )}
           </ol>
 
           {submission?.status === "graded" ? (

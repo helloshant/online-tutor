@@ -1,5 +1,6 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
+import { randomUUID } from "node:crypto";
 import {
   findAnswerInBank,
   findRelevantExercises,
@@ -31,15 +32,21 @@ import {
 } from "./chapterDocuments.js";
 import { findRelevantChapterChunks } from "./chapterRag.js";
 import { detectContentLanguage } from "./contentLanguage.js";
-import { extractEmbeddedExercises, parseGeneratedExercises } from "./exerciseParser.js";
+import { extractEmbeddedExercises, parseCaseStudyGeneration, parseGeneratedExercises } from "./exerciseParser.js";
 import { recordExerciseGenerationFailure } from "./exerciseFailureLog.js";
 import { getChatReply, getGradingReply } from "./llm.js";
 import type { LlmProvider } from "./llm.js";
 import { recordChatEvent } from "./observabilityClient.js";
-import { buildPracticeBlueprint, type QuestionMix } from "./practiceBlueprint.js";
+import {
+  buildPracticeBlueprint,
+  CASE_STUDY_SUBPART_MARKS,
+  type PracticePaperQuestionType,
+  type QuestionMix,
+} from "./practiceBlueprint.js";
 import { parsePracticePaperGrading } from "./practicePaperGrading.js";
 import { restateQuestionForStorage } from "./questionRewrite.js";
 import {
+  buildCaseStudyGenerationPrompt,
   buildChapterDocumentEmphasisPrompt,
   buildConceptExerciseGenerationPrompt,
   buildExerciseGenerationPrompt,
@@ -48,6 +55,8 @@ import {
   buildTopicSummaryPrompt,
   buildTopicSummaryTranslationPrompt,
   buildTutorSystemPrompt,
+  describeAssertionReasoningTypeInstruction,
+  describeShortAnswerTypeInstruction,
 } from "./prompts.js";
 import type { ExerciseArchetype } from "./prompts.js";
 import {
@@ -169,6 +178,16 @@ const VALID_TYPES: ExerciseType[] = [
   "short_answer",
   "long_answer",
   "numerical",
+];
+// Validates a client-supplied questionMix on /v1/practice-paper/generate --
+// VALID_TYPES above only covers the app-wide ExerciseType; practice papers
+// additionally accept the CBSE-style types that exist only here (see
+// PracticePaperQuestionType's own comment).
+const VALID_PRACTICE_PAPER_TYPES: PracticePaperQuestionType[] = [
+  ...VALID_TYPES,
+  "sa",
+  "assertion_reasoning",
+  "case_study",
 ];
 const SHARED_SECRET = process.env.ORCHESTRATOR_SHARED_SECRET;
 
@@ -2385,7 +2404,15 @@ async function generatePracticePaperQuestion(params: {
   gradeName: string;
   medium: Medium;
   topic: PracticePaperTopic;
-  type: ExerciseType;
+  // sa/assertion_reasoning (see PracticePaperQuestionType's own comment)
+  // reuse this entire function -- same archetype/concept grounding, same
+  // single Q:/A: generation+storage -- via customTypeInstruction below,
+  // never by passing them as requestedType (they're not ExerciseType
+  // members at all). case_study does NOT go through this function -- see
+  // generatePracticePaperCaseStudy, a structurally different (1 call -> 3
+  // stored questions) path the /v1/practice-paper/generate route calls
+  // instead whenever a blueprint job's type is "case_study".
+  type: Exclude<PracticePaperQuestionType, "case_study">;
   // The practice-paper difficulty slider -- see buildPracticeBlueprint's
   // sibling comment and describeDifficultyLevel in prompts.ts for how "Hard"
   // is deliberately written as "difficult to very difficult," not just
@@ -2394,7 +2421,7 @@ async function generatePracticePaperQuestion(params: {
   // whether this specific question ends up archetype-grounded, concept-
   // grounded, or fully ungrounded.
   difficulty: DifficultyLevel;
-}): Promise<{ id: string; question: string; type: ExerciseType } | null> {
+}): Promise<{ id: string; question: string; type: Exclude<PracticePaperQuestionType, "case_study"> } | null> {
   const {
     userId,
     scope,
@@ -2407,6 +2434,21 @@ async function generatePracticePaperQuestion(params: {
     type,
     difficulty,
   } = params;
+
+  // sa/assertion_reasoning aren't real ExerciseType members, so they can
+  // never be passed as requestedType below -- customTypeInstruction is the
+  // override point both buildExerciseGenerationPrompt and
+  // buildConceptExerciseGenerationPrompt already have for exactly this
+  // (see their own comment).
+  const customTypeInstruction =
+    type === "sa"
+      ? describeShortAnswerTypeInstruction(1)
+      : type === "assertion_reasoning"
+        ? describeAssertionReasoningTypeInstruction(1)
+        : undefined;
+  const requestedType = customTypeInstruction
+    ? undefined
+    : (type as ExerciseType);
 
   const archetypes = await findArchetypesForTopic({
     boardName,
@@ -2427,7 +2469,8 @@ async function generatePracticePaperQuestion(params: {
       topic: topic.topic,
       count: 1,
       archetypes,
-      requestedType: type,
+      requestedType,
+      customTypeInstruction,
       requestedDifficulty: difficulty,
     });
   } else {
@@ -2447,7 +2490,8 @@ async function generatePracticePaperQuestion(params: {
           conceptTerm: concept.term,
           conceptContent: concept.content,
           count: 1,
-          requestedType: type,
+          requestedType,
+          customTypeInstruction,
           requestedDifficulty: difficulty,
         })
       : buildExerciseGenerationPrompt({
@@ -2459,7 +2503,8 @@ async function generatePracticePaperQuestion(params: {
           topic: topic.topic,
           count: 1,
           archetypes: [],
-          requestedType: type,
+          requestedType,
+          customTypeInstruction,
           requestedDifficulty: difficulty,
         });
   }
@@ -2516,17 +2561,121 @@ async function generatePracticePaperQuestion(params: {
   // /v1/topic-exercises/generate-for-concept's identical override
   // (confirmed directly: the model reliably WRITES the requested type's
   // actual content, but its own self-classification tag is the less
-  // reliable of the two signals).
+  // reliable of the two signals). storeGeneratedExercise's own `type` is
+  // ExerciseType-only (sa/assertion_reasoning aren't persisted to
+  // answered_questions anyway -- confirmed directly it has no `type`
+  // column at all, see PracticePaperQuestionType's own comment), so it's
+  // simply omitted for those two rather than passed as something it can't
+  // type-check as; the CALLER here still returns the true requested type
+  // regardless; `stored.type` is never read.
   const stored = await storeGeneratedExercise(
     scope,
     topic.id,
     userId,
-    { question: exercise.question, answer: exercise.answer, type },
+    {
+      question: exercise.question,
+      answer: exercise.answer,
+      type: type === "sa" || type === "assertion_reasoning" ? undefined : type,
+    },
     archetypeAttribution,
   );
   if (!stored) return null;
 
   return { id: stored.id, question: stored.question, type };
+}
+
+// Sibling of generatePracticePaperQuestion above, for Case Study blueprint
+// jobs -- structurally different (ONE generation call produces a shared
+// scenario plus 3 independently-gradeable sub-parts, 1+1+2 marks, instead
+// of 1 question), so this is its own function rather than another branch
+// of that one. Ungrounded, same as buildCaseStudyGenerationPrompt's own
+// comment on why -- no archetype/concept lookup here at all.
+//
+// Each sub-part is stored with just its OWN short sub-question text --
+// NOT the scenario baked in. Baking the scenario into
+// answered_questions.question would make it the only source of truth for
+// that text, which breaks the moment anything re-derives a question's
+// display text straight from storage (GET /api/practice-papers/[id] does
+// exactly that on every reload) -- the scenario would then show up
+// twice: once from practice_paper_questions.scenario (rendered once above
+// the group) and again baked into each sub-part's own text underneath.
+// Instead, the scenario context grading needs is assembled FRESH at
+// grading time: buildPracticePaperGradingPrompt prepends `scenario` (see
+// EvaluatePracticePaperRequest.questions[].scenario) onto a sub-part's own
+// question text right there, rather than depending on it being baked into
+// storage permanently.
+async function generatePracticePaperCaseStudy(params: {
+  userId: string;
+  scope: Omit<AnswerScope, "question" | "topicId">;
+  provider?: LlmProvider;
+  subjectName: string;
+  boardName: string;
+  gradeName: string;
+  medium: Medium;
+  topic: PracticePaperTopic;
+  difficulty: DifficultyLevel;
+}): Promise<{
+  scenario: string;
+  subparts: { id: string; question: string; marks: number }[];
+} | null> {
+  const { userId, scope, provider, subjectName, boardName, gradeName, medium, topic, difficulty } = params;
+
+  const systemPrompt = buildCaseStudyGenerationPrompt({
+    subjectName,
+    boardName,
+    gradeName,
+    medium,
+    chapter: topic.chapter,
+    topic: topic.topic,
+    requestedDifficulty: difficulty,
+  });
+
+  const { text } = await getChatReply({
+    systemPrompt,
+    history: [],
+    message: "Generate the case study now.",
+    maxTokens: EXERCISE_MAX_TOKENS,
+    // Same gap-closing reasoning as generatePracticePaperQuestion's own
+    // identical event block -- every practice-paper generation call needs
+    // to be attributable, this one included.
+    event: {
+      loggable: true,
+      userId,
+      mode: "student",
+      boardId: scope.boardId,
+      gradeId: scope.gradeId,
+      subjectId: scope.subjectId,
+      medium: scope.medium,
+      question: `practice-paper/generate: ${topic.chapter} / ${topic.topic} (case_study, ${difficulty})`,
+    },
+    tier: "standard",
+    provider,
+  });
+
+  const parsed = parseCaseStudyGeneration(text);
+  if (!parsed) return null;
+
+  const subLabels = ["(i)", "(ii)", "(iii)"];
+  const stored: { id: string; question: string; marks: number }[] = [];
+  for (let i = 0; i < parsed.subparts.length; i++) {
+    const subpart = parsed.subparts[i];
+    const question = `${subLabels[i]} ${subpart.question}`;
+    const row = await storeGeneratedExercise(
+      scope,
+      topic.id,
+      userId,
+      { question, answer: subpart.answer },
+      null,
+    );
+    // One failed sub-part fails the whole scenario -- a 2-of-3 case study
+    // would be missing marks the student was told the question was worth,
+    // worse than skipping this one slot the way a single ordinary question
+    // failing already does.
+    if (!row) return null;
+    stored.push({ id: row.id, question, marks: CASE_STUDY_SUBPART_MARKS[i] });
+  }
+
+  return { scenario: parsed.scenario, subparts: stored };
 }
 
 // A student can select any number of chapters, even the whole syllabus --
@@ -2604,8 +2753,10 @@ app.post(
       body.questionMix && typeof body.questionMix === "object"
         ? Object.fromEntries(
             Object.entries(body.questionMix as Record<string, unknown>).filter(
-              (entry): entry is [ExerciseType, number] =>
-                VALID_TYPES.includes(entry[0] as ExerciseType) &&
+              (entry): entry is [PracticePaperQuestionType, number] =>
+                VALID_PRACTICE_PAPER_TYPES.includes(
+                  entry[0] as PracticePaperQuestionType,
+                ) &&
                 typeof entry[1] === "number" &&
                 Number.isFinite(entry[1]) &&
                 entry[1] >= 0,
@@ -2636,13 +2787,19 @@ app.post(
     };
 
     const blueprint = buildPracticeBlueprint(questionMix, totalQuestions);
-    const jobs: { type: ExerciseType; marks: number }[] = blueprint.flatMap(
-      (section) =>
+    // For case_study, section.count is the number of SCENARIOS (see
+    // buildPracticeBlueprint's own comment) -- one job per scenario, same
+    // as every other type's one job per question; each job still costs
+    // exactly one LLM call either way, so CONCURRENCY below still bounds
+    // real call volume correctly regardless of a case_study job producing
+    // 3 stored questions instead of 1.
+    const jobs: { type: PracticePaperQuestionType; marks: number }[] =
+      blueprint.flatMap((section) =>
         Array.from({ length: section.count }, () => ({
           type: section.type,
           marks: section.marksEach,
         })),
-    );
+      );
 
     try {
       const questions: PracticePaperQuestion[] = [];
@@ -2660,11 +2817,40 @@ app.post(
       const CONCURRENCY = 8;
       for (let i = 0; i < jobs.length; i += CONCURRENCY) {
         const chunk = jobs.slice(i, i + CONCURRENCY);
+        // Each chunk entry resolves to an ARRAY of question rows, not one
+        // -- a case_study job produces 3 (one scenario call, see
+        // generatePracticePaperCaseStudy's own comment), every other job
+        // produces 0 (failed) or 1. Flattened into `questions` below in
+        // the same relative order, so sortOrder still reads as a sensible
+        // paper layout (a case study's 3 sub-parts land consecutively).
         const results = await Promise.all(
-          chunk.map((job) => {
+          chunk.map(async (job) => {
             const topic = topics[topicCursor % topics.length];
             topicCursor += 1;
-            return generatePracticePaperQuestion({
+            if (job.type === "case_study") {
+              const group = await generatePracticePaperCaseStudy({
+                userId,
+                scope,
+                provider: body.provider,
+                subjectName,
+                boardName,
+                gradeName,
+                medium,
+                topic,
+                difficulty,
+              });
+              if (!group) return [];
+              const groupId = randomUUID();
+              return group.subparts.map((sp) => ({
+                id: sp.id,
+                question: sp.question,
+                type: "case_study" as const,
+                marks: sp.marks,
+                groupId,
+                scenario: group.scenario,
+              }));
+            }
+            const result = await generatePracticePaperQuestion({
               userId,
               scope,
               provider: body.provider,
@@ -2675,20 +2861,23 @@ app.post(
               topic,
               type: job.type,
               difficulty,
-            }).then((result) =>
-              result ? { ...result, marks: job.marks } : null,
-            );
+            });
+            return result ? [{ ...result, marks: job.marks }] : [];
           }),
         );
-        for (const result of results) {
-          if (!result) continue;
-          questions.push({
-            answeredQuestionId: result.id,
-            question: result.question,
-            type: result.type,
-            marks: result.marks,
-            sortOrder: questions.length,
-          });
+        for (const group of results) {
+          for (const result of group) {
+            questions.push({
+              answeredQuestionId: result.id,
+              question: result.question,
+              type: result.type,
+              marks: result.marks,
+              sortOrder: questions.length,
+              ...("groupId" in result
+                ? { groupId: result.groupId, scenario: result.scenario }
+                : {}),
+            });
+          }
         }
       }
 
@@ -2770,6 +2959,7 @@ app.post(
             expectedAnswer: answer.answer,
             type: q.type,
             marks: q.marks,
+            scenario: q.scenario,
           };
         })
         .filter((q): q is NonNullable<typeof q> => q !== null);

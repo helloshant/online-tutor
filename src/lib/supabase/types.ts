@@ -663,11 +663,21 @@ export type PracticePaper = {
   created_at: string;
 };
 
+// Mirrors the orchestrator's own PracticePaperQuestionType
+// (services/orchestrator/src/practiceBlueprint.ts) and
+// 0070_practice_paper_cbse_question_types.sql's widened CHECK constraint
+// -- 'sa'/'assertion_reasoning'/'case_study' are the real CBSE-style types
+// added there, separate from the app-wide ExerciseType used elsewhere in
+// this file (topic exercises, chat, the answer bank) since none of those
+// three are ever persisted outside this one table.
 export type PracticePaperQuestionType =
   | "MCQ"
   | "short_answer"
   | "long_answer"
-  | "numerical";
+  | "numerical"
+  | "sa"
+  | "assertion_reasoning"
+  | "case_study";
 
 export type PracticePaperQuestion = {
   id: string;
@@ -676,6 +686,10 @@ export type PracticePaperQuestion = {
   question_type: PracticePaperQuestionType;
   marks: number;
   sort_order: number;
+  // Set only for a Case Study sub-part -- see
+  // 0070_practice_paper_cbse_question_types.sql's own comment.
+  group_id: string | null;
+  scenario: string | null;
 };
 
 export type PracticePaperSubmissionStatus =

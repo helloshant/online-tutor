@@ -6,7 +6,7 @@ import type { LlmProvider } from "./llm.js";
 // Type-only, same reasoning as the LlmProvider import above -- erased at
 // compile time, so the reverse import practiceBlueprint.ts has of
 // ExerciseType (just below) never becomes a real runtime circular import.
-import type { QuestionMix } from "./practiceBlueprint.js";
+import type { QuestionMix, PracticePaperQuestionType } from "./practiceBlueprint.js";
 
 // "Sanskrit" is valid here even though it's never a real student-cohort
 // medium (mirrors src/lib/supabase/types.ts's own Medium in the web app --
@@ -591,9 +591,16 @@ export type GeneratePracticePaperRequest = {
 export type PracticePaperQuestion = {
   answeredQuestionId: string;
   question: string;
-  type: ExerciseType;
+  type: PracticePaperQuestionType;
   marks: number;
   sortOrder: number;
+  // Set only for a Case Study sub-part (type: "case_study") -- shared
+  // across the 3 sub-parts of one scenario (groupId) and the scenario
+  // text itself (scenario), so the caller can render them as one group
+  // instead of 3 unrelated questions. See practiceBlueprint.ts's own
+  // CASE_STUDY_SUBPART_MARKS comment.
+  groupId?: string;
+  scenario?: string;
 };
 
 export type GeneratePracticePaperResponse = {
@@ -623,7 +630,14 @@ export type EvaluatePracticePaperRequest = {
   questions: {
     id: string;
     answeredQuestionId: string;
-    type: ExerciseType;
+    type: PracticePaperQuestionType;
+    // Set only for a Case Study sub-part -- the shared scenario text,
+    // prepended onto this question's own text in
+    // buildPracticePaperGradingPrompt so the grading model has full
+    // context without it needing to be baked into storage (see
+    // server.ts's own generatePracticePaperCaseStudy comment on why it
+    // deliberately ISN'T baked into answered_questions.question).
+    scenario?: string;
     marks: number;
   }[];
   // One or more photographed answer-sheet pages -- see

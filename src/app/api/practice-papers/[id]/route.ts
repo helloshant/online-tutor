@@ -47,7 +47,9 @@ async function handleGet({ id: paperId }: { id: string }) {
 
   const { data: questionRows } = await supabase
     .from("practice_paper_questions")
-    .select("id, answered_question_id, question_type, marks, sort_order")
+    .select(
+      "id, answered_question_id, question_type, marks, sort_order, group_id, scenario",
+    )
     .eq("paper_id", paperId)
     .order("sort_order");
 
@@ -101,6 +103,8 @@ async function handleGet({ id: paperId }: { id: string }) {
         question: questionTextById.get(q.answered_question_id) ?? "",
         type: q.question_type,
         marks: q.marks,
+        groupId: q.group_id ?? undefined,
+        scenario: q.scenario ?? undefined,
         score: scoresByQuestionId.get(q.id)?.score ?? null,
         feedback: scoresByQuestionId.get(q.id)?.feedback ?? null,
       })),
