@@ -2729,6 +2729,11 @@ app.post(
     const boardName = body.boardName;
     const gradeName = body.gradeName;
     const medium = body.medium as Medium;
+    // Captured into a local const -- `body` itself is narrowed non-null
+    // only within this handler's own top-level control flow; the runJob
+    // function declaration below closes over it from a nested scope, where
+    // TS no longer carries that narrowing through.
+    const provider = body.provider;
     // The difficulty slider on the practice panel -- defaults to "Medium"
     // ("Moderate" in the UI) the same way an invalid/absent requestedType or
     // requestedDifficulty elsewhere in this file just means "no preference"
@@ -2801,9 +2806,90 @@ app.post(
         })),
       );
 
+    // One job's own result rows -- 0 (generation failed) for an ordinary
+    // question, 1 for an ordinary question, or 3 for a case_study scenario
+    // (its 3 sub-parts, sharing a fresh groupId/scenario).
+    type JobResultEntry = {
+      id: string;
+      question: string;
+      type: PracticePaperQuestionType;
+      marks: number;
+      groupId?: string;
+      scenario?: string;
+    };
+    async function runJob(
+      job: { type: PracticePaperQuestionType; marks: number },
+      topic: PracticePaperTopic,
+    ): Promise<JobResultEntry[]> {
+      if (job.type === "case_study") {
+        const group = await generatePracticePaperCaseStudy({
+          userId,
+          scope,
+          provider,
+          subjectName,
+          boardName,
+          gradeName,
+          medium,
+          topic,
+          difficulty,
+        });
+        if (!group) return [];
+        const groupId = randomUUID();
+        return group.subparts.map((sp) => ({
+          id: sp.id,
+          question: sp.question,
+          type: "case_study" as const,
+          marks: sp.marks,
+          groupId,
+          scenario: group.scenario,
+        }));
+      }
+      const result = await generatePracticePaperQuestion({
+        userId,
+        scope,
+        provider,
+        subjectName,
+        boardName,
+        gradeName,
+        medium,
+        topic,
+        type: job.type,
+        difficulty,
+      });
+      return result ? [{ ...result, marks: job.marks }] : [];
+    }
+
     try {
       const questions: PracticePaperQuestion[] = [];
       let topicCursor = 0;
+      // Reported directly: the same (or a near-identical) question could
+      // show up twice in one paper -- each generation call independently
+      // asks the model for "the" question on a given topic/type with no
+      // awareness of what any OTHER call in the SAME paper already wrote,
+      // so two slots sharing a topic+type (unavoidable once total
+      // questions exceeds topics x types) can easily converge on the same
+      // obvious answer. Worse, storeGeneratedExercise's own answer-bank
+      // dedup (findAnswerInBank, an exact-text match -- intentional, saves
+      // LLM spend ACROSS students/papers) then has both slots reference
+      // the literal same answered_question_id, so a would-be coincidence
+      // became a guaranteed, visible repeat. Tracked by normalized
+      // question text (trim/lowercase/collapsed whitespace) across the
+      // WHOLE paper, not reset per chunk -- see the retry loop below.
+      const usedQuestionTexts = new Set<string>();
+      function normalizeQuestionText(text: string): string {
+        return text.trim().toLowerCase().replace(/\s+/g, " ");
+      }
+      function hasDuplicate(entries: JobResultEntry[]): boolean {
+        return entries.some((e) => usedQuestionTexts.has(normalizeQuestionText(e.question)));
+      }
+      // 1 initial attempt + up to 2 retries -- bounded so a genuinely
+      // narrow topic/type combo (little real content to draw fresh
+      // questions from) can't loop indefinitely; a slot still colliding
+      // after every retry is dropped rather than shown twice (see below),
+      // same "paper reads a little shorter" tolerance an outright
+      // generation failure already gets elsewhere in this route.
+      const MAX_DEDUP_ATTEMPTS = 3;
+
       // Bounded concurrency -- not full parallelism (the blueprint is up to
       // MAX_PRACTICE_PAPER_QUESTIONS LLM calls every time, see
       // practiceBlueprint.ts -- unnecessary load on the provider all at
@@ -2816,65 +2902,49 @@ app.post(
       // for how its upper bound was sized against this).
       const CONCURRENCY = 8;
       for (let i = 0; i < jobs.length; i += CONCURRENCY) {
-        const chunk = jobs.slice(i, i + CONCURRENCY);
-        // Each chunk entry resolves to an ARRAY of question rows, not one
-        // -- a case_study job produces 3 (one scenario call, see
-        // generatePracticePaperCaseStudy's own comment), every other job
-        // produces 0 (failed) or 1. Flattened into `questions` below in
-        // the same relative order, so sortOrder still reads as a sensible
-        // paper layout (a case study's 3 sub-parts land consecutively).
+        const chunk = jobs.slice(i, i + CONCURRENCY).map((job) => {
+          const topic = topics[topicCursor % topics.length];
+          topicCursor += 1;
+          return { job, topic };
+        });
         const results = await Promise.all(
-          chunk.map(async (job) => {
-            const topic = topics[topicCursor % topics.length];
-            topicCursor += 1;
-            if (job.type === "case_study") {
-              const group = await generatePracticePaperCaseStudy({
-                userId,
-                scope,
-                provider: body.provider,
-                subjectName,
-                boardName,
-                gradeName,
-                medium,
-                topic,
-                difficulty,
-              });
-              if (!group) return [];
-              const groupId = randomUUID();
-              return group.subparts.map((sp) => ({
-                id: sp.id,
-                question: sp.question,
-                type: "case_study" as const,
-                marks: sp.marks,
-                groupId,
-                scenario: group.scenario,
-              }));
-            }
-            const result = await generatePracticePaperQuestion({
-              userId,
-              scope,
-              provider: body.provider,
-              subjectName,
-              boardName,
-              gradeName,
-              medium,
-              topic,
-              type: job.type,
-              difficulty,
-            });
-            return result ? [{ ...result, marks: job.marks }] : [];
-          }),
+          chunk.map(({ job, topic }) => runJob(job, topic)),
         );
-        for (const group of results) {
-          for (const result of group) {
+
+        // Walked sequentially (not another Promise.all) -- each retry needs
+        // to see every acceptance already made so far, including ones from
+        // earlier in this SAME chunk, not just earlier chunks. Only the
+        // rare duplicate actually pays for a sequential re-call; everything
+        // else here is already-resolved data.
+        for (let j = 0; j < results.length; j++) {
+          let entries = results[j];
+          const { job, topic } = chunk[j];
+          let attempts = 1;
+          while (
+            entries.length > 0 &&
+            hasDuplicate(entries) &&
+            attempts < MAX_DEDUP_ATTEMPTS
+          ) {
+            entries = await runJob(job, topic);
+            attempts += 1;
+          }
+          if (entries.length === 0) continue;
+          // Still colliding after every retry -- for a case_study job this
+          // drops the WHOLE scenario rather than keep a partial 1-or-2-of-3
+          // group (would read as a broken case study); for an ordinary
+          // single-entry job this is just that one slot, same tolerance as
+          // a generation failure.
+          if (hasDuplicate(entries)) continue;
+          for (const entry of entries) {
+            usedQuestionTexts.add(normalizeQuestionText(entry.question));
             questions.push({
-              answeredQuestionId: result.id,
-              question: result.question,
-              type: result.type,
-              marks: result.marks,
+              answeredQuestionId: entry.id,
+              question: entry.question,
+              type: entry.type,
+              marks: entry.marks,
               sortOrder: questions.length,
-              ...("groupId" in result
-                ? { groupId: result.groupId, scenario: result.scenario }
+              ...(entry.groupId
+                ? { groupId: entry.groupId, scenario: entry.scenario }
                 : {}),
             });
           }
