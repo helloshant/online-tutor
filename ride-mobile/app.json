@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Sawari",
+    "slug": "sawari-mobile",
+    "scheme": "sawari",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.sawari"
+    },
+    "android": {
+      "package": "com.example.sawari",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBBF24",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Sawari uses your location to set your pickup point and show nearby captains."
+        }
+      ]
+    ]
+  }
+}

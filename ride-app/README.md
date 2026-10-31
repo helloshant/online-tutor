@@ -41,3 +41,7 @@ There is no real driver network, routing engine or payment gateway. Captains are
 Routes are smooth curves, and distance is the straight-line distance × 1.35.
 Travel time is compressed: one trip-minute plays as 2.5 s.
 To make it real, replace `captains.ts` and the effects in `ride-app.tsx` with a backend that does dispatch and pushes location updates (for example over WebSockets or Supabase Realtime), plug in a routing API such as OSRM or Google Directions, and use a payment gateway for UPI.
+
+## Mobile app
+
+The native iOS/Android version lives in [`../ride-mobile`](../ride-mobile) and imports `src/lib/{fares,geo,places,captains}.ts` from here, so keep those modules platform-neutral.

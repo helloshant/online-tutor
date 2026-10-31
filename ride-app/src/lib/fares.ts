@@ -1,5 +1,8 @@
 import { roadDistanceKm, type LatLng } from "./geo";
 
+// Shared by the web app (ride-app) and the mobile app (ride-mobile): keep this
+// module free of DOM / Node / React Native APIs.
+
 export type VehicleType = "bike" | "auto" | "cab" | "cab_premium";
 
 export type Vehicle = {

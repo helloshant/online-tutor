@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      // Pure TypeScript domain logic shared with the web app (fares, geo,
+      // captains, places). Keep it free of DOM / React Native APIs.
+      "@shared/*": ["../ride-app/src/lib/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "../ride-app/src/lib/geo.ts", "../ride-app/src/lib/fares.ts", "../ride-app/src/lib/places.ts", "../ride-app/src/lib/captains.ts"]
+}

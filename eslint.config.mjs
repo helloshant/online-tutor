@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Standalone app with its own package.json / lint config.
     "ride-app/**",
+    "ride-mobile/**",
   ]),
 ]);
 

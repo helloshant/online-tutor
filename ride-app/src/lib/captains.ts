@@ -24,11 +24,16 @@ const AVATARS = ["👨🏽", "👨🏾", "👩🏽", "🧔🏽", "👨🏻", "�
 const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 const digits = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join("");
 
+/** Random id that works in browsers and React Native (no `crypto` needed). */
+export function randomId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function randomCaptain(type: VehicleType): Captain {
   const letters = "ABCDEFGHJKLMNPRSTUVWXYZ";
   const plate = `KA ${String(1 + Math.floor(Math.random() * 60)).padStart(2, "0")} ${pick([...letters])}${pick([...letters])} ${digits(4)}`;
   return {
-    id: crypto.randomUUID(),
+    id: randomId(),
     name: `${pick(FIRST)} ${pick(LAST)}`,
     phone: `+91 9${digits(4)} ${digits(5)}`,
     rating: Math.round((4.3 + Math.random() * 0.7) * 10) / 10,

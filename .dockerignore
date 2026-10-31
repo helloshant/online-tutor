@@ -8,6 +8,7 @@ node_modules
 !.env.example
 services
 ride-app
+ride-mobile
 .vscode
 .DS_Store
 npm-debug.log*
