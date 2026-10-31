@@ -39,5 +39,5 @@
   // harmless until a service used syntax this app's ES2017 target
   // doesn't support (named regex capture groups), which then failed the
   // web app's own build for code the web app doesn't even ship.
-  "exclude": ["node_modules", "services"]
+  "exclude": ["node_modules", "services", "ride-app"]
 }
