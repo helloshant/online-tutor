@@ -72,3 +72,16 @@ export async function exitAdminPreview() {
   await clearAdminPreviewCookie();
   redirect("/admin");
 }
+
+// Same as enterAdminPreview, but for a <select>-driven picker (see
+// admin-preview-picker.tsx on the student dashboard's own staff header)
+// where the target isn't known until submit time, so it can't be curried
+// in via .bind(null, id) the way the fixed-row buttons on
+// /admin/users/[id] and /admin/authorization use. Plain FormData in/void
+// out, same shape every other <form action={...}> picker in this app uses
+// that isn't wired through useActionState.
+export async function enterAdminPreviewFromPicker(formData: FormData) {
+  const targetUserId = String(formData.get("adminId") ?? "");
+  if (!targetUserId) return;
+  await enterAdminPreview(targetUserId);
+}

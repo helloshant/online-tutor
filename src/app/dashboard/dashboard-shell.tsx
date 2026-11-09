@@ -11,6 +11,7 @@ import { PracticePanel } from "./practice-panel";
 import { TopicList } from "./topic-list";
 import { ExamYearTrends } from "./exam-year-trends";
 import { StaffPreviewPicker } from "./staff-preview-picker";
+import { AdminPreviewPicker } from "./admin-preview-picker";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -95,6 +96,8 @@ export function DashboardShell({
   allBoards = [],
   allGrades = [],
   walletBalance = null,
+  isSuperAdminUser = false,
+  previewableAdmins = [],
 }: {
   // Only actually used to scope the wallet-balance realtime subscription
   // below (staff have no wallet, so this is otherwise unused on that
@@ -121,6 +124,14 @@ export function DashboardShell({
   // no banner at all. Just the INITIAL value from that page load -- see
   // the liveWalletBalance state below, which is what's actually rendered.
   walletBalance?: number | null;
+  // Superadmin-only: gates AdminPreviewPicker below, the same way
+  // isStaffUser gates StaffPreviewPicker -- a plain admin can't preview
+  // another admin's view (see getAdminPreviewTarget's own comment), so
+  // this is its own, stricter flag rather than reusing isStaffUser.
+  isSuperAdminUser?: boolean;
+  // Every plain admin, for AdminPreviewPicker's <select> -- empty for
+  // everyone except a superadmin (see dashboard/page.tsx's own fetch).
+  previewableAdmins?: { id: string; name: string }[];
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null,
@@ -286,6 +297,9 @@ export function DashboardShell({
               gradeId={gradeId}
               medium={medium}
             />
+          )}
+          {isSuperAdminUser && previewableAdmins.length > 0 && (
+            <AdminPreviewPicker admins={previewableAdmins} />
           )}
           {isStaffUser && (
             <Link

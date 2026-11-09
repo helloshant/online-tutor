@@ -41,6 +41,21 @@ export default async function DashboardPage({
         ? allGradesUnfiltered
         : (allGradesUnfiltered ?? []).filter((g) => allowedGrades.has(g.id));
 
+    // Superadmin-only: fed to AdminPreviewPicker so they can jump straight
+    // into "preview as this admin" mode from right here, not only from a
+    // specific admin's own /admin/users/[id] page or /admin/authorization.
+    // profiles' own "admin can read all rows" RLS policy already lets a
+    // superadmin session read this with the plain client, no admin client
+    // needed (same policy getAdminPreviewTarget itself relies on).
+    const isSuperAdminUser = profile?.role === "superadmin";
+    const { data: previewableAdminRows } = isSuperAdminUser
+      ? await supabase.from("profiles").select("id, full_name").eq("role", "admin").order("full_name")
+      : { data: null };
+    const previewableAdmins = (previewableAdminRows ?? []).map((a) => ({
+      id: a.id,
+      name: a.full_name ?? "(unnamed admin)",
+    }));
+
     let previewBoardId: string | null = null;
     let previewGradeId: string | null = null;
     let previewMedium: Medium | null = null;
@@ -100,6 +115,8 @@ export default async function DashboardPage({
         isStaffUser
         allBoards={allBoards ?? []}
         allGrades={allGrades ?? []}
+        isSuperAdminUser={isSuperAdminUser}
+        previewableAdmins={previewableAdmins}
       />
     );
   }
