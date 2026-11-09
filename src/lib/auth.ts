@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { AdminPageKey, Profile } from "@/lib/supabase/types";
@@ -77,6 +78,59 @@ export async function requireSuperAdmin() {
   return session;
 }
 
+// "Preview as this admin" -- lets a superadmin see /admin exactly as a
+// given plain admin would (which pages they can reach, which grades their
+// data is scoped to), since otherwise the only way to check a specific
+// admin's restricted view was to read admin_page_permissions/
+// admin_grade_permissions rows directly. Same cookie-based convention as
+// the single-active-device cookie (src/lib/singleSession.ts's
+// ACTIVE_SESSION_COOKIE) -- httpOnly since only the server ever needs it.
+export const ADMIN_PREVIEW_COOKIE = "admin_preview_as";
+const ADMIN_PREVIEW_COOKIE_MAX_AGE = 60 * 60 * 4; // 4h safety expiry
+
+// Resolves the admin a superadmin is currently previewing as, or null if
+// not previewing -- including when the caller isn't a superadmin, no
+// cookie is set, or the cookie's target no longer exists or isn't a plain
+// admin any more (demoted/promoted/deleted since the cookie was set):
+// treated as "not previewing" rather than left in a broken half-state.
+// cache()'d per request, same as getCurrentUser, since every preview-aware
+// helper below calls this at least once per request-render-pass.
+export const getAdminPreviewTarget = cache(
+  async (): Promise<{ id: string; fullName: string | null } | null> => {
+    const session = await getCurrentUser();
+    if (!session || session.profile?.role !== "superadmin") return null;
+
+    const cookieStore = await cookies();
+    const targetId = cookieStore.get(ADMIN_PREVIEW_COOKIE)?.value;
+    if (!targetId) return null;
+
+    const supabase = await createClient();
+    const { data: target } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", targetId)
+      .maybeSingle();
+    if (!target || target.role !== "admin") return null;
+
+    return { id: target.id, fullName: target.full_name };
+  },
+);
+
+export async function setAdminPreviewCookie(targetUserId: string) {
+  const cookieStore = await cookies();
+  cookieStore.set(ADMIN_PREVIEW_COOKIE, targetUserId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: ADMIN_PREVIEW_COOKIE_MAX_AGE,
+  });
+}
+
+export async function clearAdminPreviewCookie() {
+  (await cookies()).delete(ADMIN_PREVIEW_COOKIE);
+}
+
 // Every distinct page/section inside /admin that a superadmin can grant or
 // revoke for a plain admin. Keep in sync with the `page` check constraint on
 // admin_page_permissions (supabase/migrations/0008_admin_page_permissions.sql).
@@ -97,13 +151,19 @@ export const ADMIN_PAGES: AdminPageKey[] = [
 
 // Which admin pages the current user can see. Superadmins always get every
 // page ("all") -- their access can't be narrowed by this table, only a
-// plain admin's can.
+// plain admin's can. Preview-aware: a superadmin previewing as a plain
+// admin (see getAdminPreviewTarget) sees exactly that admin's own grants
+// instead of "all", so they can check what a specific admin can reach.
 export async function getAllowedAdminPages(): Promise<Set<AdminPageKey> | "all"> {
   const session = await requireAdmin();
-  if (session.profile?.role === "superadmin") return "all";
+  const previewTarget = await getAdminPreviewTarget();
+  if (!previewTarget && session.profile?.role === "superadmin") return "all";
 
   const supabase = await createClient();
-  const { data } = await supabase.from("admin_page_permissions").select("page").eq("user_id", session.user.id);
+  const { data } = await supabase
+    .from("admin_page_permissions")
+    .select("page")
+    .eq("user_id", previewTarget?.id ?? session.user.id);
   return new Set((data ?? []).map((row) => row.page));
 }
 
@@ -111,16 +171,19 @@ export async function getAllowedAdminPages(): Promise<Set<AdminPageKey> | "all">
 // in requireAdmin(). Superadmins always pass; a plain admin needs an
 // explicit grant row for `page`, or is redirected to a safe, ungated
 // landing page rather than back into another permission check (which could
-// otherwise redirect-loop if they lack that page too).
+// otherwise redirect-loop if they lack that page too). Preview-aware, same
+// as getAllowedAdminPages above -- a superadmin previewing as a plain admin
+// who lacks `page` gets redirected here too, exactly like that admin would.
 export async function requireAdminPage(page: AdminPageKey) {
   const session = await requireAdmin();
-  if (session.profile?.role === "superadmin") return session;
+  const previewTarget = await getAdminPreviewTarget();
+  if (!previewTarget && session.profile?.role === "superadmin") return session;
 
   const supabase = await createClient();
   const { data } = await supabase
     .from("admin_page_permissions")
     .select("page")
-    .eq("user_id", session.user.id)
+    .eq("user_id", previewTarget?.id ?? session.user.id)
     .eq("page", page)
     .maybeSingle();
 
@@ -134,16 +197,18 @@ export async function requireAdminPage(page: AdminPageKey) {
 // "locked out," the opposite default from getAllowedAdminPages()/
 // admin_page_permissions deliberately, since narrowing access here is
 // something a superadmin does on top of an otherwise-unrestricted admin,
-// not a grant they start from zero.
+// not a grant they start from zero. Preview-aware, same as
+// getAllowedAdminPages/requireAdminPage above.
 export async function getAllowedAdminGrades(): Promise<Set<string> | "all"> {
   const session = await requireAdmin();
-  if (session.profile?.role === "superadmin") return "all";
+  const previewTarget = await getAdminPreviewTarget();
+  if (!previewTarget && session.profile?.role === "superadmin") return "all";
 
   const supabase = await createClient();
   const { data } = await supabase
     .from("admin_grade_permissions")
     .select("grade_id")
-    .eq("user_id", session.user.id);
+    .eq("user_id", previewTarget?.id ?? session.user.id);
   if (!data || data.length === 0) return "all";
   return new Set(data.map((row) => row.grade_id));
 }

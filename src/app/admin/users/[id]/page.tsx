@@ -11,6 +11,7 @@ import {
   updateUserProfile,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { enterAdminPreview } from "../../authorization/actions";
 import { GradePermissionToggle } from "../../authorization/grade-permission-toggle";
 import { SetPasswordForm } from "./set-password-form";
 import {
@@ -293,7 +294,17 @@ function GradeAccessCard({
   const granted = new Set(grantedGradeIds.map((g) => g.grade_id));
   return (
     <div className="mt-4 rounded-xl border border-border bg-surface p-6">
-      <h2 className="text-sm font-semibold">Grade access</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Grade access</h2>
+        <form action={enterAdminPreview.bind(null, userId)}>
+          <button
+            type="submit"
+            className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground/82 hover:bg-brand/5"
+          >
+            Preview as this admin
+          </button>
+        </form>
+      </div>
       <p className="mt-1 text-sm text-foreground/75">
         Scope this admin to specific grades -- they&apos;ll only see and edit data for those grades
         on the grade-aware admin pages (Users, Catalog, Answer bank, Chapter notes, Topic summaries,

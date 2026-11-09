@@ -1,16 +1,41 @@
 import Link from "next/link";
-import { getAllowedAdminPages, requireAdmin } from "@/lib/auth";
+import { exitAdminPreview } from "./authorization/actions";
+import { getAdminPreviewTarget, getAllowedAdminPages, requireAdmin } from "@/lib/auth";
 import { LogoutButton } from "@/components/logout-button";
 import type { AdminPageKey } from "@/lib/supabase/types";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await requireAdmin();
+  const previewTarget = await getAdminPreviewTarget();
   const allowedPages = await getAllowedAdminPages();
   const canSee = (page: AdminPageKey) => allowedPages === "all" || allowedPages.has(page);
-  const isSuperadmin = session.profile?.role === "superadmin";
+  // A plain admin never sees the Authorization link -- neither should a
+  // superadmin previewing as one (see getAdminPreviewTarget's own scope-
+  // boundary comment: page/grade visibility is faked, role-gated UI isn't).
+  const isSuperadmin = session.profile?.role === "superadmin" && !previewTarget;
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Outside the canSee()-gated nav below, on purpose -- reachable on
+          every admin page, including /admin/no-access, which is nested
+          under this same layout, so "Exit preview" is never stranded
+          behind a page the previewed admin can't reach. */}
+      {previewTarget && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-amber-100 px-6 py-2 text-sm text-amber-900">
+          <span>
+            Previewing as <strong>{previewTarget.fullName ?? "this admin"}</strong> -- pages and grades are
+            scoped to exactly what they can see.
+          </span>
+          <form action={exitAdminPreview}>
+            <button
+              type="submit"
+              className="whitespace-nowrap rounded-lg border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-50"
+            >
+              Exit preview
+            </button>
+          </form>
+        </div>
+      )}
       {/* Split into two rows rather than one unwrapped flex row -- with
           this many admin pages (12 links, growing with every new admin
           tool this app adds), a single `justify-between` row had no

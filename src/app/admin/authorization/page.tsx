@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AdminGradePermission, AdminPageKey } from "@/lib/supabase/types";
+import { enterAdminPreview } from "./actions";
 import { GradePermissionToggle } from "./grade-permission-toggle";
 import { PermissionToggle } from "./permission-toggle";
 
@@ -121,10 +122,16 @@ export default async function AuthorizationPage() {
                   <td className="px-4 py-3">
                     <div className="font-medium">{profile.full_name ?? "—"}</div>
                     <div className="text-xs text-foreground/68">{email}</div>
-                    {isSuperadmin && (
+                    {isSuperadmin ? (
                       <span className="mt-1 inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
                         superadmin — full access
                       </span>
+                    ) : (
+                      <form action={enterAdminPreview.bind(null, profile.id)} className="mt-1">
+                        <button type="submit" className="text-xs text-brand hover:underline">
+                          Preview as this admin →
+                        </button>
+                      </form>
                     )}
                   </td>
                   {PAGES.map((p) => (
