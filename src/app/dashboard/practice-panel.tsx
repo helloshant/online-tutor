@@ -188,10 +188,11 @@ function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
 const SUBPART_LABELS = ["(i)", "(ii)", "(iii)"];
 
 // The active paper's own header + question list -- pulled out once this
-// needed to be rendered twice: once on screen (answers shown only when
-// `showAnswers`), and once in an always-off-screen copy used purely as the
-// PDF export's capture target (answers always shown there, regardless of
-// the on-screen toggle -- see PrintableAnswerKey below).
+// needed to be rendered twice: once on screen (answers shown only once
+// generated -- `showAnswers` is just `Boolean(answers)` at the call site),
+// and once in an always-off-screen copy used purely as the PDF export's
+// capture target (answers always shown there regardless -- see
+// PrintableAnswerKey below).
 function PaperQuestionList({
   paper,
   answers,
@@ -386,10 +387,12 @@ export function PracticePanel({
   // picker below offers a Numerical slider at all.
   subjectCode: string;
   medium: Medium;
-  // Gates the "Show answers" / "Download PDF" toolbar below -- a real
-  // student never gets either, only ever grading against a photographed
-  // attempt (see handleSubmit). Reported directly: admins/superadmins want
-  // to review or hand out an answer key for a paper they generate here.
+  // Gates the "Generate questions & answers sheet" / "Download PDF" flow
+  // below (replacing the student-only photograph-and-grade flow entirely
+  // for staff) -- a real student never gets either, only ever grading
+  // against a photographed attempt (see handleSubmit). Reported directly:
+  // admins/superadmins want to review or hand out an answer key for a
+  // paper they generate here, not submit a fake attempt.
   isStaffUser: boolean;
 }) {
   const numericalEligible = NUMERICAL_SUBJECT_CODES.has(subjectCode);
@@ -439,13 +442,19 @@ export function PracticePanel({
   // Staff-only answer-key state -- see isStaffUser's own comment. `answers`
   // is null until first fetched (distinct from "fetched but empty"),
   // keyed by PaperQuestion.id (matches the API route's own response
-  // shape). `pendingExport` is set the moment "Download PDF" is clicked
-  // and cleared once the export effect below actually runs -- it exists
-  // only to let that effect wait for `answers` to land in state (and the
-  // off-screen print copy to re-render with real text) before capturing.
+  // shape) -- its mere presence (non-null) is also what gates showing
+  // answers inline below, so there's no separate "reveal" toggle: once
+  // generated, they just stay visible, matching the one-way "Generate ->
+  // then Download" flow reported directly (replacing the old separate
+  // "Show answers"/"Download PDF" buttons and the student-style photo
+  // submit flow, neither of which made sense for a staff caller who never
+  // submits a real attempt). `pendingExport` is set the moment "Download
+  // PDF" is clicked and cleared once the export effect below actually
+  // runs -- it exists only to let that effect wait for `answers` to land
+  // in state (and the off-screen print copy to re-render with real text)
+  // before capturing.
   const [answers, setAnswers] = useState<Map<string, string> | null>(null);
   const [answersLoading, setAnswersLoading] = useState(false);
-  const [showAnswers, setShowAnswers] = useState(false);
   const [pendingExport, setPendingExport] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -606,7 +615,6 @@ export function PracticePanel({
     setSubmitFailed(false);
     setSelectedChapters(new Set());
     setAnswers(null);
-    setShowAnswers(false);
   }
 
   async function handleGenerate() {
@@ -648,7 +656,6 @@ export function PracticePanel({
       setSelectedFiles([]);
       setSubmitFailed(false);
       setAnswers(null);
-      setShowAnswers(false);
       void fetchHistory().then((papers) => {
         if (papers) setHistory(papers);
       });
@@ -677,7 +684,6 @@ export function PracticePanel({
       setSelectedFiles([]);
       setSubmitFailed(false);
       setAnswers(null);
-      setShowAnswers(false);
     } catch (err) {
       setGenerateError(
         err instanceof Error
@@ -768,10 +774,9 @@ export function PracticePanel({
   // Fetches the already-generated answer for every question in the active
   // paper (staff-only route -- see the API route's own comment) and
   // returns the resulting map, also committing it to state. Idempotent
-  // from the caller's point of view: both handleToggleAnswers and
+  // from the caller's point of view: both handleGenerateAnswers and
   // handleDownloadPdf call this and just skip it if `answers` is already
-  // populated, so clicking "Show answers" then "Download PDF" (or vice
-  // versa) never re-fetches.
+  // populated.
   async function loadAnswers(): Promise<Map<string, string> | null> {
     if (!activePaper) return null;
     setAnswersLoading(true);
@@ -796,9 +801,12 @@ export function PracticePanel({
     }
   }
 
-  async function handleToggleAnswers() {
-    if (!showAnswers && !answers) await loadAnswers();
-    setShowAnswers((prev) => !prev);
+  // "Generate questions & answers sheet" -- a one-way reveal (no hide),
+  // replacing the old "Show answers" toggle: once generated, they just
+  // stay visible, same posture as every other piece of staff-only
+  // paper state here.
+  async function handleGenerateAnswers() {
+    if (!answers) await loadAnswers();
   }
 
   async function handleDownloadPdf() {
@@ -1058,45 +1066,18 @@ export function PracticePanel({
         </>
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={resetToPicker}
-              className="text-xs text-foreground/65 hover:underline"
-            >
-              ← New paper
-            </button>
-
-            {isStaffUser && (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleAnswers}
-                  disabled={answersLoading}
-                  className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground/82 hover:bg-brand/5 disabled:opacity-60"
-                >
-                  {answersLoading
-                    ? "Loading…"
-                    : showAnswers
-                      ? "Hide answers"
-                      : "Show answers"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadPdf}
-                  disabled={pdfExporting}
-                  className="rounded-lg border border-brand px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/5 disabled:opacity-60"
-                >
-                  {pdfExporting ? "Preparing PDF…" : "Download PDF (Q+A)"}
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={resetToPicker}
+            className="mb-3 text-xs text-foreground/65 hover:underline"
+          >
+            ← New paper
+          </button>
 
           <PaperQuestionList
             paper={activePaper}
             answers={answers}
-            showAnswers={isStaffUser && showAnswers}
+            showAnswers={isStaffUser && Boolean(answers)}
           />
           {isStaffUser && (
             <PrintableAnswerKey
@@ -1106,7 +1087,49 @@ export function PracticePanel({
             />
           )}
 
-          {submission?.status === "graded" ? (
+          {isStaffUser ? (
+            // Staff never submit a real attempt -- this replaces the
+            // student-only photograph-and-grade flow below with the one
+            // staff actually asked for: generate the answer key, then
+            // download it. Reported directly.
+            <div className="mt-4 space-y-2 border-t border-border pt-4">
+              {!answers ? (
+                <button
+                  type="button"
+                  onClick={handleGenerateAnswers}
+                  disabled={answersLoading}
+                  className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                >
+                  {answersLoading ? (
+                    <LoadingIndicator label="Generating answers…" />
+                  ) : (
+                    "Generate questions & answers sheet"
+                  )}
+                </button>
+              ) : (
+                <>
+                  <p className="text-sm text-foreground/75">
+                    Answers generated for every question above.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={pdfExporting}
+                    className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                  >
+                    {pdfExporting ? (
+                      <LoadingIndicator label="Preparing PDF…" />
+                    ) : (
+                      "Download PDF (Q+A)"
+                    )}
+                  </button>
+                </>
+              )}
+              {generateError && (
+                <p className="text-sm text-red-600">{generateError}</p>
+              )}
+            </div>
+          ) : submission?.status === "graded" ? (
             <div className="mt-4 space-y-2 border-t border-border pt-4">
               <p className="text-lg font-semibold">
                 Total: {submission.totalScore} / {submission.maxPossibleScore}
