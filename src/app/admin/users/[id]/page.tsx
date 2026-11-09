@@ -11,6 +11,7 @@ import {
   updateUserProfile,
 } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { GradePermissionToggle } from "../../authorization/grade-permission-toggle";
 import { SetPasswordForm } from "./set-password-form";
 import {
   ActivateSubscriptionForm,
@@ -43,6 +44,7 @@ export default async function AdminUserDetailPage({
     { data: boards },
     { data: grades },
     { data: wallet },
+    { data: gradePermissions },
   ] = await Promise.all([
     admin.auth.admin.getUserById(id),
     admin.from("profiles").select("*").eq("id", id).single(),
@@ -65,6 +67,9 @@ export default async function AdminUserDetailPage({
     // for a plain 'user' role -- staff has no wallet, so there's nothing
     // student-specific to branch the fetch itself on beforehand.
     admin.from("student_wallets").select("balance_tokens").eq("user_id", id).maybeSingle(),
+    // Same "fetched unconditionally, cheap" posture -- only rendered below
+    // for a plain 'admin' role, see the Grade access card.
+    admin.from("admin_grade_permissions").select("grade_id").eq("user_id", id),
   ]);
 
   if (!authUser?.user) notFound();
@@ -139,6 +144,10 @@ export default async function AdminUserDetailPage({
           </span>
         )}
       </div>
+
+      {isSuperAdminViewer && targetRole === "admin" && (
+        <GradeAccessCard userId={id} grades={grades ?? []} grantedGradeIds={gradePermissions ?? []} />
+      )}
 
       <details className="mt-4 rounded-xl border border-border bg-surface">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-brand/5">
@@ -260,6 +269,55 @@ export default async function AdminUserDetailPage({
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+// Lets a superadmin scope THIS admin's access to specific grades, right
+// where they just set the role -- a shortcut for the same table
+// /admin/authorization's own "Grade access" section manages (same
+// GradePermissionToggle/setGradePermission underneath, see that page's
+// own comments for the table's "no rows = unrestricted" semantics).
+// Reported directly: setting a user to Admin here, then expecting to
+// assign grades right there too, not realizing it lives on a separate
+// page.
+function GradeAccessCard({
+  userId,
+  grades,
+  grantedGradeIds,
+}: {
+  userId: string;
+  grades: { id: string; name: string }[];
+  grantedGradeIds: { grade_id: string }[];
+}) {
+  const granted = new Set(grantedGradeIds.map((g) => g.grade_id));
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-surface p-6">
+      <h2 className="text-sm font-semibold">Grade access</h2>
+      <p className="mt-1 text-sm text-foreground/75">
+        Scope this admin to specific grades -- they&apos;ll only see and edit data for those grades
+        on the grade-aware admin pages (Users, Catalog, Answer bank, Chapter notes, Topic summaries,
+        Broadcasts). Leave every box unchecked for unrestricted access to every grade. Also editable
+        from{" "}
+        <Link href="/admin/authorization" className="text-brand hover:underline">
+          Authorization
+        </Link>
+        .
+      </p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        {grades.map((g) => (
+          <label
+            key={g.id}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm"
+          >
+            <GradePermissionToggle userId={userId} gradeId={g.id} granted={granted.has(g.id)} />
+            {g.name}
+          </label>
+        ))}
+        {grades.length === 0 && (
+          <p className="text-sm text-foreground/68">No grades exist in the catalog yet.</p>
+        )}
+      </div>
     </div>
   );
 }

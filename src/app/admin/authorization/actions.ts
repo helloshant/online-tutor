@@ -39,4 +39,5 @@ export async function setGradePermission(userId: string, gradeId: string, grante
   }
 
   revalidatePath("/admin/authorization");
+  revalidatePath(`/admin/users/${userId}`);
 }
