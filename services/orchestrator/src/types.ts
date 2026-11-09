@@ -584,6 +584,15 @@ export type GeneratePracticePaperRequest = {
   // function's own comment on why totalQuestions alone, with no mix, is
   // ignored).
   totalQuestions?: number;
+  // Normalized-or-not question text from the caller's own recent history
+  // for this exact board/grade/subject/medium (the web app sends the last
+  // few papers' worth) -- seeded into this generation's own
+  // usedQuestionTexts set (see server.ts's /v1/practice-paper/generate
+  // handler) so the SAME dedup-retry-then-drop mechanism that already
+  // prevents a repeat WITHIN one paper also prevents one across several
+  // papers in a row. Reported directly: generating several papers back to
+  // back for the same chapters kept producing the same question again.
+  excludeQuestionTexts?: string[];
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

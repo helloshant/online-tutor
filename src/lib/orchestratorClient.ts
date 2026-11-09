@@ -867,6 +867,10 @@ export type GeneratePracticePaperRequest = {
   // server-side to [MIN_PRACTICE_PAPER_QUESTIONS,
   // MAX_PRACTICE_PAPER_QUESTIONS]; only meaningful alongside questionMix.
   totalQuestions?: number;
+  // The caller's own recent paper-generation history for this exact
+  // board/grade/subject/medium -- see the orchestrator's own
+  // GeneratePracticePaperRequest.excludeQuestionTexts comment.
+  excludeQuestionTexts?: string[];
   // See ChatOrchestrationRequest's own comment.
   provider?: LlmProvider;
 };

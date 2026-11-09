@@ -2883,6 +2883,20 @@ app.post(
       function normalizeQuestionText(text: string): string {
         return text.trim().toLowerCase().replace(/\s+/g, " ");
       }
+      // Pre-seeded with the caller's own recent history (see
+      // GeneratePracticePaperRequest.excludeQuestionTexts' own comment) --
+      // the exact same hasDuplicate/retry-then-drop loop below that
+      // already keeps one paper's own questions from repeating each other
+      // now also keeps this paper from repeating any of those, with zero
+      // extra logic: a history "hit" is handled identically to a
+      // within-this-paper collision.
+      if (Array.isArray(body.excludeQuestionTexts)) {
+        for (const text of body.excludeQuestionTexts) {
+          if (typeof text === "string" && text) {
+            usedQuestionTexts.add(normalizeQuestionText(text));
+          }
+        }
+      }
       function hasDuplicate(entries: JobResultEntry[]): boolean {
         return entries.some((e) => usedQuestionTexts.has(normalizeQuestionText(e.question)));
       }

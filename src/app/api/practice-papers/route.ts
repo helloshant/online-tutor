@@ -304,6 +304,54 @@ async function handlePost(request: Request) {
     );
   }
 
+  // Reported directly: generating several papers back to back for the
+  // same board/grade/subject kept producing the same question again. The
+  // orchestrator already dedups within one paper (see its own
+  // usedQuestionTexts comment); this extends that to also dedup against
+  // whatever this exact scope's last few papers already used, by feeding
+  // their question text in as a starting exclusion list -- the same
+  // scope (not just subjectId) handleGet's own history list is already
+  // keyed on, for the same reason (a staff preview/medium change
+  // shouldn't pull in an unrelated board's questions as "recent").
+  // Capped at the last 4: this paper is then the 5th, so no question
+  // repeats within any run of 5 consecutive papers for this scope.
+  const RECENT_PAPERS_TO_EXCLUDE = 4;
+  // answered_questions has RLS with only an admin-read-all policy (no
+  // "user can read own" policy exists at all -- see
+  // 0006_answer_bank_validation.sql) -- the ordinary session client this
+  // route otherwise uses would silently see zero rows here for a real
+  // student, making this whole exclusion list a no-op for the exact
+  // audience ("a student generating several papers in a row") the report
+  // was about. The admin client is only used for this one read.
+  const historyAdmin = createAdminClient();
+  const { data: recentPapers } = await historyAdmin
+    .from("practice_papers")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("subject_id", subjectId)
+    .eq("board_id", scope.boardId)
+    .eq("grade_id", scope.gradeId)
+    .eq("medium", contentMedium)
+    .order("created_at", { ascending: false })
+    .limit(RECENT_PAPERS_TO_EXCLUDE);
+  let excludeQuestionTexts: string[] = [];
+  if (recentPapers && recentPapers.length > 0) {
+    const { data: recentQuestionRows } = await historyAdmin
+      .from("practice_paper_questions")
+      .select("answered_question_id")
+      .in("paper_id", recentPapers.map((p) => p.id));
+    const recentAnsweredIds = [
+      ...new Set((recentQuestionRows ?? []).map((q) => q.answered_question_id)),
+    ];
+    if (recentAnsweredIds.length > 0) {
+      const { data: recentAnsweredRows } = await historyAdmin
+        .from("answered_questions")
+        .select("question")
+        .in("id", recentAnsweredIds);
+      excludeQuestionTexts = (recentAnsweredRows ?? []).map((r) => r.question);
+    }
+  }
+
   try {
     const { questions, totalMarks } = await generatePracticePaper({
       userId: user.id,
@@ -322,6 +370,7 @@ async function handlePost(request: Request) {
       difficulty,
       questionMix,
       totalQuestions,
+      excludeQuestionTexts,
       provider,
     });
 
