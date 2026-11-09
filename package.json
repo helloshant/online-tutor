@@ -11,7 +11,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.8",
-    "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^2.5.0",
     "jspdf": "^4.2.1",
     "katex": "^0.18.1",
     "mammoth": "^1.12.2",

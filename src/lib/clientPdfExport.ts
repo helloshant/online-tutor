@@ -10,15 +10,25 @@
 // UI already proves correct, at the cost of producing a rasterized (not
 // selectable/searchable) PDF.
 //
-// html2canvas/jspdf are dynamically imported so neither ships in the main
-// bundle for the common case -- a student never sees the button that calls
-// this at all.
+// html2canvas-pro/jspdf are dynamically imported so neither ships in the
+// main bundle for the common case -- a student never sees the button that
+// calls this at all.
+//
+// html2canvas-pro, not plain html2canvas -- reported directly as "Could
+// not generate the PDF": this app's Tailwind v4 palette computes colors as
+// oklch() (every bg-red-50/bg-green-100/etc. utility class used throughout
+// PaperQuestionList's score/feedback styling resolves to one), and
+// html2canvas 1.4.1 throws "Attempting to parse an unsupported color
+// function" on any oklch()/oklab() value -- a known, long-unfixed gap in
+// that library against modern CSS. html2canvas-pro is the actively
+// maintained fork built specifically to parse these; same API, drop-in
+// replacement.
 export async function exportElementToPdf(
   element: HTMLElement,
   filename: string,
 ): Promise<void> {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import("html2canvas"),
+    import("html2canvas-pro"),
     import("jspdf"),
   ]);
 
