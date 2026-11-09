@@ -12,6 +12,7 @@ import { TopicList } from "./topic-list";
 import { ExamYearTrends } from "./exam-year-trends";
 import { StaffPreviewPicker } from "./staff-preview-picker";
 import { AdminPreviewPicker } from "./admin-preview-picker";
+import { exitAdminPreviewFromDashboard } from "@/app/admin/authorization/actions";
 import type { Medium, SyllabusTopic } from "@/lib/supabase/types";
 
 interface SubjectSummary {
@@ -98,6 +99,7 @@ export function DashboardShell({
   walletBalance = null,
   isSuperAdminUser = false,
   previewableAdmins = [],
+  previewingAdminName = null,
 }: {
   // Only actually used to scope the wallet-balance realtime subscription
   // below (staff have no wallet, so this is otherwise unused on that
@@ -132,6 +134,10 @@ export function DashboardShell({
   // Every plain admin, for AdminPreviewPicker's <select> -- empty for
   // everyone except a superadmin (see dashboard/page.tsx's own fetch).
   previewableAdmins?: { id: string; name: string }[];
+  // Set once an admin preview is active (see getAdminPreviewTarget) --
+  // purely informational here, so a superadmin understands why the Grade
+  // options in StaffPreviewPicker just narrowed to that admin's own scope.
+  previewingAdminName?: string | null;
 }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     subjects[0]?.id ?? null,
@@ -277,6 +283,21 @@ export function DashboardShell({
   // bar rather than ignoring it.
   return (
     <div className="flex h-dvh flex-col bg-background">
+      {previewingAdminName && (
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-amber-100 px-6 py-1.5 text-xs text-amber-900">
+          <span>
+            Grade options below are scoped to <strong>{previewingAdminName}</strong>&apos;s own access.
+          </span>
+          <form action={exitAdminPreviewFromDashboard}>
+            <button
+              type="submit"
+              className="whitespace-nowrap rounded-lg border border-amber-400 bg-white px-2 py-0.5 text-xs font-medium text-amber-900 hover:bg-amber-50"
+            >
+              Exit preview
+            </button>
+          </form>
+        </div>
+      )}
       <header className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-brand">SyllabusMate</span>

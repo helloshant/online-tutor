@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getAllowedAdminGrades, isGradeAllowed, isStaff, requireFreshPassword } from "@/lib/auth";
+import { getAdminPreviewTarget, getAllowedAdminGrades, isGradeAllowed, isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getWalletBalance } from "@/lib/walletBalance";
@@ -29,6 +29,12 @@ export default async function DashboardPage({
     const { board: boardParam, grade: gradeParam, medium: mediumParam } = await searchParams;
     const requestedMedium = VALID_MEDIUMS.includes(mediumParam as Medium) ? (mediumParam as Medium) : null;
     const allowedGrades = await getAllowedAdminGrades();
+    // Not used for authorization here (requireFreshPassword already
+    // confirmed this is staff) -- purely to label the picker below so a
+    // superadmin previewing as an admin understands why their own Grade
+    // options just narrowed, same as getAllowedAdminGrades() itself
+    // already did under the hood.
+    const previewTarget = await getAdminPreviewTarget();
 
     const [{ data: allBoards }, { data: allGradesUnfiltered }] = await Promise.all([
       supabase.from("boards").select("id, name").order("name"),
@@ -117,6 +123,7 @@ export default async function DashboardPage({
         allGrades={allGrades ?? []}
         isSuperAdminUser={isSuperAdminUser}
         previewableAdmins={previewableAdmins}
+        previewingAdminName={previewTarget?.fullName ?? null}
       />
     );
   }

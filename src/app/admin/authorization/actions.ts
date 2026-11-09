@@ -73,15 +73,38 @@ export async function exitAdminPreview() {
   redirect("/admin");
 }
 
-// Same as enterAdminPreview, but for a <select>-driven picker (see
-// admin-preview-picker.tsx on the student dashboard's own staff header)
+// Same as enterAdminPreview, but for a <select>-driven picker
+// (admin-preview-picker.tsx on the student dashboard's own staff header)
 // where the target isn't known until submit time, so it can't be curried
 // in via .bind(null, id) the way the fixed-row buttons on
-// /admin/users/[id] and /admin/authorization use. Plain FormData in/void
-// out, same shape every other <form action={...}> picker in this app uses
-// that isn't wired through useActionState.
+// /admin/users/[id] and /admin/authorization use. Also lands back on
+// /dashboard rather than /admin -- reported directly: from the dashboard,
+// previewing an admin is about seeing that admin's own grade scope
+// reflected in the ordinary student-preview picker right there (already
+// true for free, since getAllowedAdminGrades() is itself preview-aware --
+// see its own comment in src/lib/auth.ts), not about jumping into the
+// admin panel, which is what the two fixed-row buttons are for.
 export async function enterAdminPreviewFromPicker(formData: FormData) {
   const targetUserId = String(formData.get("adminId") ?? "");
-  if (!targetUserId) return;
-  await enterAdminPreview(targetUserId);
+  if (targetUserId) {
+    await requireSuperAdmin();
+    const supabase = await createClient();
+    const { data: target } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", targetUserId)
+      .maybeSingle();
+    if (target && target.role === "admin") {
+      await setAdminPreviewCookie(targetUserId);
+    }
+  }
+  redirect("/dashboard");
+}
+
+// Dashboard-side counterpart to exitAdminPreview -- same cookie clear,
+// lands back on /dashboard instead of /admin.
+export async function exitAdminPreviewFromDashboard() {
+  await requireSuperAdmin();
+  await clearAdminPreviewCookie();
+  redirect("/dashboard");
 }
