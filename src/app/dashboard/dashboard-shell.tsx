@@ -568,6 +568,7 @@ export function DashboardShell({
                       boardName,
                       medium,
                     )}
+                    isStaffUser={isStaffUser}
                   />
                 </div>
               )}

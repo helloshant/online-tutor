@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import { LoadingIndicator } from "@/components/loading-indicator";
+import { exportElementToPdf } from "@/lib/clientPdfExport";
 import type { Medium } from "@/lib/supabase/types";
 
 // Same local-mirror convention as pattern-picker.tsx/topic-practice.tsx --
@@ -186,6 +187,119 @@ function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
 
 const SUBPART_LABELS = ["(i)", "(ii)", "(iii)"];
 
+// The active paper's own header + question list -- pulled out once this
+// needed to be rendered twice: once on screen (answers shown only when
+// `showAnswers`), and once in an always-off-screen copy used purely as the
+// PDF export's capture target (answers always shown there, regardless of
+// the on-screen toggle -- see PrintableAnswerKey below).
+function PaperQuestionList({
+  paper,
+  answers,
+  showAnswers,
+}: {
+  paper: Paper;
+  answers: Map<string, string> | null;
+  showAnswers: boolean;
+}) {
+  return (
+    <>
+      <p className="text-lg font-bold">Mock Exam</p>
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/65">
+        {paper.chapters.join(", ")}
+      </p>
+      <p className="mb-4 text-xs text-foreground/65">
+        Total: {paper.totalMarks} marks
+      </p>
+
+      <ol className="space-y-4">
+        {buildDisplayItems(paper.questions).map((item) =>
+          item.kind === "question" ? (
+            <li key={item.question.id}>
+              <p className="whitespace-pre-wrap font-medium">
+                {item.number}.{" "}
+                <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
+                  {EXERCISE_TYPE_LABELS[item.question.type]}
+                </span>
+                <span className="mr-1 text-xs font-normal text-foreground/65">
+                  ({item.question.marks} mark{item.question.marks === 1 ? "" : "s"})
+                </span>
+                <MathText text={item.question.question} />
+              </p>
+              <QuestionFeedback q={item.question} />
+              {showAnswers && (
+                <AnswerBlock answer={answers?.get(item.question.id)} />
+              )}
+            </li>
+          ) : (
+            // A Case Study scenario -- one question number, the shared
+            // scenario shown once, then its 3 sub-parts each with their
+            // own marks and (once graded) their own independent
+            // feedback bar. See DisplayItem's own comment.
+            <li key={item.subparts[0]?.groupId ?? item.number}>
+              <p className="whitespace-pre-wrap font-medium">
+                {item.number}.{" "}
+                <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
+                  Case Study
+                </span>
+                <span className="mr-1 text-xs font-normal text-foreground/65">
+                  (
+                  {item.subparts.reduce((sum, sp) => sum + sp.marks, 0)}{" "}
+                  marks)
+                </span>
+                <MathText text={item.scenario} />
+              </p>
+              <ol className="mt-2 space-y-3 pl-4">
+                {item.subparts.map((sp, i) => (
+                  <li key={sp.id}>
+                    <p className="whitespace-pre-wrap font-medium">
+                      {SUBPART_LABELS[i] ?? `(${i + 1})`}{" "}
+                      <span className="mr-1 text-xs font-normal text-foreground/65">
+                        ({sp.marks} mark{sp.marks === 1 ? "" : "s"})
+                      </span>
+                      <MathText text={sp.question} />
+                    </p>
+                    <QuestionFeedback q={sp} />
+                    {showAnswers && <AnswerBlock answer={answers?.get(sp.id)} />}
+                  </li>
+                ))}
+              </ol>
+            </li>
+          ),
+        )}
+      </ol>
+    </>
+  );
+}
+
+// Always-mounted (whenever isStaffUser && activePaper) but visually off
+// -screen capture target for the PDF export -- `display:none`/
+// `visibility:hidden` won't work here, since html2canvas needs the node
+// to actually be laid out with real dimensions. Fixed-width at a rough A4
+// content width (794px @ 96dpi) so the exported pages look like a normal
+// printed page regardless of the admin's own browser window width. Always
+// renders with answers shown, independent of the on-screen `showAnswers`
+// toggle, so "Download PDF" never needs the admin to have clicked "Show
+// answers" first.
+function PrintableAnswerKey({
+  paper,
+  answers,
+  printRef,
+}: {
+  paper: Paper;
+  answers: Map<string, string> | null;
+  printRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      ref={printRef}
+      className="fixed left-[-9999px] top-0 w-[794px] bg-white p-10 text-black"
+      aria-hidden
+    >
+      <PaperQuestionList paper={paper} answers={answers} showAnswers />
+    </div>
+  );
+}
+
 // Shared score/feedback bar, used for both an ordinary question and a
 // Case Study sub-part -- pulled out once both needed the identical JSX
 // rather than duplicating it (a sub-part is graded as its own independent
@@ -207,6 +321,19 @@ function QuestionFeedback({ q }: { q: PaperQuestion }) {
         {q.score}/{q.marks}
       </span>{" "}
       {q.feedback}
+    </p>
+  );
+}
+
+// Staff-only (see isStaffUser below): the already-generated answer for one
+// question, revealed on demand via GET /api/practice-papers/[id]/answers --
+// never shown to a real student, who instead gets graded against it by
+// photographing their own handwritten attempt (see handleSubmit).
+function AnswerBlock({ answer }: { answer: string | undefined }) {
+  if (!answer) return null;
+  return (
+    <p className="mt-1.5 rounded-lg bg-brand/5 p-2 text-sm text-foreground/82">
+      <span className="font-semibold">Answer:</span> <MathText text={answer} />
     </p>
   );
 }
@@ -250,6 +377,7 @@ export function PracticePanel({
   subjectId,
   subjectCode,
   medium,
+  isStaffUser,
 }: {
   boardId: string;
   gradeId: string;
@@ -258,6 +386,11 @@ export function PracticePanel({
   // picker below offers a Numerical slider at all.
   subjectCode: string;
   medium: Medium;
+  // Gates the "Show answers" / "Download PDF" toolbar below -- a real
+  // student never gets either, only ever grading against a photographed
+  // attempt (see handleSubmit). Reported directly: admins/superadmins want
+  // to review or hand out an answer key for a paper they generate here.
+  isStaffUser: boolean;
 }) {
   const numericalEligible = NUMERICAL_SUBJECT_CODES.has(subjectCode);
   // Every available type for THIS subject, in display order -- drives both
@@ -302,6 +435,20 @@ export function PracticePanel({
   const [activePaper, setActivePaper] = useState<Paper | null>(null);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [loadingPaper, setLoadingPaper] = useState(false);
+
+  // Staff-only answer-key state -- see isStaffUser's own comment. `answers`
+  // is null until first fetched (distinct from "fetched but empty"),
+  // keyed by PaperQuestion.id (matches the API route's own response
+  // shape). `pendingExport` is set the moment "Download PDF" is clicked
+  // and cleared once the export effect below actually runs -- it exists
+  // only to let that effect wait for `answers` to land in state (and the
+  // off-screen print copy to re-render with real text) before capturing.
+  const [answers, setAnswers] = useState<Map<string, string> | null>(null);
+  const [answersLoading, setAnswersLoading] = useState(false);
+  const [showAnswers, setShowAnswers] = useState(false);
+  const [pendingExport, setPendingExport] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -458,6 +605,8 @@ export function PracticePanel({
     setUploadError(null);
     setSubmitFailed(false);
     setSelectedChapters(new Set());
+    setAnswers(null);
+    setShowAnswers(false);
   }
 
   async function handleGenerate() {
@@ -498,6 +647,8 @@ export function PracticePanel({
       setSubmission(null);
       setSelectedFiles([]);
       setSubmitFailed(false);
+      setAnswers(null);
+      setShowAnswers(false);
       void fetchHistory().then((papers) => {
         if (papers) setHistory(papers);
       });
@@ -525,6 +676,8 @@ export function PracticePanel({
       setSubmission(body.submission);
       setSelectedFiles([]);
       setSubmitFailed(false);
+      setAnswers(null);
+      setShowAnswers(false);
     } catch (err) {
       setGenerateError(
         err instanceof Error
@@ -611,6 +764,72 @@ export function PracticePanel({
       setSubmitting(false);
     }
   }
+
+  // Fetches the already-generated answer for every question in the active
+  // paper (staff-only route -- see the API route's own comment) and
+  // returns the resulting map, also committing it to state. Idempotent
+  // from the caller's point of view: both handleToggleAnswers and
+  // handleDownloadPdf call this and just skip it if `answers` is already
+  // populated, so clicking "Show answers" then "Download PDF" (or vice
+  // versa) never re-fetches.
+  async function loadAnswers(): Promise<Map<string, string> | null> {
+    if (!activePaper) return null;
+    setAnswersLoading(true);
+    try {
+      const res = await fetch(`/api/practice-papers/${activePaper.id}/answers`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Could not load answers.");
+      const map = new Map<string, string>(
+        (body.answers as { questionId: string; answer: string }[]).map(
+          (a) => [a.questionId, a.answer],
+        ),
+      );
+      setAnswers(map);
+      return map;
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error ? err.message : "Could not load answers.",
+      );
+      return null;
+    } finally {
+      setAnswersLoading(false);
+    }
+  }
+
+  async function handleToggleAnswers() {
+    if (!showAnswers && !answers) await loadAnswers();
+    setShowAnswers((prev) => !prev);
+  }
+
+  async function handleDownloadPdf() {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    const loaded = answers ?? (await loadAnswers());
+    if (!loaded) {
+      setPdfExporting(false);
+      return;
+    }
+    // The off-screen print copy (see PrintableQuestions below) only
+    // re-renders with real answer text once `answers` has actually
+    // committed -- this flag just tells the effect below "capture as soon
+    // as that's true," rather than capturing immediately against
+    // possibly-stale (pre-fetch) DOM content.
+    setPendingExport(true);
+  }
+
+  useEffect(() => {
+    if (!pendingExport || !answers || !activePaper || !printRef.current) return;
+    const node = printRef.current;
+    exportElementToPdf(node, `practice-paper-${activePaper.id}.pdf`)
+      .catch((err) => {
+        console.error("Practice paper PDF export failed:", err);
+        setGenerateError("Could not generate the PDF. Please try again.");
+      })
+      .finally(() => {
+        setPendingExport(false);
+        setPdfExporting(false);
+      });
+  }, [pendingExport, answers, activePaper]);
 
   // min-w-0 here (in addition to the history row's own, see below) is the
   // real fix -- reported directly, still reproducing after that first fix:
@@ -839,74 +1058,53 @@ export function PracticePanel({
         </>
       ) : (
         <>
-          <button
-            type="button"
-            onClick={resetToPicker}
-            className="mb-3 text-xs text-foreground/65 hover:underline"
-          >
-            ← New paper
-          </button>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={resetToPicker}
+              className="text-xs text-foreground/65 hover:underline"
+            >
+              ← New paper
+            </button>
 
-          <p className="text-lg font-bold">Mock Exam</p>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/65">
-            {activePaper.chapters.join(", ")}
-          </p>
-          <p className="mb-4 text-xs text-foreground/65">
-            Total: {activePaper.totalMarks} marks
-          </p>
-
-          <ol className="space-y-4">
-            {buildDisplayItems(activePaper.questions).map((item) =>
-              item.kind === "question" ? (
-                <li key={item.question.id}>
-                  <p className="whitespace-pre-wrap font-medium">
-                    {item.number}.{" "}
-                    <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
-                      {EXERCISE_TYPE_LABELS[item.question.type]}
-                    </span>
-                    <span className="mr-1 text-xs font-normal text-foreground/65">
-                      ({item.question.marks} mark{item.question.marks === 1 ? "" : "s"})
-                    </span>
-                    <MathText text={item.question.question} />
-                  </p>
-                  <QuestionFeedback q={item.question} />
-                </li>
-              ) : (
-                // A Case Study scenario -- one question number, the shared
-                // scenario shown once, then its 3 sub-parts each with their
-                // own marks and (once graded) their own independent
-                // feedback bar. See DisplayItem's own comment.
-                <li key={item.subparts[0]?.groupId ?? item.number}>
-                  <p className="whitespace-pre-wrap font-medium">
-                    {item.number}.{" "}
-                    <span className="mr-1 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground/68">
-                      Case Study
-                    </span>
-                    <span className="mr-1 text-xs font-normal text-foreground/65">
-                      (
-                      {item.subparts.reduce((sum, sp) => sum + sp.marks, 0)}{" "}
-                      marks)
-                    </span>
-                    <MathText text={item.scenario} />
-                  </p>
-                  <ol className="mt-2 space-y-3 pl-4">
-                    {item.subparts.map((sp, i) => (
-                      <li key={sp.id}>
-                        <p className="whitespace-pre-wrap font-medium">
-                          {SUBPART_LABELS[i] ?? `(${i + 1})`}{" "}
-                          <span className="mr-1 text-xs font-normal text-foreground/65">
-                            ({sp.marks} mark{sp.marks === 1 ? "" : "s"})
-                          </span>
-                          <MathText text={sp.question} />
-                        </p>
-                        <QuestionFeedback q={sp} />
-                      </li>
-                    ))}
-                  </ol>
-                </li>
-              ),
+            {isStaffUser && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleToggleAnswers}
+                  disabled={answersLoading}
+                  className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground/82 hover:bg-brand/5 disabled:opacity-60"
+                >
+                  {answersLoading
+                    ? "Loading…"
+                    : showAnswers
+                      ? "Hide answers"
+                      : "Show answers"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={pdfExporting}
+                  className="rounded-lg border border-brand px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/5 disabled:opacity-60"
+                >
+                  {pdfExporting ? "Preparing PDF…" : "Download PDF (Q+A)"}
+                </button>
+              </div>
             )}
-          </ol>
+          </div>
+
+          <PaperQuestionList
+            paper={activePaper}
+            answers={answers}
+            showAnswers={isStaffUser && showAnswers}
+          />
+          {isStaffUser && (
+            <PrintableAnswerKey
+              paper={activePaper}
+              answers={answers}
+              printRef={printRef}
+            />
+          )}
 
           {submission?.status === "graded" ? (
             <div className="mt-4 space-y-2 border-t border-border pt-4">

@@ -2655,11 +2655,15 @@ async function generatePracticePaperCaseStudy(params: {
   const parsed = parseCaseStudyGeneration(text);
   if (!parsed) return null;
 
-  const subLabels = ["(i)", "(ii)", "(iii)"];
   const stored: { id: string; question: string; marks: number }[] = [];
   for (let i = 0; i < parsed.subparts.length; i++) {
     const subpart = parsed.subparts[i];
-    const question = `${subLabels[i]} ${subpart.question}`;
+    // No "(i)/(ii)/(iii)" prefix baked in here -- the web app's own
+    // practice-panel.tsx already prepends that label when rendering a
+    // sub-part (SUBPART_LABELS), so storing it here too produced a visible
+    // double label ("(i) (i) ..."). Reported directly while adding the
+    // staff answer-key feature, which renders this same text again.
+    const question = subpart.question;
     const row = await storeGeneratedExercise(
       scope,
       topic.id,
