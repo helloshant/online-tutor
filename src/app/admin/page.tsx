@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isPasswordExpired, requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, isPasswordExpired, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createUser } from "./actions";
 import type { ProfileRole } from "@/lib/supabase/types";
@@ -9,6 +9,7 @@ const ROLES: ProfileRole[] = ["user", "admin", "superadmin"];
 export default async function AdminUsersPage() {
   const { profile: viewerProfile } = await requireAdminPage("users");
   const isSuperAdminViewer = viewerProfile?.role === "superadmin";
+  const allowedGrades = await getAllowedAdminGrades();
   const admin = createAdminClient();
 
   const [{ data: authUsers }, { data: profiles }, { data: subscriptions }] = await Promise.all([
@@ -50,6 +51,7 @@ export default async function AdminUsersPage() {
       email: u.email ?? "(no email)",
       fullName: profile?.full_name ?? "—",
       role: profile?.role ?? "user",
+      gradeId: sub?.grade_id,
       board: (sub as unknown as { boards?: { name: string } | null })?.boards?.name,
       grade: (sub as unknown as { grades?: { name: string } | null })?.grades?.name,
       medium: sub?.medium,
@@ -63,7 +65,15 @@ export default async function AdminUsersPage() {
           ? ("expired" as const)
           : ("active" as const),
     };
-  });
+  })
+    // A grade-scoped admin sees every staff row (role isn't grade-bound)
+    // and every student with no subscription yet (nothing to scope), plus
+    // students whose latest subscription is in one of their allowed
+    // grades. Unrestricted admins/superadmins see everyone, as before.
+    .filter(
+      (row) =>
+        row.role !== "user" || !row.gradeId || isGradeAllowed(allowedGrades, row.gradeId),
+    );
 
   return (
     <div>

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { AdminPageKey } from "@/lib/supabase/types";
+import type { AdminGradePermission, AdminPageKey } from "@/lib/supabase/types";
+import { GradePermissionToggle } from "./grade-permission-toggle";
 import { PermissionToggle } from "./permission-toggle";
 
 const PAGES: { key: AdminPageKey; label: string; description: string }[] = [
@@ -30,17 +31,40 @@ const PAGES: { key: AdminPageKey; label: string; description: string }[] = [
     label: "Feedback",
     description: "Review student 👍/👎 on chat replies, topic summaries, and exercises.",
   },
+  // Reported directly: these three keys exist in ADMIN_PAGES
+  // (src/lib/auth.ts) and the admin_page_permissions check constraint, but
+  // were never added to this page's own list -- a superadmin had no way to
+  // grant or revoke them here at all, only via the migration backfill or
+  // setUserRole's own "new admin gets every page" default.
+  {
+    key: "archetype_miner",
+    label: "Archetype Miner",
+    description: "Review mined reasoning-pattern archetypes and curriculum taxonomy.",
+  },
+  {
+    key: "callback_requests",
+    label: "Callback requests",
+    description: "View and manage anonymous callback-request leads.",
+  },
+  {
+    key: "business_enquiries",
+    label: "Business enquiries",
+    description: "View and manage B2B enquiry leads.",
+  },
 ];
 
 export default async function AuthorizationPage() {
   await requireSuperAdmin();
   const admin = createAdminClient();
 
-  const [{ data: authUsers }, { data: profiles }, { data: permissions }] = await Promise.all([
-    admin.auth.admin.listUsers({ perPage: 1000 }),
-    admin.from("profiles").select("*").in("role", ["admin", "superadmin"]),
-    admin.from("admin_page_permissions").select("*"),
-  ]);
+  const [{ data: authUsers }, { data: profiles }, { data: permissions }, { data: grades }, { data: gradePermissions }] =
+    await Promise.all([
+      admin.auth.admin.listUsers({ perPage: 1000 }),
+      admin.from("profiles").select("*").in("role", ["admin", "superadmin"]),
+      admin.from("admin_page_permissions").select("*"),
+      admin.from("grades").select("id, name").order("level"),
+      admin.from("admin_grade_permissions").select("*"),
+    ]);
 
   const userById = new Map((authUsers?.users ?? []).map((u) => [u.id, u]));
   const permsByUser = new Map<string, Set<AdminPageKey>>();
@@ -48,6 +72,12 @@ export default async function AuthorizationPage() {
     const set = permsByUser.get(p.user_id) ?? new Set<AdminPageKey>();
     set.add(p.page);
     permsByUser.set(p.user_id, set);
+  }
+  const gradePermsByUser = new Map<string, Set<string>>();
+  for (const p of (gradePermissions ?? []) as AdminGradePermission[]) {
+    const set = gradePermsByUser.get(p.user_id) ?? new Set<string>();
+    set.add(p.grade_id);
+    gradePermsByUser.set(p.user_id, set);
   }
 
   const staff = (profiles ?? [])
@@ -118,6 +148,76 @@ export default async function AuthorizationPage() {
             {staff.length === 0 && (
               <tr>
                 <td colSpan={PAGES.length + 1} className="px-4 py-8 text-center text-foreground/68">
+                  No admins yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 className="mt-10 text-lg font-semibold">Grade access</h2>
+      <p className="mt-1 max-w-2xl text-sm text-foreground/75">
+        Scope a plain admin to specific grades, so they can only see and edit data for those grades on
+        the pages above that are grade-aware (Users, Catalog, Answer bank, Chapter notes, Topic
+        summaries, Broadcasts). An admin with <b>no grades checked</b> is unrestricted -- sees every
+        grade -- the same as before this existed; checking one or more narrows them down.
+        Superadmins are always unrestricted and can&apos;t be scoped here.
+      </p>
+
+      <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface">
+        <table className="w-full min-w-[500px] text-left text-sm">
+          <thead className="border-b border-border text-xs uppercase text-foreground/68">
+            <tr>
+              <th className="px-4 py-3">Admin</th>
+              {(grades ?? []).map((g) => (
+                <th key={g.id} className="px-4 py-3 text-center">
+                  {g.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {staff.map(({ profile, email }) => {
+              const isSuperadmin = profile.role === "superadmin";
+              const grantedGrades = gradePermsByUser.get(profile.id) ?? new Set<string>();
+              const isUnrestricted = isSuperadmin || grantedGrades.size === 0;
+              return (
+                <tr key={profile.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{profile.full_name ?? "—"}</div>
+                    <div className="text-xs text-foreground/68">{email}</div>
+                    {isUnrestricted && (
+                      <span className="mt-1 inline-block rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/75">
+                        {isSuperadmin ? "superadmin — all grades" : "all grades (unrestricted)"}
+                      </span>
+                    )}
+                  </td>
+                  {(grades ?? []).map((g) => (
+                    <td key={g.id} className="px-4 py-3 text-center">
+                      {isSuperadmin ? (
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled
+                          className="h-4 w-4 rounded border-border accent-brand opacity-50"
+                          aria-label={`${g.name} (always granted for superadmins)`}
+                        />
+                      ) : (
+                        <GradePermissionToggle
+                          userId={profile.id}
+                          gradeId={g.id}
+                          granted={grantedGrades.has(g.id)}
+                        />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+            {staff.length === 0 && (
+              <tr>
+                <td colSpan={(grades ?? []).length + 1} className="px-4 py-8 text-center text-foreground/68">
                   No admins yet.
                 </td>
               </tr>

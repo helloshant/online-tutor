@@ -1,4 +1,4 @@
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -23,10 +23,15 @@ export default async function AdminCatalogPage({
   searchParams: Promise<{ board?: string; grade?: string; subject?: string; medium?: string }>;
 }) {
   await requireAdminPage("catalog");
-  const { board: boardId, grade: gradeId, subject: subjectId, medium } = await searchParams;
+  const { board: boardId, grade: rawGradeId, subject: subjectId, medium } = await searchParams;
   const supabase = await createClient();
+  const allowedGrades = await getAllowedAdminGrades();
+  // A requested grade outside this admin's scope is treated exactly like
+  // no grade selected, same fallback the rest of this page already uses
+  // for an incomplete filter.
+  const gradeId = rawGradeId && isGradeAllowed(allowedGrades, rawGradeId) ? rawGradeId : undefined;
 
-  const [{ data: boards }, { data: grades }, { data: subjects }, { data: offerings }] = await Promise.all([
+  const [{ data: boards }, { data: allGrades }, { data: subjects }, { data: allOfferings }] = await Promise.all([
     supabase.from("boards").select("*").order("name"),
     supabase.from("grades").select("*").order("level"),
     supabase.from("subjects").select("*").order("name"),
@@ -35,6 +40,16 @@ export default async function AdminCatalogPage({
       .select("*, boards(name), grades(name, level), subjects(name)")
       .order("board_id"),
   ]);
+  // The grade entity list itself (used for the "Grades" sidebar and the
+  // addGrade form) stays global, like boards/subjects -- only data tied to
+  // a specific grade is scoped: which grades the syllabus-topic/offering
+  // filters and forms below offer, and which offering rows are shown.
+  const selectableGrades =
+    allowedGrades === "all" ? (allGrades ?? []) : (allGrades ?? []).filter((g) => allowedGrades.has(g.id));
+  const offerings =
+    allowedGrades === "all"
+      ? allOfferings
+      : (allOfferings ?? []).filter((o) => isGradeAllowed(allowedGrades, o.grade_id));
 
   const topics =
     boardId && gradeId && subjectId && medium
@@ -108,7 +123,7 @@ export default async function AdminCatalogPage({
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-sm font-semibold">Grades</h2>
           <ul className="mt-3 space-y-1 text-sm text-foreground/82">
-            {(grades ?? []).map((g) => (
+            {(allGrades ?? []).map((g) => (
               <li key={g.id}>{g.name}</li>
             ))}
           </ul>
@@ -176,7 +191,7 @@ export default async function AdminCatalogPage({
           </select>
           <select name="gradeId" required className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm">
             <option value="">Grade</option>
-            {(grades ?? []).map((g) => (
+            {selectableGrades.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
@@ -259,7 +274,7 @@ export default async function AdminCatalogPage({
             className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           >
             <option value="">Grade</option>
-            {(grades ?? []).map((g) => (
+            {selectableGrades.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>

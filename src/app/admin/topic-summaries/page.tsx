@@ -1,4 +1,4 @@
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MathText } from "@/components/math-text";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -58,6 +58,7 @@ export default async function TopicSummariesPage({
   await requireAdminPage("topic_summaries");
   const { status, regenerated, regenerateError } = await searchParams;
   const activeStatus = (status as TopicSummaryValidationStatus | "all" | undefined) ?? "pending_review";
+  const allowedGrades = await getAllowedAdminGrades();
 
   // Service-role client, same as every other admin page reading a table
   // whose RLS is scoped to admins-only rather than broad authenticated
@@ -68,10 +69,13 @@ export default async function TopicSummariesPage({
   const supabase = createAdminClient();
   let query = supabase
     .from("topic_summaries")
-    .select("id, topic_id, language, summary, validation_status, updated_at, syllabus_topics(chapter, topic, medium, boards(name), grades(name), subjects(name))")
+    .select(
+      "id, topic_id, language, summary, validation_status, updated_at, syllabus_topics!inner(chapter, topic, medium, grade_id, boards(name), grades(name), subjects(name))"
+    )
     .order("updated_at", { ascending: false })
     .limit(200);
   if (activeStatus !== "all") query = query.eq("validation_status", activeStatus);
+  if (allowedGrades !== "all") query = query.in("syllabus_topics.grade_id", [...allowedGrades]);
 
   const { data } = await query;
   const rows = (data ?? []) as unknown as TopicSummaryRow[];

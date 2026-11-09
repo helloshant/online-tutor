@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { isStaff, requireFreshPassword } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, isStaff, requireFreshPassword } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getWalletBalance } from "@/lib/walletBalance";
@@ -28,11 +28,18 @@ export default async function DashboardPage({
   if (isStaff(profile?.role)) {
     const { board: boardParam, grade: gradeParam, medium: mediumParam } = await searchParams;
     const requestedMedium = VALID_MEDIUMS.includes(mediumParam as Medium) ? (mediumParam as Medium) : null;
+    const allowedGrades = await getAllowedAdminGrades();
 
-    const [{ data: allBoards }, { data: allGrades }] = await Promise.all([
+    const [{ data: allBoards }, { data: allGradesUnfiltered }] = await Promise.all([
       supabase.from("boards").select("id, name").order("name"),
       supabase.from("grades").select("id, name").order("level"),
     ]);
+    // The preview picker only offers a grade-scoped admin their own
+    // allowed grades -- see staff-preview-picker.tsx.
+    const allGrades =
+      allowedGrades === "all"
+        ? allGradesUnfiltered
+        : (allGradesUnfiltered ?? []).filter((g) => allowedGrades.has(g.id));
 
     let previewBoardId: string | null = null;
     let previewGradeId: string | null = null;
@@ -41,7 +48,7 @@ export default async function DashboardPage({
     let gradeName = "All grades";
     let subjects: { id: string; name: string; code: string }[] = [];
 
-    if (boardParam && gradeParam && requestedMedium) {
+    if (boardParam && gradeParam && requestedMedium && isGradeAllowed(allowedGrades, gradeParam)) {
       const [{ data: board }, { data: grade }, { data: offeringRows }] = await Promise.all([
         supabase.from("boards").select("name").eq("id", boardParam).maybeSingle(),
         supabase.from("grades").select("name").eq("id", gradeParam).maybeSingle(),

@@ -3,7 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { ADMIN_PAGES, PASSWORD_EXPIRY_DAYS, requireAdminPage, requireSuperAdmin } from "@/lib/auth";
+import {
+  ADMIN_PAGES,
+  PASSWORD_EXPIRY_DAYS,
+  getAllowedAdminGrades,
+  isGradeAllowed,
+  requireAdminPage,
+  requireSuperAdmin,
+} from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { amountForSubjects } from "@/lib/pricing";
@@ -48,6 +55,15 @@ export async function setUserRole(userId: string, role: ProfileRole) {
       );
   } else {
     await supabase.from("admin_page_permissions").delete().eq("user_id", userId);
+  }
+
+  // Grade scoping (admin_grade_permissions) has the opposite default --
+  // zero rows means unrestricted, not locked out -- so there's nothing to
+  // grant on promotion. Demotion still clears any grant, same reasoning as
+  // the page permissions above: a later re-promotion starts unrestricted
+  // rather than silently resurrecting an old grade scope.
+  if (role !== "admin") {
+    await supabase.from("admin_grade_permissions").delete().eq("user_id", userId);
   }
 
   revalidatePath("/admin");
@@ -192,12 +208,21 @@ export async function updateSubscriptionBoardGrade(
 
   const { data: subscription } = await supabase
     .from("subscriptions")
-    .select("id, status")
+    .select("id, status, grade_id")
     .eq("id", subscriptionId)
     .in("status", ["active", "pending_payment"])
     .maybeSingle();
   if (!subscription) {
     return { error: "This subscription can no longer be edited." };
+  }
+
+  // A grade-scoped admin can only move a student between grades they're
+  // themselves allowed to manage -- both where the student is coming from
+  // and where they'd be moved to, so this can't be used to reach into or
+  // move a student out into a grade outside that admin's scope.
+  const allowedGrades = await getAllowedAdminGrades();
+  if (!isGradeAllowed(allowedGrades, subscription.grade_id) || !isGradeAllowed(allowedGrades, gradeId)) {
+    return { error: "You don't have access to one of those grades." };
   }
 
   // A subject valid under the old board/grade isn't guaranteed to still be

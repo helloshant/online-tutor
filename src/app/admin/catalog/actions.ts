@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { Medium } from "@/lib/supabase/types";
 
@@ -43,6 +43,7 @@ export async function addOffering(formData: FormData) {
   const gradeId = String(formData.get("gradeId") ?? "");
   const subjectId = String(formData.get("subjectId") ?? "");
   if (!boardId || !gradeId || !subjectId) return;
+  if (!isGradeAllowed(await getAllowedAdminGrades(), gradeId)) return;
   const supabase = await createClient();
   await supabase
     .from("board_grade_subjects")
@@ -55,6 +56,15 @@ export async function addOffering(formData: FormData) {
 export async function removeOffering(offeringId: string) {
   await requireAdminPage("catalog");
   const supabase = await createClient();
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all") {
+    const { data: offering } = await supabase
+      .from("board_grade_subjects")
+      .select("grade_id")
+      .eq("id", offeringId)
+      .maybeSingle();
+    if (!offering || !isGradeAllowed(allowedGrades, offering.grade_id)) return;
+  }
   await supabase.from("board_grade_subjects").delete().eq("id", offeringId);
   revalidatePath("/admin/catalog");
 }
@@ -69,6 +79,7 @@ export async function addSyllabusTopic(formData: FormData) {
   const topic = String(formData.get("topic") ?? "").trim();
   const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
   if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(medium) || !chapter || !topic) return;
+  if (!isGradeAllowed(await getAllowedAdminGrades(), gradeId)) return;
   const supabase = await createClient();
   await supabase.from("syllabus_topics").insert({
     board_id: boardId,
@@ -143,6 +154,7 @@ export async function bulkAddSyllabusTopics(formData: FormData) {
   const medium = String(formData.get("medium") ?? "") as Medium;
   const bulkText = String(formData.get("bulkText") ?? "");
   if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(medium)) return;
+  if (!isGradeAllowed(await getAllowedAdminGrades(), gradeId)) return;
 
   const parsed = parseBulkSyllabus(bulkText);
   if (parsed.length === 0) return;
@@ -191,6 +203,15 @@ export async function updateSyllabusTopic(topicId: string, formData: FormData) {
   const sortOrder = Number(formData.get("sortOrder") ?? 0) || 0;
   if (!chapter || !topic) return;
   const supabase = await createClient();
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all") {
+    const { data: existing } = await supabase
+      .from("syllabus_topics")
+      .select("grade_id")
+      .eq("id", topicId)
+      .maybeSingle();
+    if (!existing || !isGradeAllowed(allowedGrades, existing.grade_id)) return;
+  }
   await supabase
     .from("syllabus_topics")
     .update({ chapter, topic, sort_order: sortOrder })
@@ -201,6 +222,15 @@ export async function updateSyllabusTopic(topicId: string, formData: FormData) {
 export async function removeSyllabusTopic(topicId: string) {
   await requireAdminPage("catalog");
   const supabase = await createClient();
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all") {
+    const { data: existing } = await supabase
+      .from("syllabus_topics")
+      .select("grade_id")
+      .eq("id", topicId)
+      .maybeSingle();
+    if (!existing || !isGradeAllowed(allowedGrades, existing.grade_id)) return;
+  }
   await supabase.from("syllabus_topics").delete().eq("id", topicId);
   revalidatePath("/admin/catalog");
 }

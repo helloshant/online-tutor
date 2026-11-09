@@ -25,10 +25,14 @@ export function NewBroadcastForm({
   boards,
   grades,
   subjects,
+  gradeScoped,
 }: {
   boards: CatalogItem[];
   grades: CatalogItem[];
   subjects: CatalogItem[];
+  // A grade-scoped admin must target one specific allowed grade -- "All
+  // grades" (grade_id null) would reach students outside their scope too.
+  gradeScoped: boolean;
 }) {
   const [state, formAction, pending] = useActionState(createBroadcast, initialState);
 
@@ -81,8 +85,13 @@ export function NewBroadcastForm({
               </option>
             ))}
           </select>
-          <select name="gradeId" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm">
-            <option value="">All grades</option>
+          <select
+            name="gradeId"
+            required={gradeScoped}
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            {!gradeScoped && <option value="">All grades</option>}
+            {gradeScoped && <option value="">Select a grade…</option>}
             {grades.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}

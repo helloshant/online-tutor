@@ -2,10 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { invalidateCachedTopicSummary } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
+
+// Re-resolves a topic_summaries row's real grade via its topic, rather than
+// trusting a topicId handed back from the client -- same "never trust a
+// client-supplied scope" posture as every other trust boundary in this app.
+async function assertTopicSummaryGradeAllowed(
+  supabase: ReturnType<typeof createAdminClient>,
+  id: string,
+): Promise<boolean> {
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades === "all") return true;
+  const { data } = await supabase
+    .from("topic_summaries")
+    .select("syllabus_topics(grade_id)")
+    .eq("id", id)
+    .maybeSingle();
+  const gradeId = (data as unknown as { syllabus_topics: { grade_id: string } | null } | null)?.syllabus_topics
+    ?.grade_id;
+  return isGradeAllowed(allowedGrades, gradeId);
+}
 
 // Promotes a pending_review summary to approved -- from this point it's
 // what the orchestrator's /v1/topic-summary cache/database stages serve to
@@ -15,6 +34,7 @@ import type { Medium } from "@/lib/supabase/types";
 export async function approveTopicSummary(id: string) {
   await requireAdminPage("topic_summaries");
   const supabase = createAdminClient();
+  if (!(await assertTopicSummaryGradeAllowed(supabase, id))) return;
   await supabase.from("topic_summaries").update({ validation_status: "approved" }).eq("id", id);
   revalidatePath("/admin/topic-summaries");
 }
@@ -32,6 +52,7 @@ export async function approveTopicSummary(id: string) {
 export async function rejectTopicSummary(id: string, topicId: string, language: string) {
   await requireAdminPage("topic_summaries");
   const supabase = createAdminClient();
+  if (!(await assertTopicSummaryGradeAllowed(supabase, id))) return;
   await supabase.from("topic_summaries").update({ validation_status: "rejected" }).eq("id", id);
   await invalidateCachedTopicSummary(topicId, language as Medium);
   revalidatePath("/admin/topic-summaries");
@@ -43,6 +64,7 @@ export async function rejectTopicSummary(id: string, topicId: string, language: 
 export async function deleteTopicSummary(id: string, topicId: string, language: string) {
   await requireAdminPage("topic_summaries");
   const supabase = createAdminClient();
+  if (!(await assertTopicSummaryGradeAllowed(supabase, id))) return;
   await supabase.from("topic_summaries").delete().eq("id", id);
   await invalidateCachedTopicSummary(topicId, language as Medium);
   revalidatePath("/admin/topic-summaries");
@@ -71,11 +93,14 @@ export async function deleteTopicSummary(id: string, topicId: string, language: 
 export async function regenerateAllTopicSummaries() {
   await requireAdminPage("topic_summaries");
   const supabase = createAdminClient();
+  const allowedGrades = await getAllowedAdminGrades();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("topic_summaries")
-    .select("id, topic_id, language")
+    .select("id, topic_id, language, syllabus_topics!inner(grade_id)")
     .neq("validation_status", "rejected");
+  if (allowedGrades !== "all") query = query.in("syllabus_topics.grade_id", [...allowedGrades]);
+  const { data, error } = await query;
   if (error) {
     console.error("Failed to load topic summaries for bulk regeneration:", error);
     redirect("/admin/topic-summaries?regenerateError=1");

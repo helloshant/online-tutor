@@ -20,3 +20,23 @@ export async function setPagePermission(userId: string, page: AdminPageKey, gran
 
   revalidatePath("/admin/authorization");
 }
+
+// Grade scoping has the opposite "empty" meaning from page permissions --
+// zero rows means unrestricted (see 0071_admin_grade_permissions.sql), so
+// toggling a grade on actually narrows an admin's access rather than
+// widening it.
+export async function setGradePermission(userId: string, gradeId: string, granted: boolean) {
+  await requireSuperAdmin();
+  const supabase = await createClient();
+
+  if (granted) {
+    await supabase.from("admin_grade_permissions").upsert(
+      { user_id: userId, grade_id: gradeId },
+      { onConflict: "user_id,grade_id", ignoreDuplicates: true }
+    );
+  } else {
+    await supabase.from("admin_grade_permissions").delete().eq("user_id", userId).eq("grade_id", gradeId);
+  }
+
+  revalidatePath("/admin/authorization");
+}

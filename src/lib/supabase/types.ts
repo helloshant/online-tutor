@@ -424,6 +424,19 @@ export type AdminPagePermission = {
   created_at: string;
 };
 
+// Written by superadmins only (RLS: is_superadmin() for all writes; a user
+// can read their own rows). See
+// supabase/migrations/0071_admin_grade_permissions.sql. Opposite default
+// from AdminPagePermission: a plain admin with zero rows here is
+// unrestricted (every grade), not locked out -- see
+// getAllowedAdminGrades() in src/lib/auth.ts.
+export type AdminGradePermission = {
+  id: string;
+  user_id: string;
+  grade_id: string;
+  created_at: string;
+};
+
 // Admin-authored detailed chapter content, retrievable by semantic
 // similarity rather than keyword match -- see
 // supabase/migrations/0024_chapter_documents_rag.sql. RLS is enabled with
@@ -938,6 +951,12 @@ export interface Database {
         Row: AdminPagePermission;
         Insert: Partial<AdminPagePermission>;
         Update: Partial<AdminPagePermission>;
+        Relationships: [];
+      };
+      admin_grade_permissions: {
+        Row: AdminGradePermission;
+        Insert: Partial<AdminGradePermission>;
+        Update: Partial<AdminGradePermission>;
         Relationships: [];
       };
       topic_summaries: {

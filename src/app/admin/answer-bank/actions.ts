@@ -2,11 +2,27 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { IMAGE_MARKER, IMAGE_PLACEHOLDER_PATTERN } from "@/lib/imageMarker";
 import { invalidateCachedAnswer } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Medium } from "@/lib/supabase/types";
+
+// Re-resolves a row's real grade_id from the database rather than trusting
+// a gradeId handed back from the client (even one that was only ever
+// server-rendered into a bound action arg) -- same "never trust a
+// client-supplied scope" posture as every other trust boundary in this
+// app. Used by every row-level action below that only receives an `id`.
+async function assertAnswerGradeAllowed(
+  supabase: ReturnType<typeof createAdminClient>,
+  id: string,
+): Promise<boolean> {
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades === "all") return true;
+  const { data } = await supabase.from("answered_questions").select("grade_id").eq("id", id).maybeSingle();
+  if (!data) return false;
+  return isGradeAllowed(allowedGrades, data.grade_id);
+}
 
 // Public bucket created in 0017_answer_bank_image.sql -- see that migration
 // for why no storage.objects policy is needed (only this service-role
@@ -33,6 +49,7 @@ export type AnswerBankScope = {
 export async function approveAnswer(id: string) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
   await supabase.from("answered_questions").update({ validation_status: "admin_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
@@ -40,6 +57,7 @@ export async function approveAnswer(id: string) {
 export async function rejectAnswer(scope: AnswerBankScope) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, scope.id))) return;
   await supabase.from("answered_questions").update({ validation_status: "rejected" }).eq("id", scope.id);
   // A rejected answer must stop being served immediately, not whenever its
   // Redis TTL happens to expire.
@@ -98,6 +116,9 @@ export async function editAnswer(
   const rawAnswer = ((formData.get("answer") as string | null) ?? "").trim();
 
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, scope.id))) {
+    return { unmatchedImageRefs: [] };
+  }
 
   const { data: currentRow } = await supabase
     .from("answered_questions")
@@ -203,6 +224,7 @@ export async function editAnswer(
 export async function restoreAnswer(id: string) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
   await supabase.from("answered_questions").update({ validation_status: "auto_approved" }).eq("id", id);
   revalidatePath("/admin/answer-bank");
 }
@@ -210,6 +232,7 @@ export async function restoreAnswer(id: string) {
 export async function deleteAnswer(scope: AnswerBankScope) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, scope.id))) return;
 
   // Otherwise every attached image would be orphaned in storage forever
   // once the row itself is gone -- list() rather than reading image_urls
@@ -234,6 +257,7 @@ export async function addTag(id: string, formData: FormData) {
   if (!tag) return;
 
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
   const { data } = await supabase.from("answered_questions").select("tags").eq("id", id).single();
   const tags = Array.from(new Set([...(data?.tags ?? []), tag]));
   await supabase.from("answered_questions").update({ tags }).eq("id", id);
@@ -243,6 +267,7 @@ export async function addTag(id: string, formData: FormData) {
 export async function removeTag(id: string, tag: string) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
   const { data } = await supabase.from("answered_questions").select("tags").eq("id", id).single();
   const tags = (data?.tags ?? []).filter((t: string) => t !== tag);
   await supabase.from("answered_questions").update({ tags }).eq("id", id);
@@ -269,6 +294,7 @@ export async function addImage(id: string, formData: FormData) {
   }
 
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
   const path = `${id}/${crypto.randomUUID()}`;
   const { error: uploadError } = await supabase.storage
     .from(IMAGE_BUCKET)
@@ -294,6 +320,7 @@ export async function addImage(id: string, formData: FormData) {
 export async function removeImage(id: string, imageUrl: string) {
   await requireAdminPage("answer_bank");
   const supabase = createAdminClient();
+  if (!(await assertAnswerGradeAllowed(supabase, id))) return;
 
   const { data } = await supabase.from("answered_questions").select("image_urls").eq("id", id).single();
   const imageUrls = (data?.image_urls ?? []).filter((url: string) => url !== imageUrl);
@@ -694,6 +721,9 @@ export async function bulkImportAnswers(
 
   if (!boardId || !gradeId || !subjectId || !medium) {
     return { error: "Board, grade, subject, and medium are all required." };
+  }
+  if (!isGradeAllowed(await getAllowedAdminGrades(), gradeId)) {
+    return { error: "You don't have access to that grade." };
   }
 
   const scope = { boardId, gradeId, subjectId, medium, topicId };

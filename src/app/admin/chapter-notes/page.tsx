@@ -1,4 +1,4 @@
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ChapterDocumentSourceType, Medium } from "@/lib/supabase/types";
 import { deleteChapterDocument } from "./actions";
@@ -37,8 +37,11 @@ export default async function ChapterNotesPage({
 }) {
   await requireAdminPage("chapter_notes");
   const { board, grade, subject, medium, sourceType, search } = await searchParams;
+  const allowedGrades = await getAllowedAdminGrades();
   const activeBoard = board || null;
-  const activeGrade = grade || null;
+  // A requested grade outside this admin's scope is treated as no grade
+  // selected, same fallback the other filters on this page already use.
+  const activeGrade = grade && isGradeAllowed(allowedGrades, grade) ? grade : null;
   const activeSubject = subject || null;
   const activeMedium = (medium as Medium | undefined) || null;
   const activeSourceType = (sourceType as ChapterDocumentSourceType | undefined) || null;
@@ -67,12 +70,13 @@ export default async function ChapterNotesPage({
     .order("created_at", { ascending: false });
   if (activeBoard) documentsQuery = documentsQuery.eq("syllabus_topics.board_id", activeBoard);
   if (activeGrade) documentsQuery = documentsQuery.eq("syllabus_topics.grade_id", activeGrade);
+  if (allowedGrades !== "all") documentsQuery = documentsQuery.in("syllabus_topics.grade_id", [...allowedGrades]);
   if (activeSubject) documentsQuery = documentsQuery.eq("syllabus_topics.subject_id", activeSubject);
   if (activeMedium) documentsQuery = documentsQuery.eq("syllabus_topics.medium", activeMedium);
   if (activeSourceType) documentsQuery = documentsQuery.eq("source_type", activeSourceType);
   if (activeSearch) documentsQuery = documentsQuery.ilike("title", `%${activeSearch}%`);
 
-  const [{ data: boards }, { data: grades }, { data: subjects }, { data: documents }, { data: allTopics }, { data: ingestedTopicRows }, { data: offeringRows }] =
+  const [{ data: boards }, { data: allGrades }, { data: subjects }, { data: documents }, { data: allTopicsUnfiltered }, { data: ingestedTopicRows }, { data: offeringRows }] =
     await Promise.all([
       supabase.from("boards").select("*").order("name"),
       supabase.from("grades").select("*").order("level"),
@@ -102,8 +106,17 @@ export default async function ChapterNotesPage({
       supabase.from("board_grade_subjects").select("board_id, grade_id, subject_id"),
     ]);
 
+  const grades =
+    allowedGrades === "all" ? allGrades : (allGrades ?? []).filter((g) => allowedGrades.has(g.id));
+  // Coverage below is built entirely from allTopics -- scope it to allowed
+  // grades too, so a grade-scoped admin never sees "missing" topics for a
+  // grade they can't act on anyway.
+  const allTopics =
+    allowedGrades === "all"
+      ? allTopicsUnfiltered
+      : (allTopicsUnfiltered ?? []).filter((t) => isGradeAllowed(allowedGrades, t.grade_id));
   const boardNameById = new Map((boards ?? []).map((b) => [b.id, b.name]));
-  const gradeNameById = new Map((grades ?? []).map((g) => [g.id, g.name]));
+  const gradeNameById = new Map((allGrades ?? []).map((g) => [g.id, g.name]));
   const subjectNameById = new Map((subjects ?? []).map((s) => [s.id, s.name]));
   const ingestedTopicIds = new Set((ingestedTopicRows ?? []).map((r) => r.topic_id));
   const offeredCombos = new Set((offeringRows ?? []).map((o) => `${o.board_id}|${o.grade_id}|${o.subject_id}`));

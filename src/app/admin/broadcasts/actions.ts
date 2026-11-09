@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendBroadcast as sendBroadcastRequest, gradeTestAnswer } from "@/lib/broadcastClient";
 import type { BroadcastType, Medium, TestQuestionType } from "@/lib/supabase/types";
@@ -53,6 +53,15 @@ export async function createBroadcast(
   const medium = optionalField(formData, "medium");
   if (medium && !MEDIUMS.includes(medium as Medium)) return { error: "Invalid medium." };
 
+  const gradeId = optionalField(formData, "gradeId");
+  // A grade-scoped admin must target one specific allowed grade -- "All
+  // grades" (null) would reach students outside their scope too, same as
+  // targeting a grade they're not allowed.
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all" && !isGradeAllowed(allowedGrades, gradeId)) {
+    return { error: "Select one of your assigned grades." };
+  }
+
   const { data: created, error } = await supabase
     .from("broadcasts")
     .insert({
@@ -60,7 +69,7 @@ export async function createBroadcast(
       title,
       body,
       board_id: optionalField(formData, "boardId"),
-      grade_id: optionalField(formData, "gradeId"),
+      grade_id: gradeId,
       subject_id: optionalField(formData, "subjectId"),
       medium: medium as Medium | null,
       status: "draft",
@@ -91,6 +100,13 @@ export async function createBroadcast(
 export async function deleteBroadcast(id: string) {
   await requireAdminPage("broadcasts");
   const supabase = createAdminClient();
+
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all") {
+    const { data: broadcast } = await supabase.from("broadcasts").select("grade_id").eq("id", id).maybeSingle();
+    if (!broadcast || !isGradeAllowed(allowedGrades, broadcast.grade_id)) return;
+  }
+
   await supabase.from("broadcasts").delete().eq("id", id).eq("status", "draft");
   revalidatePath("/admin/broadcasts");
 }
@@ -110,6 +126,7 @@ export async function sendBroadcastAction(id: string) {
     .single();
   if (error || !broadcast) return;
   if (broadcast.status !== "draft") return;
+  if (!isGradeAllowed(await getAllowedAdminGrades(), broadcast.grade_id)) return;
 
   if (broadcast.type === "test") {
     const { count } = await supabase

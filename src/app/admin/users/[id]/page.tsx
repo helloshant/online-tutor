@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, isPasswordExpired, PASSWORD_EXPIRY_DAYS, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   deleteUser,
@@ -71,6 +71,22 @@ export default async function AdminUserDetailPage({
 
   const isSuperAdminViewer = actingProfile?.role === "superadmin";
   const targetRole: ProfileRole = profile?.role ?? "user";
+
+  // Grade-scoped admins can only reach a student whose most recent
+  // subscription is in one of their allowed grades -- same rule the Users
+  // list page filters rows by. Staff accounts and students with no
+  // subscription yet (nothing to scope) are always reachable.
+  const allowedGrades = await getAllowedAdminGrades();
+  const latestSubscription = (subscriptions ?? [])[0] as { grade_id: string } | undefined;
+  if (
+    targetRole === "user" &&
+    latestSubscription &&
+    !isGradeAllowed(allowedGrades, latestSubscription.grade_id)
+  ) {
+    notFound();
+  }
+  const allowedGradesList =
+    allowedGrades === "all" ? (grades ?? []) : (grades ?? []).filter((g) => allowedGrades.has(g.id));
   // Mirrors deleteUser's own guards (no self-delete; staff accounts need a
   // superadmin) so the button doesn't invite an action that's a no-op.
   const canDeleteTarget = id !== actingUser.id && (targetRole === "user" || isSuperAdminViewer);
@@ -211,7 +227,7 @@ export default async function AdminUserDetailPage({
 
       <div className="mt-3 space-y-3">
         {(subscriptions ?? []).map((sub) => (
-          <SubscriptionCard key={sub.id} sub={sub} userId={id} boards={boards ?? []} grades={grades ?? []} />
+          <SubscriptionCard key={sub.id} sub={sub} userId={id} boards={boards ?? []} grades={allowedGradesList} />
         ))}
 
         {(subscriptions ?? []).length === 0 && (

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { runEmphasisPass } from "@/lib/chapterDocumentEmphasis";
 import { embedChapterDocument, importChapterChunks } from "@/lib/orchestratorClient";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -57,7 +57,7 @@ export async function saveChapterDocument(
   if (!content) return { error: "Content is required." };
   const { sourceType, sourceUrl, sourceNote } = readSourceFields(formData);
 
-  let documentId: string;
+  let documentId: string | null = null;
   let topicId: string;
 
   if (id) {
@@ -74,7 +74,31 @@ export async function saveChapterDocument(
     if (error || !existing) return { error: "This document no longer exists." };
     documentId = id;
     topicId = existing.topic_id;
+  } else {
+    topicId = (formData.get("topicId") as string | null) ?? "";
+    if (!topicId) return { error: "Board, grade, subject, medium, and topic are all required." };
+  }
 
+  // chapter_document_chunks denormalizes board/grade/subject/medium off the
+  // topic (see 0024_chapter_documents_rag.sql) so the retrieval RPC can
+  // filter on plain equality -- looked up here rather than trusting a
+  // second set of hidden form fields, same reasoning as topicId above. Also
+  // doubles as this save's grade-scope check, done before either write
+  // below runs, not after.
+  const { data: topic, error: topicError } = await supabase
+    .from("syllabus_topics")
+    .select("board_id, grade_id, subject_id, medium")
+    .eq("id", topicId)
+    .single();
+  if (topicError || !topic) {
+    console.error("Failed to look up topic scope for chapter document:", topicError);
+    return { error: "Couldn't look up its board/grade/subject scope. Please try again." };
+  }
+  if (!isGradeAllowed(await getAllowedAdminGrades(), topic.grade_id)) {
+    return { error: "You don't have access to that grade." };
+  }
+
+  if (documentId) {
     const { error: updateError } = await supabase
       .from("chapter_documents")
       .update({ title, content, source_type: sourceType, source_url: sourceUrl, source_note: sourceNote })
@@ -84,9 +108,6 @@ export async function saveChapterDocument(
       return { error: "Could not save this document. Please try again." };
     }
   } else {
-    topicId = (formData.get("topicId") as string | null) ?? "";
-    if (!topicId) return { error: "Board, grade, subject, medium, and topic are all required." };
-
     const { data: created, error: insertError } = await supabase
       .from("chapter_documents")
       .insert({
@@ -105,20 +126,6 @@ export async function saveChapterDocument(
       return { error: "Could not save this document. Please try again." };
     }
     documentId = created.id;
-  }
-
-  // chapter_document_chunks denormalizes board/grade/subject/medium off the
-  // topic (see 0024_chapter_documents_rag.sql) so the retrieval RPC can
-  // filter on plain equality -- looked up here rather than trusting a
-  // second set of hidden form fields, same reasoning as topicId above.
-  const { data: topic, error: topicError } = await supabase
-    .from("syllabus_topics")
-    .select("board_id, grade_id, subject_id, medium")
-    .eq("id", topicId)
-    .single();
-  if (topicError || !topic) {
-    console.error("Failed to look up topic scope for chapter document:", topicError);
-    return { error: "Saved, but couldn't look up its board/grade/subject scope to index it for search." };
   }
 
   let embedded = true;
@@ -145,6 +152,19 @@ export async function saveChapterDocument(
 export async function deleteChapterDocument(id: string) {
   await requireAdminPage("chapter_notes");
   const supabase = createAdminClient();
+
+  const allowedGrades = await getAllowedAdminGrades();
+  if (allowedGrades !== "all") {
+    const { data: doc } = await supabase
+      .from("chapter_documents")
+      .select("syllabus_topics(grade_id)")
+      .eq("id", id)
+      .maybeSingle();
+    const gradeId = (doc as unknown as { syllabus_topics: { grade_id: string } | null } | null)?.syllabus_topics
+      ?.grade_id;
+    if (!isGradeAllowed(allowedGrades, gradeId)) return;
+  }
+
   // ON DELETE CASCADE on chapter_document_chunks.document_id (see
   // 0024_chapter_documents_rag.sql) removes the derived chunks along with
   // this row -- no separate cleanup call needed.
@@ -253,6 +273,9 @@ export async function importChapterChunksJson(
   const VALID_MEDIUMS: Medium[] = ["English", "Hindi", "Bengali"];
   if (!boardId || !gradeId || !subjectId || !VALID_MEDIUMS.includes(rawMedium as Medium) || !book) {
     return { error: "Board, grade, subject, medium, and book are all required." };
+  }
+  if (!isGradeAllowed(await getAllowedAdminGrades(), gradeId)) {
+    return { error: "You don't have access to that grade." };
   }
   const medium = rawMedium as Medium;
   // One provenance claim for the whole book -- a JSON file prepared offline
@@ -450,10 +473,14 @@ export async function addEmphasisToChapterDocument(
 
   const { data: doc, error } = await supabase
     .from("chapter_documents")
-    .select("id, topic_id, content")
+    .select("id, topic_id, content, syllabus_topics(grade_id)")
     .eq("id", id)
     .single();
   if (error || !doc) return { error: "This document no longer exists." };
+  const docGradeId = (doc as unknown as { syllabus_topics: { grade_id: string } | null }).syllabus_topics?.grade_id;
+  if (!isGradeAllowed(await getAllowedAdminGrades(), docGradeId)) {
+    return { error: "You don't have access to that grade." };
+  }
 
   const result = await runEmphasisPass(supabase, doc);
   if (!result) return { error: "Could not format this document right now. Please try again." };

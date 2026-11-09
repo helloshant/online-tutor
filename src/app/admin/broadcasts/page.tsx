@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import type { BroadcastStatus, BroadcastType } from "@/lib/supabase/types";
@@ -27,6 +27,7 @@ type BroadcastRow = {
   status: BroadcastStatus;
   sent_at: string | null;
   created_at: string;
+  grade_id: string | null;
   boards: { name: string } | null;
   grades: { name: string } | null;
   subjects: { name: string } | null;
@@ -35,6 +36,7 @@ type BroadcastRow = {
 
 export default async function BroadcastsPage() {
   await requireAdminPage("broadcasts");
+  const allowedGrades = await getAllowedAdminGrades();
 
   // broadcasts has RLS enabled with zero client-facing policies (see
   // 0028_broadcast_service.sql) -- same "backend-only table" posture as
@@ -42,18 +44,25 @@ export default async function BroadcastsPage() {
   // service-role client the same way those admin pages do.
   const supabase = createAdminClient();
 
-  const [{ data: boards }, { data: grades }, { data: subjects }, { data: broadcasts }] = await Promise.all([
+  const [{ data: boards }, { data: allGrades }, { data: subjects }, { data: broadcasts }] = await Promise.all([
     supabase.from("boards").select("id, name").order("name"),
     supabase.from("grades").select("id, name").order("level"),
     supabase.from("subjects").select("id, name").order("name"),
     supabase
       .from("broadcasts")
-      .select("id, type, title, status, sent_at, created_at, medium, boards(name), grades(name), subjects(name)")
+      .select("id, type, title, status, sent_at, created_at, grade_id, medium, boards(name), grades(name), subjects(name)")
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
 
-  const rows = (broadcasts ?? []) as unknown as BroadcastRow[];
+  const grades = allowedGrades === "all" ? allGrades : (allGrades ?? []).filter((g) => allowedGrades.has(g.id));
+  // A scoped admin still sees an "all grades" broadcast (grade_id null) in
+  // this list -- it does reach their students too -- but can't create,
+  // send, or delete one (see new-broadcast-form.tsx and the mutating
+  // actions below), only ones scoped to a grade they're allowed.
+  const rows = ((broadcasts ?? []) as unknown as BroadcastRow[]).filter(
+    (row) => !row.grade_id || isGradeAllowed(allowedGrades, row.grade_id),
+  );
 
   return (
     <div>
@@ -64,7 +73,12 @@ export default async function BroadcastsPage() {
         unfiltered to reach everyone. A draft reaches nobody until you open it and hit Send.
       </p>
 
-      <NewBroadcastForm boards={boards ?? []} grades={grades ?? []} subjects={subjects ?? []} />
+      <NewBroadcastForm
+        boards={boards ?? []}
+        grades={grades ?? []}
+        subjects={subjects ?? []}
+        gradeScoped={allowedGrades !== "all"}
+      />
 
       <div className="mt-6 space-y-2">
         {rows.length === 0 && <p className="text-sm text-foreground/68">No broadcasts yet.</p>}
@@ -94,7 +108,7 @@ export default async function BroadcastsPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              {row.status === "draft" && (
+              {row.status === "draft" && (allowedGrades === "all" || Boolean(row.grade_id)) && (
                 <>
                   <form action={sendBroadcastAction.bind(null, row.id)}>
                     <button className="rounded-lg border border-brand px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/5">

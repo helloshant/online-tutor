@@ -127,3 +127,34 @@ export async function requireAdminPage(page: AdminPageKey) {
   if (!data) redirect("/admin/no-access");
   return session;
 }
+
+// Which grades the current user's admin access is scoped to. Superadmins
+// are always unrestricted. For a plain admin, zero rows means unrestricted
+// too (opt-in scoping -- see 0071_admin_grade_permissions.sql) rather than
+// "locked out," the opposite default from getAllowedAdminPages()/
+// admin_page_permissions deliberately, since narrowing access here is
+// something a superadmin does on top of an otherwise-unrestricted admin,
+// not a grant they start from zero.
+export async function getAllowedAdminGrades(): Promise<Set<string> | "all"> {
+  const session = await requireAdmin();
+  if (session.profile?.role === "superadmin") return "all";
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("admin_grade_permissions")
+    .select("grade_id")
+    .eq("user_id", session.user.id);
+  if (!data || data.length === 0) return "all";
+  return new Set(data.map((row) => row.grade_id));
+}
+
+// Plain predicate (no redirect) for checking one specific row's grade_id
+// against a scope already resolved via getAllowedAdminGrades() -- used
+// inside pages/actions that are already gated by requireAdminPage(), to
+// filter a list or re-validate a client-bound id before a mutation. A
+// null/missing gradeId is never implicitly allowed once scoped, since
+// there's nothing to check it against.
+export function isGradeAllowed(scope: Set<string> | "all", gradeId: string | null | undefined): boolean {
+  if (scope === "all") return true;
+  return Boolean(gradeId) && scope.has(gradeId as string);
+}

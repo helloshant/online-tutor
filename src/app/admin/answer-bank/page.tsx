@@ -1,4 +1,4 @@
-import { requireAdminPage } from "@/lib/auth";
+import { getAllowedAdminGrades, isGradeAllowed, requireAdminPage } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { splitInlineImages, TextWithInlineImages } from "@/components/text-with-inline-images";
 import type { AnswerValidationStatus, Medium } from "@/lib/supabase/types";
@@ -50,10 +50,13 @@ export default async function AnswerBankPage({
 }) {
   await requireAdminPage("answer_bank");
   const { status, tag, board, grade, subject, medium, topic, page } = await searchParams;
+  const allowedGrades = await getAllowedAdminGrades();
   const activeStatus = (status as AnswerValidationStatus | "all" | undefined) ?? "all";
   const activeTag = tag?.trim() || null;
   const activeBoard = board || null;
-  const activeGrade = grade || null;
+  // A requested grade outside this admin's scope is treated as no grade
+  // selected, same fallback the rest of this page's filters already use.
+  const activeGrade = grade && isGradeAllowed(allowedGrades, grade) ? grade : null;
   const activeSubject = subject || null;
   const activeMedium = (medium as Medium | undefined) || null;
   const activeTopic = topic || null;
@@ -80,6 +83,7 @@ export default async function AnswerBankPage({
   if (activeTag) query = query.contains("tags", [activeTag]);
   if (activeBoard) query = query.eq("board_id", activeBoard);
   if (activeGrade) query = query.eq("grade_id", activeGrade);
+  if (allowedGrades !== "all") query = query.in("grade_id", [...allowedGrades]);
   if (activeSubject) query = query.eq("subject_id", activeSubject);
   if (activeMedium) query = query.eq("medium", activeMedium);
   if (activeTopic) query = query.eq("topic_id", activeTopic);
@@ -103,7 +107,7 @@ export default async function AnswerBankPage({
   const [
     { data: fetchedRows },
     { data: boards },
-    { data: grades },
+    { data: allGrades },
     { data: subjects },
     filterTopicsResult,
     { data: profiles },
@@ -123,6 +127,8 @@ export default async function AnswerBankPage({
     supabase.from("profiles").select("id, full_name, role"),
     supabase.auth.admin.listUsers({ perPage: 1000 }),
   ]);
+  const grades =
+    allowedGrades === "all" ? allGrades : (allGrades ?? []).filter((g) => allowedGrades.has(g.id));
   const filterTopics = filterTopicsResult.data;
   const hasNextPage = (fetchedRows?.length ?? 0) > PAGE_SIZE;
   const rows = (fetchedRows ?? []).slice(0, PAGE_SIZE);
