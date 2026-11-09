@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MathText } from "@/components/math-text";
 import { LoadingIndicator } from "@/components/loading-indicator";
-import { exportElementToPdf } from "@/lib/clientPdfExport";
+import { exportPaperToDocx } from "@/lib/clientDocxExport";
 import type { Medium } from "@/lib/supabase/types";
 
 // Same local-mirror convention as pattern-picker.tsx/topic-practice.tsx --
@@ -18,7 +18,7 @@ import type { Medium } from "@/lib/supabase/types";
 // for why these three live in their OWN union rather than widening the
 // app-wide ExerciseType used elsewhere in this app (topic practice,
 // pattern picker, chat).
-type ExerciseType =
+export type ExerciseType =
   | "MCQ"
   | "short_answer"
   | "long_answer"
@@ -29,8 +29,9 @@ type ExerciseType =
 // short_answer/long_answer relabeled "VSA"/"LA" here now that the
 // genuinely distinct SA (3 marks) and Assertion-Reasoning badges also
 // exist alongside them -- "Short answer" next to a new "SA" badge would
-// read as the same thing twice at a glance.
-const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
+// read as the same thing twice at a glance. Exported for
+// clientDocxExport.ts's own use -- same labels, not duplicated.
+export const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
   MCQ: "MCQ",
   short_answer: "VSA",
   long_answer: "LA",
@@ -122,7 +123,7 @@ const MAX_FILE_BYTES = 15 * 1024 * 1024;
 // See the chapter-list effect's own comment for what this decides.
 const FEW_CHAPTERS_THRESHOLD = 3;
 
-type PaperQuestion = {
+export type PaperQuestion = {
   id: string;
   question: string;
   type: ExerciseType;
@@ -137,7 +138,7 @@ type PaperQuestion = {
   scenario?: string;
 };
 
-type Paper = {
+export type Paper = {
   id: string;
   chapters: string[];
   totalMarks: number;
@@ -155,7 +156,7 @@ type Paper = {
 // loop), so grouping by consecutive matching groupId is safe -- no need to
 // handle a case study's sub-parts ever being interleaved with other
 // questions.
-type DisplayItem =
+export type DisplayItem =
   | { kind: "question"; number: number; question: PaperQuestion }
   | {
       kind: "caseStudy";
@@ -164,7 +165,9 @@ type DisplayItem =
       subparts: PaperQuestion[];
     };
 
-function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
+// Exported for clientDocxExport.ts -- same question-numbering/grouping
+// logic reused rather than duplicated.
+export function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
   const items: DisplayItem[] = [];
   let number = 1;
   for (let i = 0; i < questions.length; ) {
@@ -185,14 +188,14 @@ function buildDisplayItems(questions: PaperQuestion[]): DisplayItem[] {
   return items;
 }
 
-const SUBPART_LABELS = ["(i)", "(ii)", "(iii)"];
+// Exported for clientDocxExport.ts.
+export const SUBPART_LABELS = ["(i)", "(ii)", "(iii)"];
 
-// The active paper's own header + question list -- pulled out once this
-// needed to be rendered twice: once on screen (answers shown only once
-// generated -- `showAnswers` is just `Boolean(answers)` at the call site),
-// and once in an always-off-screen copy used purely as the PDF export's
-// capture target (answers always shown there regardless -- see
-// PrintableAnswerKey below).
+// The active paper's own header + question list -- shows answers only
+// once generated (`showAnswers` is just `Boolean(answers)` at the call
+// site). The .docx export (clientDocxExport.ts) builds its own document
+// straight from `paper`/`answers` rather than rendering/capturing this
+// component -- there's no DOM to snapshot for a native Word document.
 function PaperQuestionList({
   paper,
   answers,
@@ -269,35 +272,6 @@ function PaperQuestionList({
         )}
       </ol>
     </>
-  );
-}
-
-// Always-mounted (whenever isStaffUser && activePaper) but visually off
-// -screen capture target for the PDF export -- `display:none`/
-// `visibility:hidden` won't work here, since html2canvas needs the node
-// to actually be laid out with real dimensions. Fixed-width at a rough A4
-// content width (794px @ 96dpi) so the exported pages look like a normal
-// printed page regardless of the admin's own browser window width. Always
-// renders with answers shown, independent of the on-screen `showAnswers`
-// toggle, so "Download PDF" never needs the admin to have clicked "Show
-// answers" first.
-function PrintableAnswerKey({
-  paper,
-  answers,
-  printRef,
-}: {
-  paper: Paper;
-  answers: Map<string, string> | null;
-  printRef: React.RefObject<HTMLDivElement | null>;
-}) {
-  return (
-    <div
-      ref={printRef}
-      className="fixed left-[-9999px] top-0 w-[794px] bg-white p-10 text-black"
-      aria-hidden
-    >
-      <PaperQuestionList paper={paper} answers={answers} showAnswers />
-    </div>
   );
 }
 
@@ -387,7 +361,7 @@ export function PracticePanel({
   // picker below offers a Numerical slider at all.
   subjectCode: string;
   medium: Medium;
-  // Gates the "Generate questions & answers sheet" / "Download PDF" flow
+  // Gates the "Generate questions & answers sheet" / "Download Word" flow
   // below (replacing the student-only photograph-and-grade flow entirely
   // for staff) -- a real student never gets either, only ever grading
   // against a photographed attempt (see handleSubmit). Reported directly:
@@ -448,16 +422,10 @@ export function PracticePanel({
   // then Download" flow reported directly (replacing the old separate
   // "Show answers"/"Download PDF" buttons and the student-style photo
   // submit flow, neither of which made sense for a staff caller who never
-  // submits a real attempt). `pendingExport` is set the moment "Download
-  // PDF" is clicked and cleared once the export effect below actually
-  // runs -- it exists only to let that effect wait for `answers` to land
-  // in state (and the off-screen print copy to re-render with real text)
-  // before capturing.
+  // submits a real attempt).
   const [answers, setAnswers] = useState<Map<string, string> | null>(null);
   const [answersLoading, setAnswersLoading] = useState(false);
-  const [pendingExport, setPendingExport] = useState(false);
-  const [pdfExporting, setPdfExporting] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
+  const [docxExporting, setDocxExporting] = useState(false);
 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -775,7 +743,7 @@ export function PracticePanel({
   // paper (staff-only route -- see the API route's own comment) and
   // returns the resulting map, also committing it to state. Idempotent
   // from the caller's point of view: both handleGenerateAnswers and
-  // handleDownloadPdf call this and just skip it if `answers` is already
+  // handleDownloadDocx call this and just skip it if `answers` is already
   // populated.
   async function loadAnswers(): Promise<Map<string, string> | null> {
     if (!activePaper) return null;
@@ -809,35 +777,24 @@ export function PracticePanel({
     if (!answers) await loadAnswers();
   }
 
-  async function handleDownloadPdf() {
-    if (pdfExporting) return;
-    setPdfExporting(true);
-    const loaded = answers ?? (await loadAnswers());
-    if (!loaded) {
-      setPdfExporting(false);
-      return;
+  // Builds straight from `paper`/`answers` (no DOM capture needed for a
+  // native Word document -- see clientDocxExport.ts's own comment), so
+  // unlike the old PDF export this can just run inline, no effect/ref
+  // needed to wait for a re-render.
+  async function handleDownloadDocx() {
+    if (docxExporting || !activePaper) return;
+    setDocxExporting(true);
+    try {
+      const loaded = answers ?? (await loadAnswers());
+      if (!loaded) return;
+      await exportPaperToDocx(activePaper, loaded, `practice-paper-${activePaper.id}.docx`);
+    } catch (err) {
+      console.error("Practice paper .docx export failed:", err);
+      setGenerateError("Could not generate the document. Please try again.");
+    } finally {
+      setDocxExporting(false);
     }
-    // The off-screen print copy (see PrintableQuestions below) only
-    // re-renders with real answer text once `answers` has actually
-    // committed -- this flag just tells the effect below "capture as soon
-    // as that's true," rather than capturing immediately against
-    // possibly-stale (pre-fetch) DOM content.
-    setPendingExport(true);
   }
-
-  useEffect(() => {
-    if (!pendingExport || !answers || !activePaper || !printRef.current) return;
-    const node = printRef.current;
-    exportElementToPdf(node, `practice-paper-${activePaper.id}.pdf`)
-      .catch((err) => {
-        console.error("Practice paper PDF export failed:", err);
-        setGenerateError("Could not generate the PDF. Please try again.");
-      })
-      .finally(() => {
-        setPendingExport(false);
-        setPdfExporting(false);
-      });
-  }, [pendingExport, answers, activePaper]);
 
   // min-w-0 here (in addition to the history row's own, see below) is the
   // real fix -- reported directly, still reproducing after that first fix:
@@ -1079,13 +1036,6 @@ export function PracticePanel({
             answers={answers}
             showAnswers={isStaffUser && Boolean(answers)}
           />
-          {isStaffUser && (
-            <PrintableAnswerKey
-              paper={activePaper}
-              answers={answers}
-              printRef={printRef}
-            />
-          )}
 
           {isStaffUser ? (
             // Staff never submit a real attempt -- this replaces the
@@ -1113,14 +1063,14 @@ export function PracticePanel({
                   </p>
                   <button
                     type="button"
-                    onClick={handleDownloadPdf}
-                    disabled={pdfExporting}
+                    onClick={handleDownloadDocx}
+                    disabled={docxExporting}
                     className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                   >
-                    {pdfExporting ? (
-                      <LoadingIndicator label="Preparing PDF…" />
+                    {docxExporting ? (
+                      <LoadingIndicator label="Preparing document…" />
                     ) : (
-                      "Download PDF (Q+A)"
+                      "Download Word (Q+A)"
                     )}
                   </button>
                 </>
